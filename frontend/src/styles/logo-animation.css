@@ -1,0 +1,59 @@
+/* Animation styles for ServiceFix logo */
+@keyframes logo-pulse {
+  0% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.05);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+
+/* Rotation animation for hover */
+@keyframes logo-rotate {
+  0% {
+    transform: rotate(0deg);
+  }
+  100% {
+    transform: rotate(360deg);
+  }
+}
+
+.logo-animation {
+  animation: logo-pulse 3s ease-in-out infinite;
+  transform-origin: center;
+  cursor: pointer;
+}
+
+.logo-animation:hover {
+  animation-name: logo-rotate;
+  animation-duration: 0.7s;
+  animation-timing-function: ease-in-out;
+  animation-fill-mode: forwards;
+}
+
+/* Hero image animation */
+@keyframes float-animation {
+  0% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-10px);
+  }
+  100% {
+    transform: translateY(0);
+  }
+}
+
+.hero-animation {
+  animation: float-animation 6s ease-in-out infinite;
+}
+
+/* Logo colors */
+.logo-teal { fill: #4DB6AC; }
+.logo-orange { fill: #FFA726; }
+.logo-red { fill: #EF5350; }
+.logo-purple { fill: #7E57C2; }
+.logo-blue { fill: #42A5F5; } 

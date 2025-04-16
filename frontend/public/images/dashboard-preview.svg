@@ -1,0 +1,38 @@
+<svg width="800" height="500" xmlns="http://www.w3.org/2000/svg">
+  <!-- Background -->
+  <rect width="800" height="500" fill="#f5f7fa" rx="12" ry="12" />
+  
+  <!-- Header -->
+  <rect width="800" height="64" fill="#3f51b5" rx="12" ry="12" />
+  <circle cx="40" cy="32" r="20" fill="#ffffff" opacity="0.8" />
+  <rect x="80" y="22" width="120" height="20" fill="#ffffff" rx="4" ry="4" opacity="0.8" />
+  <rect x="600" y="22" width="80" height="20" fill="#ffffff" rx="10" ry="10" opacity="0.6" />
+  <rect x="700" y="22" width="40" height="20" fill="#ffffff" rx="10" ry="10" opacity="0.6" />
+  
+  <!-- Sidebar -->
+  <rect width="200" height="436" y="64" fill="#ffffff" />
+  <rect x="20" y="100" width="160" height="30" fill="#3f51b5" rx="4" ry="4" opacity="0.2" />
+  <rect x="20" y="150" width="160" height="20" fill="#3f51b5" rx="4" ry="4" opacity="0.1" />
+  <rect x="20" y="190" width="160" height="20" fill="#3f51b5" rx="4" ry="4" opacity="0.1" />
+  <rect x="20" y="230" width="160" height="20" fill="#3f51b5" rx="4" ry="4" opacity="0.1" />
+  <rect x="20" y="270" width="160" height="20" fill="#3f51b5" rx="4" ry="4" opacity="0.1" />
+  
+  <!-- Main Content -->
+  <rect x="220" y="84" width="560" height="120" fill="#ffffff" rx="8" ry="8" />
+  <rect x="240" y="104" width="200" height="24" fill="#3f51b5" rx="4" ry="4" opacity="0.2" />
+  <rect x="240" y="144" width="520" height="40" fill="#3f51b5" rx="4" ry="4" opacity="0.1" />
+  
+  <!-- Cards -->
+  <rect x="220" y="224" width="270" height="180" fill="#ffffff" rx="8" ry="8" />
+  <rect x="240" y="244" width="150" height="20" fill="#3f51b5" rx="4" ry="4" opacity="0.2" />
+  <rect x="240" y="284" width="230" height="100" fill="#3f51b5" rx="4" ry="4" opacity="0.1" />
+  
+  <rect x="510" y="224" width="270" height="180" fill="#ffffff" rx="8" ry="8" />
+  <rect x="530" y="244" width="150" height="20" fill="#3f51b5" rx="4" ry="4" opacity="0.2" />
+  <circle cx="570" cy="334" r="60" fill="#3f51b5" opacity="0.1" />
+  <path d="M 530 334 A 60 60 0 0 1 610 334" stroke="#3f51b5" stroke-width="12" fill="none" />
+  
+  <!-- Bottom Section -->
+  <rect x="220" y="424" width="560" height="56" fill="#ffffff" rx="8" ry="8" />
+  <rect x="240" y="444" width="520" height="16" fill="#3f51b5" rx="4" ry="4" opacity="0.1" />
+</svg> 
