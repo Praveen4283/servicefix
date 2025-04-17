@@ -1096,8 +1096,6 @@ const UsersPage = () => {
                    </Grid>
                    {/* Add Delete Avatar Button if avatar exists */}
                    {(() => {
-                     // Log the value being checked for the button
-                     console.log('[Render Check] currentUser?.avatar_url:', currentUser?.avatar_url);
                      return currentUser?.avatar_url && (
                        <Grid item xs={6} sx={{ textAlign: 'right' }}>
                          <Button

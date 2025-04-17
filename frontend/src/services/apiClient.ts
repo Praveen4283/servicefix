@@ -279,21 +279,8 @@ class ApiClient {
   public getUser(userId: string): Promise<User> {
     return this.get<any>(`/users/${userId}`)
       .then(response => {
-        const userDTO: UserDTO = {
-          id: response.id || response._id || userId,
-          email: response.email,
-          first_name: response.first_name || response.firstName || '',
-          last_name: response.last_name || response.lastName || '',
-          role: response.role || 'user',
-          avatar_url: response.avatar_url || response.avatarUrl,
-          phone_number: response.phone_number || response.phoneNumber,
-          job_title: response.job_title || response.jobTitle,
-          organization_id: response.organization_id || response.organizationId,
-          organization: response.organization,
-          created_at: response.created_at || response.createdAt,
-          updated_at: response.updated_at || response.updatedAt
-        };
-        
+        // Use normalizeUserResponse to handle potential inconsistencies
+        const userDTO = this.normalizeUserResponse(response); 
         const user = mapUserDTOToUser(userDTO);
         return user;
       })
@@ -322,43 +309,48 @@ class ApiClient {
    * @returns Promise resolving to the updated User object
    */
   public async updateUserProfile(userId: string, profileData: any): Promise<User> {
-    const profileDTO = mapProfileUpdateToDTO(profileData);
-    
-    const avatarFile = profileDTO.avatar;
-    delete profileDTO.avatar; // Always remove the file object from the DTO
-    
-    // Get current user data to preserve existing avatar if needed
+    const profileDTO = mapProfileUpdateToDTO(profileData); // contains { ..., avatar: File | null | undefined }
+
+    const avatarFile = profileDTO.avatar; // File | null | undefined
+    delete profileDTO.avatar; // remove dto.avatar
+
     const currentAuthUser = JSON.parse(localStorage.getItem('user') || '{}') as User;
-    
-    // Handle avatar separately if present
-    if (avatarFile) {
+
+    // Handle avatar logic based on avatarFile state
+    if (avatarFile instanceof File) { // Case 1: New file uploaded
       try {
         const compressedImage = await this.compressImage(avatarFile, {
           maxWidth: 300,
           maxHeight: 300,
-          quality: 0.9 // Set quality to 90%
+          quality: 0.9
         });
-        
         const dataUrl = await createDataURLFromFile(compressedImage);
         
-        // Limit Data URL size (e.g., ~2MB)
         if (dataUrl.length > 2 * 1024 * 1024) {
           console.warn('Compressed avatar Data URL too large, skipping avatar update.');
           profileDTO.avatar_url = currentAuthUser.avatarUrl; // Keep existing avatar
         } else {
           console.log('Assigning compressed avatar Data URL to avatar_url');
-          profileDTO.avatar_url = dataUrl; // Assign Data URL to avatar_url field
+          profileDTO.avatar_url = dataUrl; // Assign NEW Data URL
         }
-        
       } catch (error) {
         console.error('Error processing avatar image, skipping avatar update:', error);
         profileDTO.avatar_url = currentAuthUser.avatarUrl; // Keep existing avatar on error
       }
-    } else if (profileData.avatarUrl === undefined && currentAuthUser.avatarUrl !== undefined) {
-      // Ensure we don't accidentally clear the avatar if no new file is provided and one exists
-      profileDTO.avatar_url = currentAuthUser.avatarUrl;
+    } else if (avatarFile === null) { // Case 2: Explicit removal requested
+      console.log('Setting avatar_url to null for removal.');
+      profileDTO.avatar_url = null; // Explicitly set to null for backend update
+    } else { // Case 3: No change requested (avatarFile is undefined)
+      // Preserve existing avatar URL if it exists, otherwise leave avatar_url undefined in DTO
+      if (currentAuthUser.avatarUrl !== undefined) {
+        profileDTO.avatar_url = currentAuthUser.avatarUrl;
+      }
     }
-    
+
+    // Add logging here
+    console.log(`[updateUserProfile] Sending PUT request for user ${userId} with DTO:`, JSON.stringify(profileDTO));
+
+    // Send the PUT request with the potentially updated profileDTO.avatar_url
     return this.put<any>(`/users/${userId}`, profileDTO)
       .then(response => {
         const normalizedResponse = this.normalizeUserResponse(response);
@@ -397,7 +389,7 @@ class ApiClient {
       role: response.role || 'user',
       avatar_url: response.avatar_url || response.avatarUrl,
       phone_number: response.phone_number || response.phoneNumber || response.phone || '',
-      job_title: response.job_title || response.jobTitle || response.designation || '',
+      designation: response.designation || response.job_title || response.jobTitle || '',
       organization_id: response.organization_id || response.organizationId,
       organization: organizationData,
       timezone: response.timezone || 'UTC',

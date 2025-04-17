@@ -19,8 +19,8 @@ export interface UserDTO {
   avatar_url?: string;
   /** User's phone number */
   phone_number?: string;
-  /** User's job title */
-  job_title?: string;
+  /** User's designation/job title (snake_case db convention) */
+  designation?: string;
   /** Reference to user's organization */
   organization_id?: string;
   /** Nested organization data */
@@ -50,12 +50,12 @@ export interface ProfileUpdateDTO {
   first_name?: string;
   last_name?: string;
   phone_number?: string;
-  job_title?: string;
+  designation?: string;
   timezone?: string;
   language?: string;
   notification_settings?: Record<string, boolean>;
-  avatar?: File;
-  avatar_url?: string;
+  avatar?: File | null;
+  avatar_url?: string | null;
   email?: string;
 }
 
@@ -73,7 +73,7 @@ export function mapUserDTOToUser(dto: UserDTO): User {
     role: dto.role as 'admin' | 'agent' | 'customer',
     avatarUrl: dto.avatar_url,
     phoneNumber: dto.phone_number,
-    jobTitle: dto.job_title,
+    designation: dto.designation,
     organizationId: dto.organization_id,
     organization: dto.organization ? {
       id: dto.organization.id,
@@ -101,7 +101,7 @@ export function mapUserToDTO(user: Partial<User>): Partial<UserDTO> {
   if (user.firstName !== undefined) dto.first_name = user.firstName;
   if (user.lastName !== undefined) dto.last_name = user.lastName;
   if (user.phoneNumber !== undefined) dto.phone_number = user.phoneNumber;
-  if (user.jobTitle !== undefined) dto.job_title = user.jobTitle;
+  if (user.designation !== undefined) dto.designation = user.designation;
   if (user.avatarUrl !== undefined) dto.avatar_url = user.avatarUrl;
   if (user.organizationId !== undefined) dto.organization_id = user.organizationId;
   if (user.timezone !== undefined) dto.timezone = user.timezone;
@@ -124,7 +124,7 @@ export function mapProfileUpdateToDTO(data: any): ProfileUpdateDTO {
   if (data.firstName !== undefined) dto.first_name = data.firstName;
   if (data.lastName !== undefined) dto.last_name = data.lastName;
   if (data.phoneNumber !== undefined) dto.phone_number = data.phoneNumber;
-  if (data.jobTitle !== undefined) dto.job_title = data.jobTitle;
+  if (data.designation !== undefined) dto.designation = data.designation;
   if (data.timezone !== undefined) dto.timezone = data.timezone;
   if (data.language !== undefined) dto.language = data.language;
   if (data.notificationSettings !== undefined) dto.notification_settings = data.notificationSettings;

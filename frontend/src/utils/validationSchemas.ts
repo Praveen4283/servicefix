@@ -81,7 +81,7 @@ export const profileSchema = Yup.object().shape({
       excludeEmptyString: true,
     })
     .nullable(),
-  jobTitle: Yup.string().nullable(),
+  designation: Yup.string().nullable(),
   timezone: Yup.string().nullable(),
   language: Yup.string().nullable(),
   // Email is usually not editable in profile

@@ -68,7 +68,7 @@ router.get('/', authenticate, authorize([UserRole.ADMIN]), async (req, res) => {
       avatar_url: user.avatarUrl,
       is_active: user.isActive,
       last_login_at: user.lastLoginAt,
-      designation: user.jobTitle,
+      designation: user.designation,
       created_at: user.createdAt,
       organization: user.organization,
       department: user.departmentMember?.department ? {
@@ -172,7 +172,7 @@ router.get('/:id', authenticate, async (req, res) => {
         email: user.email,
         role: user.role,
         avatarUrl: user.avatarUrl,
-        jobTitle: user.jobTitle, 
+        designation: user.designation,
         phoneNumber: user.phoneNumber,
         organizationId: user.organizationId,
         organization: user.organization ? { id: user.organization.id, name: user.organization.name } : null,
@@ -211,7 +211,7 @@ router.post('/', authenticate, authorize([UserRole.ADMIN]), async (req, res) => 
     }
 
     // Destructure using snake_case
-    const { first_name, last_name, email, password, role, job_title, phone_number, department_id } = req.body;
+    const { first_name, last_name, email, password, role, designation, phone_number, department_id } = req.body;
     
     // Validate using snake_case variables
     if (!first_name || !last_name || !email || !password) {
@@ -237,7 +237,7 @@ router.post('/', authenticate, authorize([UserRole.ADMIN]), async (req, res) => 
     user.lastName = last_name;
     user.email = email;
     user.role = role as UserRole || UserRole.CUSTOMER;
-    if (job_title) user.jobTitle = job_title; // Map job_title to user.jobTitle
+    if (designation) user.designation = designation;
     if (phone_number) user.phoneNumber = phone_number; // Map phone_number to user.phoneNumber
     user.password = await bcrypt.hash(password, 10); // Hash password
     user.isActive = true;
@@ -291,7 +291,7 @@ router.put('/:id', authenticate, async (req, res) => {
     }
     
     const { 
-      first_name, last_name, email, role, job_title, 
+      first_name, last_name, email, role, designation,
       phone_number, is_active, avatar_url, timezone, language, 
       notification_settings,
       department_id
@@ -344,7 +344,7 @@ router.put('/:id', authenticate, async (req, res) => {
       if (first_name !== undefined) user.firstName = first_name;
       if (last_name !== undefined) user.lastName = last_name;
       if (phone_number !== undefined) user.phoneNumber = phone_number;
-      if (job_title !== undefined) user.jobTitle = job_title;
+      if (designation !== undefined) user.designation = designation;
       if (avatar_url !== undefined) user.avatarUrl = avatar_url;
       if (timezone !== undefined) user.timezone = timezone;
       if (language !== undefined) user.language = language;
@@ -413,7 +413,7 @@ router.put('/:id', authenticate, async (req, res) => {
          avatar_url: updatedUser.avatarUrl,
          is_active: updatedUser.isActive,
          last_login_at: updatedUser.lastLoginAt,
-         designation: updatedUser.jobTitle,
+         designation: updatedUser.designation,
          organization: updatedUser.organization ? {
            id: updatedUser.organization.id,
            name: updatedUser.organization.name

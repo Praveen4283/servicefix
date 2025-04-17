@@ -943,7 +943,7 @@ const TicketListPage: React.FC = () => {
     return (
       <EnhancedGrid 
         container 
-        spacing={3}
+        spacing={1}
       >
         {/* Stats Overview - Keep existing welcome box */}
         <Grid item xs={12}>
@@ -982,34 +982,24 @@ const TicketListPage: React.FC = () => {
               }
             }}
           >
-            <Box sx={{ p: 2, position: 'relative', zIndex: 1 }}>
-              <Grid container alignItems="center" justifyContent="space-between" spacing={2}>
-                <Grid item>
-                  <Typography variant="h5" component="h1" gutterBottom sx={{
-                    fontWeight: 800,
-                    color: theme.palette.text.primary,
-                    letterSpacing: '0.5px',
-                    textShadow: theme.palette.mode === 'dark' ? '0 2px 10px rgba(0,0,0,0.3)' : 'none'
-                  }}>
-                    My Tickets
-                  </Typography>
-                  <Typography variant="body1" sx={{
-                    mb: 2,
-                    maxWidth: 600,
-                    color: theme.palette.text.secondary,
-                    fontWeight: 500
-                  }}>
-                    Track your support requests and get real-time updates on ticket status.
-                  </Typography>
-                </Grid>
-                <Grid item>
-                  <Button
-                    variant="contained"
-                    startIcon={<AddIcon />}
-                    onClick={handleCreateTicket}
-                  >
-                    New Ticket
-                  </Button>
+            <Box sx={{ p: { xs: 3, md: 2 }, position: 'relative', zIndex: 1 }}>
+            <Grid container alignItems="center" justifyContent="space-between" spacing={3}>
+              <Grid item xs={12} md={7}>
+                <Typography variant="h5" component="h1" gutterBottom>
+                Ticket Management
+                </Typography>
+                <Typography variant="subtitle1">
+                View and manage all support tickets in one place. Monitor status, assign tickets, and track issue resolution.
+                </Typography>
+              </Grid>
+              <Grid item xs={12} md={5} sx={{ display: 'flex', justifyContent: { xs: 'flex-start', md: 'flex-end' }, alignItems: 'center', gap: 2 }}>
+                <Button
+                  variant="contained"
+                  startIcon={<AddIcon />}
+                  onClick={handleCreateTicket}
+                >
+                  New Ticket
+                </Button>
                 </Grid>
               </Grid>
             </Box>
@@ -1208,7 +1198,7 @@ const TicketListPage: React.FC = () => {
   const renderAgentDashboard = () => (
     <EnhancedGrid 
       container 
-      spacing={3}
+      spacing={1}
     >
       {/* Welcome Banner */}
       <Grid item xs={12}>
@@ -1229,11 +1219,11 @@ const TicketListPage: React.FC = () => {
           <Box sx={{ p: { xs: 3, md: 2 }, position: 'relative', zIndex: 1 }}>
             <Grid container alignItems="center" justifyContent="space-between" spacing={3}>
               <Grid item xs={12} md={7}>
-                <Typography variant="h3" component="h1" gutterBottom>
-                  Agent Dashboard
+                <Typography variant="h5" component="h1" gutterBottom>
+                Ticket Management
                 </Typography>
                 <Typography variant="subtitle1">
-                  Manage support tickets, track performance metrics, and respond to customer inquiries efficiently.
+                View and manage all support tickets in one place. Monitor status, assign tickets, and track issue resolution.
                 </Typography>
               </Grid>
               <Grid item xs={12} md={5} sx={{ display: 'flex', justifyContent: { xs: 'flex-start', md: 'flex-end' }, alignItems: 'center', gap: 2 }}>
@@ -1553,7 +1543,7 @@ const TicketListPage: React.FC = () => {
     const filteredTickets = getFilteredTickets();
     
     return (
-    <Grid container spacing={3}>
+    <Grid container spacing={1}>
         {/* Header */}
       <Grid item xs={12}>
         <Card 

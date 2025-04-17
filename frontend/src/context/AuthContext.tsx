@@ -12,7 +12,7 @@ export interface User {
   role: 'admin' | 'agent' | 'customer';
   avatarUrl?: string;
   phoneNumber?: string;
-  jobTitle?: string;
+  designation?: string;
   organizationId?: string;
   organization?: {
     id: string;

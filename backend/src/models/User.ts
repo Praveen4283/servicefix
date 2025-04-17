@@ -50,7 +50,7 @@ export class User {
   organizationId: number;
 
   @Column({ name: 'designation', nullable: true })
-  jobTitle: string;
+  designation: string;
 
   @Column({ name: 'phone', nullable: true })
   phoneNumber: string;

@@ -22,8 +22,12 @@ import {
   FormControlLabel,
   Switch,
   FormGroup,
+  Tooltip,
+  IconButton,
+  useTheme,
+  alpha,
 } from '@mui/material';
-import { Edit as EditIcon, Save as SaveIcon, Cancel as CancelIcon, Upload as UploadIcon, LockReset as LockResetIcon } from '@mui/icons-material';
+import { Edit as EditIcon, Save as SaveIcon, Cancel as CancelIcon, Upload as UploadIcon, LockReset as LockResetIcon, Close as CloseIcon } from '@mui/icons-material';
 import { useAuth } from '../context/AuthContext';
 import { FormTextField } from '../components/common/FormField';
 import useFormValidation from '../utils/useFormValidation';
@@ -82,12 +86,14 @@ const ProfilePage: React.FC = () => {
   const [editing, setEditing] = useState(false);
   const [avatarFile, setAvatarFile] = useState<File | null>(null);
   const [avatarPreview, setAvatarPreview] = useState<string | null>(null);
+  const [removeCurrentAvatar, setRemoveCurrentAvatar] = useState(false);
   const [changePasswordOpen, setChangePasswordOpen] = useState(false);
   const [notification, setNotification] = useState<{ open: boolean; message: string; type: 'success' | 'error' | 'info' }>({
     open: false,
     message: '',
     type: 'success',
   });
+  const theme = useTheme();
 
   // Profile form validation hook
   const { 
@@ -100,7 +106,7 @@ const ProfilePage: React.FC = () => {
       lastName: '',
       email: '',
       phoneNumber: '',
-      jobTitle: '',
+      designation: '',
       timezone: '',
       language: '',
       notificationSettings: {
@@ -114,16 +120,31 @@ const ProfilePage: React.FC = () => {
     validationSchema: profileSchema,
     onSubmit: async (values) => {
       try {
-        await updateProfile({ 
-          ...values, 
-          ...(avatarFile && { avatarFile: avatarFile }) 
-        });
+        // Prepare update data
+        const updateData: any = { ...values };
+
+        // Handle avatar:
+        if (avatarFile) {
+          // If a new file is explicitly selected, send it
+          updateData.avatarFile = avatarFile;
+        } else if (removeCurrentAvatar) {
+          // If remove button was clicked AND no new file selected after, signal removal
+          // Assuming updateProfile handles avatarFile: null as removal instruction
+          updateData.avatarFile = null; 
+        }
+        // If neither avatarFile nor removeCurrentAvatar is set, the backend should keep the existing avatar.
+
+        await updateProfile(updateData); // Send combined data
+
         setEditing(false);
         setAvatarFile(null);
         setAvatarPreview(null);
+        setRemoveCurrentAvatar(false); // Reset flag
         setNotification({ open: true, message: 'Profile updated successfully', type: 'success' });
       } catch (error: any) {
         setNotification({ open: true, message: error.message || 'Failed to update profile', type: 'error' });
+        // Reset remove flag on error as well
+        setRemoveCurrentAvatar(false);
       }
     },
   });
@@ -137,7 +158,7 @@ const ProfilePage: React.FC = () => {
           lastName: user.lastName || '',
           email: user.email || '',
           phoneNumber: user.phoneNumber || '',
-          jobTitle: user.jobTitle || '',
+          designation: user.designation || '',
           timezone: user.timezone || 'UTC',
           language: user.language || 'en',
           notificationSettings: {
@@ -146,6 +167,8 @@ const ProfilePage: React.FC = () => {
           }
         }
       });
+      // Reset avatar removal flag when user data changes
+      setRemoveCurrentAvatar(false); 
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps 
   }, [user]); // Run only when user object changes
@@ -203,6 +226,7 @@ const ProfilePage: React.FC = () => {
       
       // If validation passes, set the file for upload
       setAvatarFile(file);
+      setRemoveCurrentAvatar(false); // If uploading a new one, don't remove the old one yet
       
       // Create a preview URL
       const reader = new FileReader();
@@ -213,11 +237,22 @@ const ProfilePage: React.FC = () => {
     }
   };
 
+  // Function to handle avatar removal click
+  const handleRemoveAvatar = () => {
+    setAvatarFile(null);
+    setAvatarPreview(null);
+    // If there was an existing avatar url or a preview, mark for removal on save
+    if (user?.avatarUrl || avatarPreview) {
+      setRemoveCurrentAvatar(true);
+    }
+  };
+
   const handleCancel = () => {
     setEditing(false);
     setAvatarPreview(null);
     setAvatarFile(null);
-    profileFormik.resetForm();
+    setRemoveCurrentAvatar(false); // Reset removal flag on cancel
+    profileFormik.resetForm(); // Resets to initial values (or values from useEffect based on user)
   };
 
   const handleOpenChangePassword = () => {
@@ -242,15 +277,38 @@ const ProfilePage: React.FC = () => {
   }
 
   return (
-    <Container maxWidth="lg">
-      <Box mb={4}>
-        <Typography variant="h4" component="h1" gutterBottom>
-          My Profile
-        </Typography>
-        <Typography variant="subtitle1" color="textSecondary">
-          Manage your personal information and preferences
-        </Typography>
-      </Box>
+    <Container maxWidth="lg" sx={{ py: { xs: 2, md: 3 } }}>
+      <Grid container spacing={3} sx={{ mb: 1 }}>
+        <Grid item xs={12}>
+          <Card 
+            elevation={0}
+            sx={{ 
+              p: 0, 
+              overflow: 'hidden',
+              border: '1px solid',
+              borderColor: alpha(theme.palette.primary.main, 0.2),
+              borderRadius: 3,
+              background: theme.palette.mode === 'dark'
+                ? `linear-gradient(120deg, ${alpha(theme.palette.primary.dark, 0.7)}, ${alpha(theme.palette.secondary.dark, 0.5)})`
+                : `linear-gradient(120deg, ${alpha('#fff', 0.95)}, ${alpha(theme.palette.secondary.light, 0.15)})`,
+              position: 'relative',
+            }}
+          >
+            <Box sx={{ p: { xs: 3, md: 2 }, position: 'relative', zIndex: 1 }}>
+              <Grid container alignItems="center" justifyContent="space-between" spacing={3}>
+                <Grid item xs={12} md={7}>
+                  <Typography variant="h5" component="h1" gutterBottom>
+                    My Profile
+                  </Typography>
+                  <Typography variant="subtitle1" color="textSecondary">
+                    Manage your personal information and preferences
+                  </Typography>
+                </Grid>
+              </Grid>
+            </Box>
+          </Card>
+        </Grid>
+      </Grid>
 
       {profileSubmitError && (
         <Alert severity="error" sx={{ mb: 3 }}>
@@ -258,30 +316,52 @@ const ProfilePage: React.FC = () => {
         </Alert>
       )}
 
-      <Paper sx={{ p: 4, mb: 4 }}>
+      <Paper sx={{ p: 4, mb: 1 }}>
         <Grid container spacing={4}>
           <Grid item xs={12} md={4} sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
-            {(() => {
-              const avatarSource = avatarPreview || user?.avatarUrl || undefined;
-              return (
-                <Avatar
-                  src={avatarSource}
-                  alt={`${user?.firstName} ${user?.lastName}`}
-                  sx={{
-                    width: 150,
-                    height: 150,
-                    mb: 2,
-                    boxShadow: '0 4px 8px rgba(0,0,0,0.1)',
-                    fontSize: '4rem'
-                  }}
-                >
-                  {!avatarPreview && !user?.avatarUrl && user?.firstName && user?.lastName &&
-                    `${user.firstName.charAt(0)}${user.lastName.charAt(0)}`}
-                </Avatar>
-              );
-            })()}
+            <Box sx={{ position: 'relative', mb: 2 }}>
+              {(() => {
+                const avatarSource = removeCurrentAvatar ? undefined : (avatarPreview || user?.avatarUrl || undefined);
+                return (
+                  <Avatar
+                    src={avatarSource}
+                    alt={`${user?.firstName} ${user?.lastName}`}
+                    sx={{
+                      width: 150,
+                      height: 150,
+                      boxShadow: '0 4px 8px rgba(0,0,0,0.1)',
+                      fontSize: '4rem'
+                    }}
+                  >
+                    {!avatarSource && user?.firstName && user?.lastName &&
+                      `${user.firstName.charAt(0)}${user.lastName.charAt(0)}`}
+                  </Avatar>
+                );
+              })()}
+              {editing && (avatarPreview || (user?.avatarUrl && !removeCurrentAvatar)) && (
+                <Tooltip title="Remove Photo">
+                  <IconButton
+                    onClick={handleRemoveAvatar}
+                    disabled={isProfileSubmitting}
+                    size="small"
+                    sx={{
+                      position: 'absolute',
+                      top: 4,
+                      right: 4,
+                      backgroundColor: 'rgba(0, 0, 0, 0.5)',
+                      color: 'white',
+                      '&:hover': {
+                        backgroundColor: 'rgba(0, 0, 0, 0.7)',
+                      },
+                    }}
+                  >
+                    <CloseIcon fontSize="small" /> 
+                  </IconButton>
+                </Tooltip>
+              )}
+            </Box>
             {editing ? (
-              <>
+              <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', mb: 2 }}>
                 <input
                   accept="image/*"
                   id="avatar-upload"
@@ -295,25 +375,25 @@ const ProfilePage: React.FC = () => {
                     variant="outlined"
                     component="span"
                     startIcon={<UploadIcon />}
-                    sx={{ mb: 2 }}
                     disabled={isProfileSubmitting}
+                    sx={{ mb: 1 }}
                   >
-                    {avatarFile ? 'Change Photo' : 'Upload Photo'}
+                    {avatarPreview ? 'Change Photo' : 'Upload Photo'}
                   </Button>
                 </label>
-                {avatarPreview && (
-                   <Typography variant="caption" color="textSecondary">
-                     New photo selected. Click Save.
+                {(avatarPreview || removeCurrentAvatar) && (
+                   <Typography variant="caption" color="textSecondary" sx={{ textAlign: 'center' }}>
+                     {removeCurrentAvatar ? 'Avatar will be removed on save.' : 'New photo selected. Click Save.'}
                    </Typography>
                 )}
-              </>
+              </Box>
             ) : (
               <Typography variant="subtitle1" gutterBottom>
-                {user?.role && user.role.charAt(0).toUpperCase() + user.role.slice(1)}
+                {/* Display Designation instead of Role */}
+                {user?.designation || 'No designation set'}
               </Typography>
             )}
             
-            {/* Last Login Information */}
             {user?.lastLogin ? (
               <Box mt={2} textAlign="center">
                 <Typography variant="caption" color="textSecondary">
@@ -407,10 +487,10 @@ const ProfilePage: React.FC = () => {
                 </Grid>
                 <Grid item xs={12} sm={6}>
                   <FormTextField
-                    name="jobTitle"
-                    label="Job Title"
+                    name="designation"
+                    label="Designation (Job Title)"
                     fullWidth
-                    value={profileFormik.values.jobTitle}
+                    value={profileFormik.values.designation}
                     onChange={profileFormik.handleChange}
                     onBlur={profileFormik.handleBlur}
                     touched={profileFormik.touched}
@@ -512,18 +592,20 @@ const ProfilePage: React.FC = () => {
                       variant="contained"
                       color="primary"
                       startIcon={isProfileSubmitting ? <CircularProgress size={20} color="inherit" /> : <SaveIcon />}
-                      disabled={isProfileSubmitting || (!profileFormik.dirty && !avatarFile)}
+                      disabled={isProfileSubmitting || (!profileFormik.dirty && !avatarFile && !removeCurrentAvatar)}
                     >
                       Save Changes
                     </Button>
-                    <Button
-                      variant="outlined"
-                      onClick={handleCancel}
-                      startIcon={<CancelIcon />}
-                      disabled={isProfileSubmitting}
-                    >
-                      Cancel
-                    </Button>
+                    <Box sx={{ marginLeft: 'auto' }}>
+                      <Button
+                        variant="outlined"
+                        onClick={handleCancel}
+                        startIcon={<CancelIcon />}
+                        disabled={isProfileSubmitting}
+                      >
+                        Cancel
+                      </Button>
+                    </Box>
                   </Grid>
                 )}
               </Grid>
