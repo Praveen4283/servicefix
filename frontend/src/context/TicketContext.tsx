@@ -35,6 +35,48 @@ interface User {
   avatar?: string;
 }
 
+// Backend API response might include snake_case versions of the fields
+interface TicketBackendResponse {
+  id: string;
+  subject: string;
+  status: TicketStatus;
+  priority: TicketPriority;
+  department?: Department;
+  type?: TicketType;
+  requester: User;
+  assignee?: User;
+  // Include both camelCase and snake_case versions to handle either format
+  createdAt?: string;
+  created_at?: string;
+  updatedAt?: string;
+  updated_at?: string;
+  lastActivity?: string;
+  last_activity?: string;
+  dueDate?: string;
+  due_date?: string;
+  resolvedAt?: string;
+  resolved_at?: string;
+  closedAt?: string;
+  closed_at?: string;
+  tags?: string[];
+  description?: string;
+  // Include optional properties for detail view
+  comments?: Comment[];
+  attachments?: Attachment[];
+}
+
+// Interface for Comment response from backend
+interface CommentBackendResponse extends Comment {
+  created_at?: string;
+  updated_at?: string;
+}
+
+// Interface for Attachment response from backend
+interface AttachmentBackendResponse extends Attachment {
+  created_at?: string;
+}
+
+// Frontend standardized interface using camelCase
 interface Ticket {
   id: string;
   subject: string;
@@ -218,15 +260,31 @@ export const TicketProvider: React.FC<{ children: ReactNode }> = ({ children }) 
       const queryString = params.toString();
       console.log(`[fetchTickets] Fetching: /tickets?${queryString}`);
       
-      const response = await apiClient.get<{ tickets: Ticket[]; pagination: PaginationState }>(`/tickets?${queryString}`);
+      const response = await apiClient.get<{ tickets: TicketBackendResponse[]; pagination: PaginationState }>(`/tickets?${queryString}`);
       const fetchedTickets = response.tickets || [];
       const fetchedPagination = response.pagination || { page, limit, totalCount: 0, totalPages: 1 };
       
-      setTickets(fetchedTickets);
-      setFilteredTickets(fetchedTickets);
+      // Map snake_case date fields to camelCase for consistency
+      const normalizedTickets = fetchedTickets.map((ticket: TicketBackendResponse) => {
+        // Log raw data for debugging
+        console.log(`[fetchTickets] Raw ticket data:`, ticket);
+        
+        // Normalize dates by mapping snake_case to camelCase if needed
+        return {
+          ...ticket,
+          // Ensure correct date fields are available
+          createdAt: ticket.createdAt || ticket.created_at || null,
+          updatedAt: ticket.updatedAt || ticket.updated_at || null,
+          // Handle other date fields too if needed
+          lastActivity: ticket.lastActivity || ticket.last_activity || new Date().toISOString() // Fallback for lastActivity
+        } as Ticket;
+      });
+      
+      setTickets(normalizedTickets);
+      setFilteredTickets(normalizedTickets);
       setPagination(fetchedPagination);
       
-      return { tickets: fetchedTickets, pagination: fetchedPagination };
+      return { tickets: normalizedTickets, pagination: fetchedPagination };
     } catch (err: any) {
       setError(err.message || 'Failed to fetch tickets. Please try again.');
       console.error('Error fetching tickets:', err);
@@ -245,18 +303,34 @@ export const TicketProvider: React.FC<{ children: ReactNode }> = ({ children }) 
     
     try {
       // Use real API call
-      const response = await apiClient.get<{ ticket: TicketDetail }>(`/tickets/${id}`); // Expect { ticket: ... }
+      const response = await apiClient.get<{ ticket: TicketBackendResponse }>(`/tickets/${id}`); // Expect { ticket: ... }
       
       // Extract the ticket object directly from the response
       const fetchedTicket = response.ticket; // Access response.ticket directly
       
       if (fetchedTicket) {
-        // Ensure comments and attachments are arrays, even if missing from response
-        setCurrentTicket({
+        // Log the raw ticket data for debugging
+        console.log('[fetchTicketById] Raw ticket data:', fetchedTicket);
+        
+        // Create normalized ticket with proper camelCase date fields
+        const normalizedTicket = {
           ...fetchedTicket,
-          comments: fetchedTicket.comments || [], 
-          attachments: fetchedTicket.attachments || [] 
-        });
+          // Ensure correct date fields are available
+          createdAt: fetchedTicket.createdAt || fetchedTicket.created_at || null,
+          updatedAt: fetchedTicket.updatedAt || fetchedTicket.updated_at || null,
+          lastActivity: fetchedTicket.lastActivity || fetchedTicket.last_activity || new Date().toISOString(),
+          // Ensure comments and attachments are arrays, normalizing any date fields
+          comments: (fetchedTicket.comments || []).map((comment: CommentBackendResponse) => ({
+            ...comment,
+            createdAt: comment.createdAt || comment.created_at || new Date().toISOString()
+          })),
+          attachments: (fetchedTicket.attachments || []).map((attachment: AttachmentBackendResponse) => ({
+            ...attachment,
+            createdAt: attachment.createdAt || attachment.created_at || new Date().toISOString()
+          }))
+        } as TicketDetail;
+        
+        setCurrentTicket(normalizedTicket);
       } else {
         // Handle case where ticket data might be missing in the response
         console.error('Ticket data missing in API response:', response);

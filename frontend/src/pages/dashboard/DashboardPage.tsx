@@ -89,6 +89,7 @@ import {
   chartContainerStyle,
   buttonAnimation
 } from '../../styles/commonStyles';
+import { Ticket, PaginationState } from '../../context/TicketContext';
 
 // We'll use these colors for our charts
 const chartColors = [
@@ -492,25 +493,29 @@ const DashboardPage: React.FC = () => {
   const isTablet = useMediaQuery(theme.breakpoints.between('sm', 'md'));
   const navigate = useNavigate();
   const { user } = useAuth();
-  const { tickets, isLoading: ticketsLoading } = useTickets();
+  const { tickets, isLoading: ticketsLoading, fetchTickets } = useTickets();
   const [timeRange, setTimeRange] = useState<'day' | 'week' | 'month'>('week');
   const [stats, setStats] = useState<TicketStats>(mockTicketStats);
   const [recentActivities, setRecentActivities] = useState<TicketActivity[]>(mockActivities);
   const [isStatsLoading, setIsStatsLoading] = useState<boolean>(false);
   const [isActivitiesLoading, setIsActivitiesLoading] = useState<boolean>(false);
   const [selectedSection, setSelectedSection] = useState<string | null>(null);
+  const [dashboardTickets, setDashboardTickets] = useState<Ticket[]>([]);
+  const [dashboardPagination, setDashboardPagination] = useState<PaginationState>({ page: 1, limit: 5, totalCount: 0, totalPages: 1 });
+  const [dashboardLoading, setDashboardLoading] = useState(false);
+  const [dashboardError, setDashboardError] = useState<string | null>(null);
   
   // Memoize the activity columns
   const memoizedActivityColumns = React.useMemo(() => activityColumns, []);
   
-  // Define ticket columns with access to navigate
-  const ticketColumns: GridColDef[] = React.useMemo(() => [
+  // Define ticket columns for the dashboard view
+  const dashboardTicketColumns: GridColDef[] = React.useMemo(() => [
     {
       field: 'id',
-      headerName: 'ID',
+      headerName: 'Ticket ID',
       width: 100,
       renderCell: (params) => (
-        <Typography variant="body2">
+        <Typography variant="body2" sx={{ color: theme.palette.primary.main, '&:hover': { textDecoration: 'underline' } }}>
           {params.row.id}
         </Typography>
       ),
@@ -529,7 +534,7 @@ const DashboardPage: React.FC = () => {
     {
       field: 'status',
       headerName: 'Status',
-      width: 150,
+      width: 120,
       renderCell: (params) => (
         <StatusBadge status={params.row.status} size="small" />
       ),
@@ -537,7 +542,7 @@ const DashboardPage: React.FC = () => {
     {
       field: 'priority',
       headerName: 'Priority',
-      width: 150,
+      width: 120,
       renderCell: (params) => (
         <PriorityBadge priority={params.row.priority} size="small" />
       ),
@@ -555,7 +560,8 @@ const DashboardPage: React.FC = () => {
     {
       field: 'actions',
       headerName: 'Actions',
-      width: 100,
+      width: 80,
+      align: 'center',
       renderCell: (params) => (
         <Tooltip title="View Ticket">
           <IconButton
@@ -564,13 +570,17 @@ const DashboardPage: React.FC = () => {
               e.stopPropagation();
               navigate(`/tickets/${params.row.id}`);
             }}
+            sx={{ 
+              color: theme.palette.primary.main,
+              '&:hover': { backgroundColor: alpha(theme.palette.primary.main, 0.1) }
+            }}
           >
             <VisibilityIcon fontSize="small" />
           </IconButton>
         </Tooltip>
       ),
     },
-  ], [navigate]);
+  ], [navigate, theme]);
   
   // Fetch data on component mount
   useEffect(() => {
@@ -663,6 +673,46 @@ const DashboardPage: React.FC = () => {
   const handleViewTicket = (ticketId: string) => {
     navigate(`/tickets/${ticketId}`);
   };
+
+  // Fetch logic for Customer Dashboard
+  const fetchDashboardData = useCallback(async (page: number, limit: number) => {
+    setDashboardLoading(true);
+    setDashboardError(null);
+    try {
+      // Add log here to see what fetchTickets returns *for the dashboard*
+      console.log(`[Dashboard Fetch] Calling fetchTickets with page: ${page}, limit: ${limit}, filters: { isOpen: true }`);
+      const result = await fetchTickets(page, limit, { isOpen: true });
+      // Add log here to inspect the result
+      console.log(`[Dashboard Fetch] Result from fetchTickets:`, result);
+      
+      if (result) {
+        setDashboardTickets(result.tickets);
+        setDashboardPagination(result.pagination);
+      } else {
+        console.log(`[Dashboard Fetch] fetchTickets returned undefined. Setting empty tickets.`);
+        setDashboardTickets([]); // Ensure state is cleared if fetch fails
+        setDashboardError('Failed to load dashboard tickets.');
+      }
+    } catch (err) {
+      console.error(`[Dashboard Fetch] Error during fetch:`, err);
+      setDashboardError('An error occurred while fetching dashboard tickets.');
+      setDashboardTickets([]); // Ensure state is cleared on error
+    } finally {
+      setDashboardLoading(false);
+    }
+  }, [fetchTickets]);
+
+  // Add missing pagination handler
+  const handleDashboardPaginationChange = (model: { page: number; pageSize: number }) => {
+    fetchDashboardData(model.page + 1, model.pageSize);
+  };
+
+  // Initial fetch for dashboard
+  useEffect(() => {
+    if (user?.role === 'customer') { 
+        fetchDashboardData(1, 5);
+    }
+  }, [user]);
 
   // Render dashboard based on user role
   const renderRoleDashboard = () => {
@@ -792,21 +842,19 @@ const DashboardPage: React.FC = () => {
 
       {/* Open Tickets - Updated with modern styling */}
       <Grid item xs={12}>
-        <EnhancedCard
-          index={2}
+        <Paper 
           elevation={0}
           sx={{
-            ...cardStyles,
-            minHeight: '100%',
+            p: 2, 
+            borderRadius: 2,
+            ...gradientAccent(theme),
+            overflow: 'hidden',
             border: '1px solid',
             borderColor: theme.palette.divider,
-            display: 'flex',
-            flexDirection: 'column',
-            overflow: 'hidden',
-            ...gradientAccent(theme)
+            minHeight: '100%'
           }}
         >
-            <CardHeader 
+          <CardHeader 
             title={
               <Typography variant="h6" sx={{ 
                 fontWeight: 700, 
@@ -828,7 +876,7 @@ const DashboardPage: React.FC = () => {
                 Track your active support requests
               </Typography>
             }
-              action={
+            action={
               <Box sx={{ display: 'flex', gap: 1 }}>
                 <IconButton 
                   onClick={handleRefreshData} 
@@ -859,17 +907,17 @@ const DashboardPage: React.FC = () => {
               </Box>
             }
             sx={{ 
-              px: 3, 
-              pt: 2,
-              pb: 1,
+              px: 3, pt: 2, pb: 1, 
+              borderBottom: `1px solid ${theme.palette.divider}`,
+              borderTopLeftRadius: theme.shape.borderRadius * 2,
+              borderTopRightRadius: theme.shape.borderRadius * 2,
               background: theme.palette.mode === 'dark' 
-                ? alpha(theme.palette.background.paper, 0.4)
-                : alpha(theme.palette.background.paper, 0.7),
+                ? alpha(theme.palette.background.default, 0.6)
+                : alpha(theme.palette.background.default, 0.8),
             }}
           />
-          <Divider />
           <CardContent sx={{ p: 0 }}>
-            {isStatsLoading ? (
+            {dashboardLoading ? (
               <Box sx={{ p: 1.5 }}>
                 {[1, 2, 3, 4, 5].map((i) => (
                   <Skeleton
@@ -889,43 +937,51 @@ const DashboardPage: React.FC = () => {
                   />
                 ))}
               </Box>
+            ) : dashboardError ? (
+              <Alert severity="error" sx={{ m: 2 }}>{dashboardError}</Alert>
             ) : (
               <Box sx={{ width: '100%' }}>
                 <DataGrid
-                  rows={tickets
-                    .filter(ticket => ticket.status.name !== 'Closed' && ticket.status.name !== 'Resolved')
-                    .slice(0, 5)}
-                  columns={ticketColumns}
-                  paginationModel={{ page: 0, pageSize: 5 }}
-                  pageSizeOptions={[5]}
+                  rows={dashboardTickets} 
+                  columns={dashboardTicketColumns} 
+                  rowCount={dashboardPagination.totalCount} 
+                  loading={dashboardLoading} 
+                  pageSizeOptions={[5, 10]}
+                  paginationModel={{ 
+                    page: dashboardPagination.page - 1,  
+                    pageSize: dashboardPagination.limit 
+                  }}
+                  paginationMode="server" 
+                  onPaginationModelChange={handleDashboardPaginationChange}
                   disableRowSelectionOnClick
                   onRowClick={(params) => navigate(`/tickets/${params.row.id}`)}
-                  autoHeight
-                  rowHeight={42}
-                    sx={{
+                  autoHeight={true}
+                  rowHeight={45}
+                  sx={{
                     border: 'none',
+                    '& .MuiDataGrid-columnHeaders': {
+                      backgroundColor: theme.palette.mode === 'dark'
+                        ? alpha(theme.palette.primary.dark, 0.1) 
+                        : alpha(theme.palette.primary.light, 0.1),
+                      borderBottom: `1px solid ${theme.palette.divider}`,
+                      height: '40px !important',
+                      minHeight: '40px !important',
+                    },
                     '& .MuiDataGrid-cell': {
                       borderBottom: `1px solid ${theme.palette.divider}`,
                       cursor: 'pointer',
                       transition: 'all 0.2s ease',
-                      py: 0.5,
-                      '&:hover': {
+                      py: 1,
+                       '&:hover': {
                         backgroundColor: alpha(theme.palette.primary.main, 0.04),
-                        transform: 'translateX(4px)',
                       },
-                    },
-                    '& .MuiDataGrid-columnHeaders': {
-                      backgroundColor: alpha(theme.palette.background.paper, 0.8),
-                      borderBottom: `1px solid ${theme.palette.divider}`,
-                      height: '40px !important',
-                      minHeight: '40px !important',
                     },
                   }}
                 />
               </Box>
             )}
           </CardContent>
-          {tickets.length > 0 && (
+          {dashboardPagination.totalCount > dashboardPagination.limit && (
             <Box sx={{ p: 0.5, textAlign: 'center' }}>
               <Button 
                 onClick={() => navigate('/tickets')} 
@@ -943,7 +999,7 @@ const DashboardPage: React.FC = () => {
               </Button>
             </Box>
           )}
-        </EnhancedCard>
+        </Paper>
       </Grid>
     </EnhancedGrid>
   );

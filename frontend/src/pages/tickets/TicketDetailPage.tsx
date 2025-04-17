@@ -56,6 +56,9 @@ import UserAvatar from '../../components/common/UserAvatar';
 import TicketTimeline, { TimelineEvent } from '../../components/tickets/TicketTimeline';
 import { useTheme as useMuiTheme, alpha } from '@mui/material/styles';
 import { SystemAlert, useNotification } from '../../context/NotificationContext';
+import { format } from 'date-fns';
+import { formatInTimeZone } from 'date-fns-tz';
+import { useAuth } from '../../context/AuthContext';
 
 interface TabPanelProps {
   children?: React.ReactNode;
@@ -168,6 +171,7 @@ const TicketDetailPage: React.FC = () => {
   const navigate = useNavigate();
   const theme = useTheme();
   const muiTheme = useMuiTheme();
+  const { user } = useAuth();
   
   // Get ticket data from context
   const { 
@@ -199,6 +203,9 @@ const TicketDetailPage: React.FC = () => {
   const [isSubmittingComment, setIsSubmittingComment] = useState(false);
   const [commentError, setCommentError] = useState<string | null>(null);
   
+  // Determine user timezone with fallback
+  const userTimeZone = user?.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
+
   // Fetch ticket data when component mounts or ID changes
   useEffect(() => {
     if (id) {
@@ -350,18 +357,26 @@ const TicketDetailPage: React.FC = () => {
     }
   };
 
-  const formatDate = (dateString: string) => {
-    const options: Intl.DateTimeFormatOptions = {
-      year: 'numeric',
-      month: 'short',
-      day: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit',
-    };
-    return new Date(dateString).toLocaleString(undefined, options);
+  // Updated formatDate function using user's timezone
+  const formatDate = (dateString: string | undefined | null): string => {
+    if (!dateString) {
+      return 'N/A'; // Handle null or undefined input
+    }
+    try {
+      const date = new Date(dateString);
+      if (isNaN(date.getTime())) {
+        throw new Error('Invalid date value');
+      }
+      // Use date-fns-tz formatInTimeZone
+      return formatInTimeZone(date, userTimeZone, 'MMM dd, yyyy p'); // Example: Oct 27, 2023 2:30 PM IST
+    } catch (error) {
+      console.error(`Error formatting date string "${dateString}" in timezone "${userTimeZone}":`, error);
+      return 'Invalid Date'; // Fallback for parsing errors
+    }
   };
   
-  const formatFileSize = (bytes: number) => {
+  const formatFileSize = (bytes: number | undefined | null): string => {
+    if (bytes === null || bytes === undefined) return 'N/A';
     if (bytes < 1024) return bytes + ' B';
     if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
     return (bytes / (1024 * 1024)).toFixed(1) + ' MB';

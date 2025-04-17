@@ -33,6 +33,7 @@ import { FormTextField } from '../components/common/FormField';
 import useFormValidation from '../utils/useFormValidation';
 import { profileSchema, changePasswordSchema } from '../utils/validationSchemas';
 import { format } from 'date-fns';
+import { formatInTimeZone } from 'date-fns-tz';
 
 // List of common timezones
 const TIMEZONES = [
@@ -402,11 +403,13 @@ const ProfilePage: React.FC = () => {
                 <Typography variant="body2">
                   {(() => {
                     try {
-                      // Try to format the date, but catch any errors
-                      return format(new Date(user.lastLogin), 'MMM dd, yyyy HH:mm');
+                      // Determine timezone, fallback to UTC if not set on user
+                      const userTimeZone = user?.timezone || 'UTC'; 
+                      // Use formatInTimeZone for correct display
+                      return formatInTimeZone(new Date(user.lastLogin), userTimeZone, 'MMM dd, yyyy p');
                     } catch (error) {
                       console.error('Error formatting last login date:', error);
-                      return 'Unknown';
+                      return 'Invalid Date'; // Show error if formatting fails
                     }
                   })()}
                 </Typography>
