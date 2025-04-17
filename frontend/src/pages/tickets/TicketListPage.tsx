@@ -1228,13 +1228,6 @@ const TicketListPage: React.FC = () => {
               </Grid>
               <Grid item xs={12} md={5} sx={{ display: 'flex', justifyContent: { xs: 'flex-start', md: 'flex-end' }, alignItems: 'center', gap: 2 }}>
                 <Button
-                  variant="contained"
-                  startIcon={<AddIcon />}
-                  onClick={handleCreateTicket}
-                >
-                  New Ticket
-                </Button>
-                <Button
                   variant="outlined"
                   startIcon={<RefreshIcon />}
                   onClick={handleRefreshData}

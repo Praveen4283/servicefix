@@ -390,7 +390,7 @@ const ProfilePage: React.FC = () => {
             ) : (
               <Typography variant="subtitle1" gutterBottom>
                 {/* Display Designation instead of Role */}
-                {user?.designation || 'No designation set'}
+                {user?.designation || 'No Designation set'}
               </Typography>
             )}
             

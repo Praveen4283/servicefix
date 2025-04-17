@@ -274,7 +274,7 @@ export const login = async (
       role: userFromDb.role,
       avatarUrl: userFromDb.avatar_url,
       phoneNumber: userFromDb.phone,
-      jobTitle: userFromDb.designation,
+      designation: userFromDb.designation,
       timezone: userFromDb.timezone,
       language: userFromDb.language,
       isActive: userFromDb.is_active,

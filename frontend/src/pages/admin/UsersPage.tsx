@@ -835,7 +835,7 @@ const UsersPage = () => {
                                     {user.first_name} {user.last_name}
                                   </Typography>
                                   <Typography variant="caption" display="block" color="textSecondary">
-                                    {user.designation || '-'}
+                                    {user.designation || 'No Designation set'}
                                   </Typography>
                                 </Box>
                               </Box>

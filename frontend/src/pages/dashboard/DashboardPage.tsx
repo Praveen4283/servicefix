@@ -685,7 +685,7 @@ const DashboardPage: React.FC = () => {
   const renderCustomerDashboard = () => (
     <EnhancedGrid 
       container 
-      spacing={3}
+      spacing={1}
     >
       {/* Stats Overview - Keep existing welcome box */}
       <Grid item xs={12}>
@@ -724,27 +724,17 @@ const DashboardPage: React.FC = () => {
             }
           }}
         >
-          <Box sx={{ p: 2, position: 'relative', zIndex: 1 }}>
-            <Grid container alignItems="center" justifyContent="space-between" spacing={2}>
-              <Grid item>
-                <Typography variant="h5" component="h1" gutterBottom sx={{
-                  fontWeight: 800,
-                  color: theme.palette.text.primary,
-                  letterSpacing: '0.5px',
-                  textShadow: theme.palette.mode === 'dark' ? '0 2px 10px rgba(0,0,0,0.3)' : 'none'
-                }}>
-                  Welcome, {user?.firstName || 'User'}
+          <Box sx={{ p: { xs: 3, md: 2 }, position: 'relative', zIndex: 1 }}>
+            <Grid container alignItems="center" justifyContent="space-between" spacing={3}>
+              <Grid item xs={12} md={7}>
+                <Typography variant="h5" component="h1" gutterBottom>
+                Welcome, {user?.firstName || 'User'}
                 </Typography>
-                <Typography variant="body1" sx={{
-                  mb: 2,
-                  maxWidth: 600,
-                  color: theme.palette.text.secondary,
-                  fontWeight: 500
-                }}>
-                  Track your support requests and get real-time updates on ticket status.
+                <Typography variant="subtitle1">
+                Track your support requests and get real-time updates on ticket status.
                 </Typography>
               </Grid>
-              <Grid item>
+              <Grid item xs={12} md={5} sx={{ display: 'flex', justifyContent: { xs: 'flex-start', md: 'flex-end' }, alignItems: 'center', gap: 2 }}>
                 <Button
                   variant="contained"
                   startIcon={<AddIcon />}
@@ -960,7 +950,7 @@ const DashboardPage: React.FC = () => {
 
   // Agent dashboard view
   const renderAgentDashboard = () => (
-    <Grid container spacing={3}>
+    <Grid container spacing={1}>
       {/* Welcome Banner */}
       <Grid item xs={12}>
         <Card 
@@ -1049,109 +1039,6 @@ const DashboardPage: React.FC = () => {
           columns={4}
         />
       </Grid>
-
-      {/* Performance Chart - Updated with modern styling */}
-      <Grid item xs={12} md={8}>
-        <Card elevation={0} sx={{ height: '100%', border: '1px solid', borderColor: theme.palette.divider, borderRadius: 2 }}>
-          <CardHeader 
-            title={
-              <Typography variant="h6" sx={{ 
-                fontWeight: 700, 
-                fontSize: '1.2rem',
-                color: theme.palette.text.primary,
-                letterSpacing: '0.5px',
-                mb: 1
-              }}>
-                Ticket Resolution Trends
-              </Typography>
-            }
-            subheader={
-              <Typography variant="body2" sx={{ 
-                color: theme.palette.text.secondary,
-                fontWeight: 500,
-                fontSize: '0.9rem',
-                lineHeight: 1.5
-              }}>
-                Track ticket resolution performance over time
-              </Typography>
-            }
-            sx={{ 
-              px: 3, 
-              pt: 3, 
-              pb: 2,
-              background: theme.palette.mode === 'dark' 
-                ? alpha(theme.palette.background.paper, 0.4)
-                : alpha(theme.palette.background.paper, 0.7),
-            }}
-          />
-          <Divider />
-          <CardContent sx={{ p: 4 }}>
-        <TicketChart
-          type="line"
-          height={320}
-          data={stats.ticketsTrend}
-          isLoading={isStatsLoading}
-              xAxisLabel="Date"
-              yAxisLabel="Count"
-        />
-          </CardContent>
-        </Card>
-      </Grid>
-
-      {/* Department Distribution - Updated with modern styling */}
-        <Grid item xs={12} md={4}>
-        <Card elevation={0} sx={{ height: '100%', border: '1px solid', borderColor: theme.palette.divider, borderRadius: 2 }}>
-          <CardHeader
-            title={
-              <Typography variant="h6" sx={{ 
-              fontWeight: 700, 
-              fontSize: '1.2rem',
-              color: theme.palette.text.primary,
-              letterSpacing: '0.5px',
-              mb: 1
-            }}>
-                Department Distribution
-              </Typography>
-            } 
-            subheader={
-              <Typography variant="body2" sx={{ 
-                color: theme.palette.text.secondary,
-                fontWeight: 500,
-                fontSize: '0.9rem',
-                lineHeight: 1.5
-              }}>
-                Distribution of tickets by department
-              </Typography>
-            }
-            sx={{ 
-              px: 3, 
-              pt: 3, 
-              pb: 2,
-              background: theme.palette.mode === 'dark' 
-                ? alpha(theme.palette.background.paper, 0.4)
-                : alpha(theme.palette.background.paper, 0.7),
-            }}
-          />
-          <Divider />
-          <CardContent sx={{ p: 4 }}>
-        <TicketChart
-              title=""
-              description="Distribution of tickets by department"
-          type="pie"
-              data={stats.ticketsByDepartment}
-              height={350}
-          isLoading={isStatsLoading}
-              colors={[
-                theme.palette.primary.main,
-                theme.palette.info.main,
-                theme.palette.success.main,
-                theme.palette.warning.main,
-                theme.palette.error.main,
-              ]}
-            />
-          </CardContent>
-        </Card>
-        </Grid>
 
       {/* Recent Activity - Updated with modern styling */}
       <Grid item xs={12}>
@@ -1272,7 +1159,7 @@ const DashboardPage: React.FC = () => {
   // Admin dashboard view
   const renderAdminDashboard = () => {
     return (
-    <Grid container spacing={3}>
+    <Grid container spacing={1}>
       {/* Welcome Banner */}
       <Grid item xs={12}>
         <Card 
@@ -1418,7 +1305,7 @@ const DashboardPage: React.FC = () => {
 
       {/* Agent Performance and Department Distribution Row */}
         <Grid item xs={12}>
-      <Grid container spacing={3}>
+      <Grid container spacing={1}>
         {/* Agent Performance */}
         <Grid item xs={12} md={6}>
               <Card elevation={0} sx={{ height: '100%', border: '1px solid', borderColor: theme.palette.divider, borderRadius: 2 }}>
