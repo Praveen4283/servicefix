@@ -6,9 +6,16 @@ import compression from 'compression';
 import dotenv from 'dotenv';
 import rateLimit from 'express-rate-limit';
 import 'reflect-metadata';
+import http from 'http';
+import socketService from './services/socket.service';
 
 // Load environment variables
 dotenv.config();
+
+// Check for critical environment variables
+if (!process.env.JWT_SECRET) {
+  logger.warn('JWT_SECRET environment variable is not set. Using fallback secrets, which may cause authentication issues if inconsistent.');
+}
 
 // Configure Database
 import { initializeDatabase } from './config/database';
@@ -26,6 +33,7 @@ import knowledgeBaseRoutes from './routes/knowledgeBase.routes';
 import reportRoutes from './routes/report.routes';
 import aiRoutes from './routes/ai.routes';
 import chatbotRoutes from './routes/chatbot.routes';
+import notificationRoutes from './routes/notification.routes';
 
 // Import the Supabase initialization function
 import { initBucket } from './utils/supabase';
@@ -33,6 +41,9 @@ import { initBucket } from './utils/supabase';
 // Initialize express app
 const app = express();
 const PORT = process.env.PORT || 5000;
+
+// Create HTTP server
+const server = http.createServer(app);
 
 // Rate limiting configuration
 const limiter = rateLimit({
@@ -74,6 +85,7 @@ app.use('/api/knowledge', knowledgeBaseRoutes);
 app.use('/api/reports', reportRoutes);
 app.use('/api/ai', aiRoutes);
 app.use('/api/chat', chatbotRoutes);
+app.use('/api/notifications', notificationRoutes);
 
 // Error handling middleware
 app.use(errorHandler);
@@ -116,8 +128,11 @@ const startServer = async () => {
     // Run database diagnostics to help troubleshoot connection issues
     await diagnoseDatabaseConnection();
     
+    // Initialize Socket.IO
+    socketService.initialize(server);
+    
     // Start the server
-    app.listen(PORT, () => {
+    server.listen(PORT, () => {
       logger.info(`Server running on port ${PORT}`);
     });
     

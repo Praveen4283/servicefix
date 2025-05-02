@@ -18,6 +18,7 @@ import { ChatbotConversation } from '../models/ChatbotConversation';
 import { ChatMessage } from '../models/ChatMessage';
 import { NotificationPreference } from '../models/NotificationPreference';
 import { DepartmentMember } from '../models/DepartmentMember';
+import { Notification } from '../models/Notification';
 // Add any other entities you have here
 
 // Load environment variables
@@ -57,6 +58,7 @@ export const AppDataSource = new DataSource({
     ChatbotConversation,
     ChatMessage,
     NotificationPreference,
+    Notification,
     // Add other imported entity classes here
   ],
   // Adjust migrations path for production build

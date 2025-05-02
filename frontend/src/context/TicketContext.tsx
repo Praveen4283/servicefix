@@ -28,7 +28,7 @@ interface TicketType {
 }
 
 interface User {
-  id: string;
+  id: string | number;
   firstName: string;
   lastName: string;
   email: string;
@@ -134,6 +134,7 @@ export interface PaginationState {
 interface TicketFilters {
   priorityName?: string;
   isOpen?: boolean;
+  assigneeId?: string | number; // Add assigneeId to filter tickets by assignee
   // Add other potential filters here
 }
 
@@ -157,12 +158,13 @@ interface TicketContextType {
   filterTickets: (filters: any) => void;
   searchTickets: (query: string) => void;
   clearFilters: () => void;
+  getAgentsList: () => Promise<User[]>;
 }
 
 const TicketContext = createContext<TicketContextType | undefined>(undefined);
 
 export const TicketProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
-  const { isAuthenticated } = useAuth();
+  const { isAuthenticated, user } = useAuth();
   const [tickets, setTickets] = useState<Ticket[]>([]);
   const [filteredTickets, setFilteredTickets] = useState<Ticket[]>([]);
   const [currentTicket, setCurrentTicket] = useState<TicketDetail | null>(null);
@@ -254,11 +256,16 @@ export const TicketProvider: React.FC<{ children: ReactNode }> = ({ children }) 
       if (filters.isOpen !== undefined) {
         params.append('isOpen', filters.isOpen.toString());
       }
+      
+      // Add assigneeId filter if provided - the controller uses 'assignee' rather than 'assigneeId'
+      if (filters.assigneeId !== undefined) {
+        params.append('assignee', filters.assigneeId.toString());
+      }
+      
       // Add other filters here if needed
       // if (filters.priorityName) { ... }
       
       const queryString = params.toString();
-      console.log(`[fetchTickets] Fetching: /tickets?${queryString}`);
       
       const response = await apiClient.get<{ tickets: TicketBackendResponse[]; pagination: PaginationState }>(`/tickets?${queryString}`);
       const fetchedTickets = response.tickets || [];
@@ -266,9 +273,6 @@ export const TicketProvider: React.FC<{ children: ReactNode }> = ({ children }) 
       
       // Map snake_case date fields to camelCase for consistency
       const normalizedTickets = fetchedTickets.map((ticket: TicketBackendResponse) => {
-        // Log raw data for debugging
-        console.log(`[fetchTickets] Raw ticket data:`, ticket);
-        
         // Normalize dates by mapping snake_case to camelCase if needed
         return {
           ...ticket,
@@ -309,9 +313,6 @@ export const TicketProvider: React.FC<{ children: ReactNode }> = ({ children }) 
       const fetchedTicket = response.ticket; // Access response.ticket directly
       
       if (fetchedTicket) {
-        // Log the raw ticket data for debugging
-        console.log('[fetchTicketById] Raw ticket data:', fetchedTicket);
-        
         // Create normalized ticket with proper camelCase date fields
         const normalizedTicket = {
           ...fetchedTicket,
@@ -382,31 +383,56 @@ export const TicketProvider: React.FC<{ children: ReactNode }> = ({ children }) 
     setError(null);
     
     try {
-      // In a real app, this would be an API call
-      await new Promise(resolve => setTimeout(resolve, 1000)); // Simulate network request
+      // Create a copy of ticketData to avoid modifying the original
+      const processedData = { ...ticketData };
       
+      // Handle assigneeId conversion to number if it's a UUID string
+      if (processedData.assigneeId !== undefined) {
+        // If it's a string that doesn't look like a number, try to extract numeric part or set to null
+        if (typeof processedData.assigneeId === 'string' && isNaN(Number(processedData.assigneeId))) {
+          console.log('Converting non-numeric assigneeId to null:', processedData.assigneeId);
+          processedData.assigneeId = null;
+        } 
+        // If it's a string that looks like a number, convert to number
+        else if (typeof processedData.assigneeId === 'string') {
+          processedData.assigneeId = Number(processedData.assigneeId);
+        }
+        
+        console.log('Final assigneeId value:', processedData.assigneeId);
+      }
+      
+      // Use the processed data for the API call
+      const response = await apiClient.put(`/tickets/${id}`, processedData);
+      const updatedTicket = response.ticket || response;
+      
+      // Update the tickets list with the updated ticket
       setTickets(prevTickets =>
         prevTickets.map(ticket =>
           ticket.id === id
-            ? { ...ticket, ...ticketData, updatedAt: new Date().toISOString() }
+            ? { ...ticket, ...updatedTicket, updatedAt: new Date().toISOString() }
             : ticket
         )
       );
       
+      // Also update filtered tickets list
       setFilteredTickets(prevTickets =>
         prevTickets.map(ticket =>
           ticket.id === id
-            ? { ...ticket, ...ticketData, updatedAt: new Date().toISOString() }
+            ? { ...ticket, ...updatedTicket, updatedAt: new Date().toISOString() }
             : ticket
         )
       );
       
+      // If we are viewing the current ticket being updated, update the current ticket state
       if (currentTicket && currentTicket.id === id) {
-        setCurrentTicket({ ...currentTicket, ...ticketData, updatedAt: new Date().toISOString() });
+        setCurrentTicket({ ...currentTicket, ...updatedTicket, updatedAt: new Date().toISOString() });
       }
-    } catch (err) {
-      setError('Failed to update ticket. Please try again.');
+      
+      return updatedTicket;
+    } catch (err: any) {
       console.error('Error updating ticket:', err);
+      setError(err.message || 'Failed to update ticket. Please try again.');
+      throw err;
     } finally {
       setIsLoading(false);
     }
@@ -547,12 +573,54 @@ export const TicketProvider: React.FC<{ children: ReactNode }> = ({ children }) 
     setFilteredTickets(tickets);
   }, [tickets]);
 
-  // Load initial data
-  useEffect(() => {
-    if (isAuthenticated) {
-      fetchTickets();
+  // Get agents list for assignment
+  const getAgentsList = useCallback(async (): Promise<User[]> => {
+    if (!isAuthenticated) return [];
+    
+    try {
+      // Fetch agents directly from users table where role is agent or admin
+      const response = await apiClient.get<{ agents: User[] }>('/users/roles/agent');
+      
+      // Log successful response
+      console.log('Successfully fetched agents:', response.agents?.length || 0);
+      
+      // Process agent IDs to ensure they're compatible with backend expectations
+      const formattedAgents = response.agents?.map(agent => {
+        let processedId = agent.id;
+        
+        // If ID is a string, check if it can be converted to a number
+        if (typeof agent.id === 'string') {
+          const numericId = parseInt(agent.id, 10);
+          if (!isNaN(numericId)) {
+            // It's a numeric string, convert to number
+            processedId = numericId;
+            console.log(`Converted agent ID from ${agent.id} to ${numericId}`);
+          } else {
+            // It's a UUID or non-numeric string, see if we can extract any numeric parts
+            const numericParts = agent.id.match(/\d+/);
+            if (numericParts && numericParts[0]) {
+              const extractedId = parseInt(numericParts[0], 10);
+              if (!isNaN(extractedId)) {
+                processedId = extractedId;
+                console.log(`Extracted numeric ID ${extractedId} from ${agent.id}`);
+              }
+            }
+          }
+        }
+        
+        return {
+          ...agent,
+          id: processedId
+        };
+      }) || [];
+      
+      return formattedAgents;
+    } catch (error) {
+      console.error('Failed to fetch agents list:', error);
+      // Don't set error state to avoid UI disruption, just log it
+      return [];
     }
-  }, [isAuthenticated, fetchTickets]);
+  }, [isAuthenticated]);
 
   const value = {
     tickets,
@@ -574,6 +642,7 @@ export const TicketProvider: React.FC<{ children: ReactNode }> = ({ children }) 
     filterTickets,
     searchTickets,
     clearFilters,
+    getAgentsList,
   };
 
   return <TicketContext.Provider value={value}>{children}</TicketContext.Provider>;

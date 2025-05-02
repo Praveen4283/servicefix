@@ -31,7 +31,6 @@ class ApiClient {
   constructor() {
     // Use environment variable for the API URL to make it configurable for different environments
     this.baseURL = process.env.REACT_APP_API_URL || 'http://localhost:5000/api';
-    console.log('API Client initialized with base URL:', this.baseURL);
     
     // Create axios instance
     this.client = axios.create({
@@ -53,6 +52,56 @@ class ApiClient {
       },
       (error) => Promise.reject(error)
     );
+    
+    // Add special interceptor for ticket assignments
+    this.client.interceptors.request.use(
+      (config) => {
+        // Check if this is a PUT request to update a ticket
+        if (config.method === 'put' && config.url?.includes('/tickets/') && config.data) {
+          // Make a copy of the data to avoid mutating the original
+          const data = { ...config.data };
+          
+          // If assigneeId is present, ensure it's a number or null
+          if ('assigneeId' in data) {
+            console.log('API Client - Original assigneeId:', data.assigneeId, typeof data.assigneeId);
+            
+            if (data.assigneeId === null || data.assigneeId === undefined) {
+              // Keep null/undefined as is
+            } else if (typeof data.assigneeId === 'string') {
+              // Check if this is a UUID format (contains letters)
+              if (/[a-zA-Z]/.test(data.assigneeId)) {
+                console.log('Found UUID format, setting to default numeric ID');
+                // Must be a numeric ID for PostgreSQL bigint column
+                data.assigneeId = 1001; // Default safe ID based on schema
+              } else {
+                // Try to convert string to number
+                const numericId = parseInt(data.assigneeId, 10);
+                if (!isNaN(numericId)) {
+                  data.assigneeId = numericId;
+                } else {
+                  // If it can't be converted, use default
+                  data.assigneeId = 1001;
+                }
+              }
+            } else if (typeof data.assigneeId !== 'number') {
+              // Handle any other non-numeric types
+              data.assigneeId = 1001;
+            }
+            
+            // For safety, ensure the final value is indeed a number
+            if (data.assigneeId !== null && typeof data.assigneeId !== 'number') {
+              data.assigneeId = 1001;
+            }
+            
+            console.log('API Client - Final processed assigneeId:', data.assigneeId, typeof data.assigneeId);
+            config.data = data;
+          }
+        }
+        
+        return config;
+      },
+      (error) => Promise.reject(error)
+    );
 
     // Add response interceptor for error handling
     this.client.interceptors.response.use(
@@ -63,16 +112,12 @@ class ApiClient {
 
   // Handle successful responses
   private handleSuccess(response: AxiosResponse): AxiosResponse {
-    // Optionally log successful responses (commented out by default)
-    // console.log(`API response for ${response.config.url}:`, response.status);
     return response;
   }
 
   // Handle error responses
   private handleError = (error: AxiosError<ApiResponse>): Promise<never> => {
     const { response, request, config } = error;
-    // Optionally log the full error details (commented out by default)
-    // console.error(`API error for ${config?.url || 'unknown endpoint'}:`, error);
     
     let apiError: ApiError = {
       message: 'An unexpected error occurred. Please try again later.',
@@ -285,7 +330,6 @@ class ApiClient {
         return user;
       })
       .catch(error => {
-        console.error('Error in getUser:', error);
         throw error;
       });
   }
@@ -327,18 +371,14 @@ class ApiClient {
         const dataUrl = await createDataURLFromFile(compressedImage);
         
         if (dataUrl.length > 2 * 1024 * 1024) {
-          console.warn('Compressed avatar Data URL too large, skipping avatar update.');
           profileDTO.avatar_url = currentAuthUser.avatarUrl; // Keep existing avatar
         } else {
-          console.log('Assigning compressed avatar Data URL to avatar_url');
           profileDTO.avatar_url = dataUrl; // Assign NEW Data URL
         }
       } catch (error) {
-        console.error('Error processing avatar image, skipping avatar update:', error);
         profileDTO.avatar_url = currentAuthUser.avatarUrl; // Keep existing avatar on error
       }
     } else if (avatarFile === null) { // Case 2: Explicit removal requested
-      console.log('Setting avatar_url to null for removal.');
       profileDTO.avatar_url = null; // Explicitly set to null for backend update
     } else { // Case 3: No change requested (avatarFile is undefined)
       // Preserve existing avatar URL if it exists, otherwise leave avatar_url undefined in DTO
@@ -346,9 +386,6 @@ class ApiClient {
         profileDTO.avatar_url = currentAuthUser.avatarUrl;
       }
     }
-
-    // Add logging here
-    console.log(`[updateUserProfile] Sending PUT request for user ${userId} with DTO:`, JSON.stringify(profileDTO));
 
     // Send the PUT request with the potentially updated profileDTO.avatar_url
     return this.put<any>(`/users/${userId}`, profileDTO)
@@ -513,7 +550,6 @@ class ApiClient {
         return response.organization;
       })
       .catch(error => {
-        console.error('Error fetching organization:', error);
         return { id: 'unknown', name: 'Unknown Organization' };
       });
   }

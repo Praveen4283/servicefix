@@ -2,7 +2,7 @@ import React from 'react';
 import { Avatar, Box, Typography, Chip, Tooltip, useTheme } from '@mui/material';
 
 interface User {
-  id: string;
+  id: string | number;
   firstName?: string;
   lastName?: string;
   name?: string; // Alternative to firstName/lastName

@@ -569,22 +569,44 @@ const TicketListPage: React.FC = () => {
 
   // --- Fetch logic for Main List View (Example) ---
   useEffect(() => {
-    if (user && user.role && user.role.toLowerCase() !== 'customer') { 
+    if (user && user.role) {
+      // For agents, only fetch tickets assigned to them
+      if (user.role.toLowerCase() === 'agent') {
+        console.log('Agent role detected, fetching tickets assigned to:', user.id);
+        fetchTickets(listPaginationModel.page + 1, listPaginationModel.pageSize, { assigneeId: user.id })
+          .then(result => {
+            if (result) {
+              console.log(`Fetched ${result.tickets.length} tickets assigned to agent`);
+            }
+          })
+          .catch(err => {
+            console.error('Error fetching agent tickets:', err);
+          });
+      } else {
+        // For admin and customers, use standard fetching
         fetchTickets(listPaginationModel.page + 1, listPaginationModel.pageSize); 
+      }
     }
-  }, [user, listPaginationModel, fetchTickets]); 
+  }, [user, listPaginationModel, fetchTickets]);
   // --- End List View Fetch Logic ---
 
   // Get filtered tickets
   const getFilteredTickets = () => {
+    // Use the correct source for tickets based on context
     const ticketsData = contextTickets || mockTickets;
     
     return ticketsData.filter(ticket => {
-      if (filterStatus !== 'all' && ticket.status.toString() !== filterStatus) {
+      // Remove the redundant agent filter - the context already provides filtered tickets for agents
+      // if (user?.role?.toLowerCase() === 'agent' && ticket.assignee?.id !== user.id) {
+      //   return false;
+      // }
+      
+      // Apply local filters (status, priority, search)
+      if (filterStatus !== 'all' && ticket.status.id !== filterStatus) {
         return false;
       }
       
-      if (filterPriority !== 'all' && ticket.priority.toString() !== filterPriority) {
+      if (filterPriority !== 'all' && ticket.priority.id !== filterPriority) {
         return false;
       }
       
@@ -1043,7 +1065,7 @@ const TicketListPage: React.FC = () => {
                   letterSpacing: '0.5px',
                   mb: 0.5
                 }}>
-                  My Open Tickets
+                  My Assigned Tickets
                 </Typography>
               }
               subheader={
@@ -1218,10 +1240,10 @@ const TicketListPage: React.FC = () => {
             <Grid container alignItems="center" justifyContent="space-between" spacing={3}>
               <Grid item xs={12} md={7}>
                 <Typography variant="h5" component="h1" gutterBottom>
-                  Agent Ticket View
+                  My Assigned Tickets
                 </Typography>
                 <Typography variant="subtitle1">
-                  View and manage assigned and available support tickets. Filter and search to find specific issues.
+                  View and manage tickets assigned to you. Filter and search to find specific issues.
                 </Typography>
               </Grid>
               <Grid item xs={12} md={5} sx={{ display: 'flex', justifyContent: { xs: 'flex-start', md: 'flex-end' }, alignItems: 'center', gap: 2 }}>

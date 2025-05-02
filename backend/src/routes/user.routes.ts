@@ -293,7 +293,6 @@ router.put('/:id', authenticate, async (req, res) => {
     const { 
       first_name, last_name, email, role, designation,
       phone_number, is_active, avatar_url, timezone, language, 
-      notification_settings,
       department_id
     } = req.body;
     
@@ -348,45 +347,6 @@ router.put('/:id', authenticate, async (req, res) => {
       if (avatar_url !== undefined) user.avatarUrl = avatar_url;
       if (timezone !== undefined) user.timezone = timezone;
       if (language !== undefined) user.language = language;
-      
-      // Notification settings update
-      if (notification_settings && typeof notification_settings === 'object') {
-        const preferenceRepository = getRepository(NotificationPreference);
-        const existingPreferences = await preferenceRepository.find({ where: { userId: Number(userId) } });
-        const preferencesMap = new Map(existingPreferences.map(p => [p.eventType, p]));
-        const preferencesToSave: NotificationPreference[] = [];
-
-        for (const eventType in notification_settings) {
-          if (Object.prototype.hasOwnProperty.call(notification_settings, eventType)) {
-            const isEnabled = !!notification_settings[eventType];
-
-            const existingPref = preferencesMap.get(eventType);
-            if (existingPref) {
-              if (existingPref.emailEnabled !== isEnabled || existingPref.pushEnabled !== isEnabled || existingPref.inAppEnabled !== isEnabled) {
-                existingPref.emailEnabled = isEnabled;
-                existingPref.pushEnabled = isEnabled;
-                existingPref.inAppEnabled = isEnabled;
-                preferencesToSave.push(existingPref);
-              }
-            } else {
-              const newPref = preferenceRepository.create({
-                userId: userId as any,
-                eventType: eventType,
-                emailEnabled: isEnabled,
-                pushEnabled: isEnabled,
-                inAppEnabled: isEnabled,
-              });
-              preferencesToSave.push(newPref);
-            }
-          } else {
-             console.warn(`Issue processing notification_settings key: '${eventType}' for user ${userId}.`);
-          }
-        }
-        
-        if (preferencesToSave.length > 0) {
-          await preferenceRepository.save(preferencesToSave);
-        }
-      }
       
       // Admin-only updates
       if (req.user.role === UserRole.ADMIN) {
@@ -618,6 +578,42 @@ router.delete('/:id/avatar', authenticate, async (req, res, next) => {
   } catch (error) {
     logger.error(`Error deleting avatar for user ${req.params.id}:`, error);
     next(new AppError('Server error while deleting avatar', 500));
+  }
+});
+
+/**
+ * @route   GET /api/users/roles/agent
+ * @desc    Get all users with role 'agent' or 'admin' for ticket assignment
+ * @access  Private (Agents and Admins)
+ */
+router.get('/roles/agent', authenticate, authorize([UserRole.ADMIN, UserRole.AGENT]), async (req, res) => {
+  try {
+    const userRepository = getRepository(User);
+    
+    // Query for users with role 'agent' or 'admin'
+    const agents = await userRepository.find({
+      where: [
+        { role: UserRole.AGENT },
+        { role: UserRole.ADMIN }
+      ],
+      order: { firstName: 'ASC', lastName: 'ASC' }
+    });
+    
+    // Format the response
+    const formattedAgents = agents.map(agent => ({
+      id: agent.id,
+      firstName: agent.firstName,
+      lastName: agent.lastName,
+      email: agent.email,
+      role: agent.role,
+      avatarUrl: agent.avatarUrl,
+      designation: agent.designation
+    }));
+    
+    return res.json({ agents: formattedAgents });
+  } catch (error) {
+    console.error('Error fetching agents list:', error);
+    return res.status(500).json({ message: 'Failed to fetch user data' });
   }
 });
 

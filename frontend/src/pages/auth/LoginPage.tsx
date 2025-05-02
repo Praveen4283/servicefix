@@ -81,7 +81,6 @@ const LoginPage: React.FC = () => {
         const loginSuccess = await login(values.email, values.password);
         
         if (loginSuccess) {
-          showSuccess('Login successful!', { title: 'Welcome Back' });
           // Clear the registration notification flag
           sessionStorage.removeItem('registrationNotificationShown');
           navigate(redirectTo);

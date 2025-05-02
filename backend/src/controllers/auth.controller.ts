@@ -10,6 +10,13 @@ import { isValidEmail } from '../utils/validation';
 // Secret key for JWT
 const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key';
 const JWT_REFRESH_SECRET = process.env.JWT_REFRESH_SECRET || 'your-refresh-secret-key';
+// Log which secret is being used for signing
+if (!process.env.JWT_SECRET) {
+  logger.warn('[Auth Signing] JWT_SECRET not set, using fallback key. Ensure this matches socket verification.');
+} else {
+  logger.info('[Auth Signing] Using JWT_SECRET from environment variables.');
+}
+
 const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || '1h';
 const JWT_REFRESH_EXPIRES_IN = process.env.JWT_REFRESH_EXPIRES_IN || '7d';
 

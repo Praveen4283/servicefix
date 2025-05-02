@@ -39,7 +39,7 @@ export interface UserDTO {
   /** Last update timestamp */
   updated_at?: string;
   /** User-specific notification settings */
-  notification_settings?: Record<string, boolean>;
+  notification_settings?: Record<string, { email: boolean; push: boolean; in_app: boolean }>;
 }
 
 /**
@@ -53,7 +53,7 @@ export interface ProfileUpdateDTO {
   designation?: string;
   timezone?: string;
   language?: string;
-  notification_settings?: Record<string, boolean>;
+  notification_settings?: Record<string, { email: boolean; push: boolean; in_app: boolean }>;
   avatar?: File | null;
   avatar_url?: string | null;
   email?: string;

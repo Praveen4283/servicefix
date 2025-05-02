@@ -14,6 +14,7 @@ import {
 } from '@mui/icons-material';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { NotificationProvider, NotificationContainer } from './context/NotificationContext';
+import { NotificationPreferencesProvider } from './context/NotificationPreferencesContext';
 import { TicketProvider } from './context/TicketContext';
 import { ThemeProvider } from './context/ThemeContext';
 import { CookieConsentProvider } from './context/CookieConsentContext';
@@ -21,6 +22,7 @@ import { ErrorBoundary } from './components/ErrorBoundary';
 import { testLocalStorage } from './utils/debugTools';
 import { isDevelopment } from './utils/environment';
 import CookieConsentBanner from './components/common/CookieConsentBanner';
+import { initializeNotificationSystem, shutdownNotificationSystem } from './services/notificationInitializer';
 
 // Layouts
 import AppLayout from './components/layout/AppLayout';
@@ -133,6 +135,22 @@ const AppWithRouter = () => {
   const location = useLocation();
   const { isAuthenticated, user, isLoading } = useAuth();
   
+  // Initialize and cleanup notification system
+  useEffect(() => {
+    // When auth state changes and user is authenticated
+    if (isAuthenticated && user && !isLoading) {
+      const authToken = localStorage.getItem('authToken');
+      if (authToken) {
+        initializeNotificationSystem(authToken);
+      }
+    }
+    
+    // Cleanup function
+    return () => {
+      shutdownNotificationSystem();
+    };
+  }, [isAuthenticated, user, isLoading]);
+  
   // Protect routes that require authentication
   const withProtectedLayout = (Component: React.ComponentType<any>, requiredRole?: string) => {
     // If still loading auth state, show a loading spinner instead of redirecting
@@ -153,7 +171,9 @@ const AppWithRouter = () => {
     
     return (
       <AppLayout>
-        <Component />
+        <TicketProvider>
+          <Component />
+        </TicketProvider>
       </AppLayout>
     );
   };
@@ -188,59 +208,57 @@ const AppWithRouter = () => {
     <ThemeProvider>
       <CookieConsentProvider>
         <CssBaseline />
-        <TicketProvider>
-          <ErrorBoundary FallbackComponent={ErrorFallback}>
-            <Suspense fallback={<LoadingSpinner />}>
-              {/* Global components that should appear across all pages */}
-              <CookieConsentBanner />
-              {isAuthenticated && <ChatbotWidget />}
+        <ErrorBoundary FallbackComponent={ErrorFallback}>
+          <Suspense fallback={<LoadingSpinner />}>
+            {/* Global components that should appear across all pages */}
+            <CookieConsentBanner />
+            {isAuthenticated && <ChatbotWidget />}
+            
+            <Routes>
+              {/* Public routes */}
+              <Route path="/" element={<LandingPage />} />
               
-              <Routes>
-                {/* Public routes */}
-                <Route path="/" element={<LandingPage />} />
-                
-                {/* Auth routes - these should not require authentication */}
-                <Route path="/login" element={withAuthLayout(LoginPage)} />
-                <Route path="/register" element={withAuthLayout(RegisterPage)} />
-                <Route path="/forgot-password" element={withAuthLayout(ForgotPasswordPage)} />
-                <Route path="/reset-password" element={withAuthLayout(ResetPasswordPage)} />
-                
-                {/* Protected routes - these require authentication */}
-                <Route path="/dashboard" element={withProtectedLayout(DashboardPage)} />
-                <Route path="/tickets">
-                  <Route index element={withProtectedLayout(TicketListPage)} />
-                  <Route path="create" element={withProtectedLayout(CreateTicketPage)} />
-                  <Route path=":id" element={withProtectedLayout(TicketDetailPage)} />
-                </Route>
-                
-                {/* Knowledge base routes */}
-                <Route path="/knowledge">
-                  <Route index element={withProtectedLayout(KnowledgeBasePage)} />
-                  <Route path=":id" element={withProtectedLayout(ArticleDetailPage)} />
-                </Route>
-                
-                {/* Admin routes */}
-                <Route path="/analytics" element={withProtectedLayout(AnalyticsDashboardPage, 'admin')} />
-                <Route path="/automation" element={withProtectedLayout(WorkflowAutomationPage, 'admin')} />
-                <Route path="/reports" element={withProtectedLayout(ReportsPage)} />
-                <Route path="/users" element={withProtectedLayout(UsersPage, 'admin')} />
-                <Route path="/settings" element={withProtectedLayout(SettingsPage, 'admin')} />
-                
-                {/* User profile */}
-                <Route path="/profile" element={withProtectedLayout(ProfilePage)} />
-                
-                {/* Search */}
-                <Route path="/search" element={withProtectedLayout(SearchPage)} />
-                
-                {/* Cookies page - public */}
-                <Route path="/cookies" element={withPublicLayout(CookiesPage)} />
-                
-                {/* Not found route */}
-                <Route path="*" element={withPublicLayout(NotFoundPage)} />
-              </Routes>
-            </Suspense>
-          </ErrorBoundary>
-        </TicketProvider>
+              {/* Auth routes - these should not require authentication */}
+              <Route path="/login" element={withAuthLayout(LoginPage)} />
+              <Route path="/register" element={withAuthLayout(RegisterPage)} />
+              <Route path="/forgot-password" element={withAuthLayout(ForgotPasswordPage)} />
+              <Route path="/reset-password" element={withAuthLayout(ResetPasswordPage)} />
+              
+              {/* Protected routes - these require authentication */}
+              <Route path="/dashboard" element={withProtectedLayout(DashboardPage)} />
+              <Route path="/tickets">
+                <Route index element={withProtectedLayout(TicketListPage)} />
+                <Route path="create" element={withProtectedLayout(CreateTicketPage)} />
+                <Route path=":id" element={withProtectedLayout(TicketDetailPage)} />
+              </Route>
+              
+              {/* Knowledge base routes */}
+              <Route path="/knowledge">
+                <Route index element={withProtectedLayout(KnowledgeBasePage)} />
+                <Route path=":id" element={withProtectedLayout(ArticleDetailPage)} />
+              </Route>
+              
+              {/* Admin routes */}
+              <Route path="/analytics" element={withProtectedLayout(AnalyticsDashboardPage, 'admin')} />
+              <Route path="/automation" element={withProtectedLayout(WorkflowAutomationPage, 'admin')} />
+              <Route path="/reports" element={withProtectedLayout(ReportsPage)} />
+              <Route path="/users" element={withProtectedLayout(UsersPage, 'admin')} />
+              <Route path="/settings" element={withProtectedLayout(SettingsPage, 'admin')} />
+              
+              {/* User profile */}
+              <Route path="/profile" element={withProtectedLayout(ProfilePage)} />
+              
+              {/* Search */}
+              <Route path="/search" element={withProtectedLayout(SearchPage)} />
+              
+              {/* Cookies page - public */}
+              <Route path="/cookies" element={withPublicLayout(CookiesPage)} />
+              
+              {/* Not found route */}
+              <Route path="*" element={withPublicLayout(NotFoundPage)} />
+            </Routes>
+          </Suspense>
+        </ErrorBoundary>
       </CookieConsentProvider>
     </ThemeProvider>
   );
@@ -250,11 +268,14 @@ const AppWithRouter = () => {
 const App = () => {
   return (
     <Router>
-      <NotificationProvider>
-        <AuthProvider>
-          <AppWithRouter />
-        </AuthProvider>
-      </NotificationProvider>
+      <AuthProvider>
+        <NotificationProvider>
+          <NotificationPreferencesProvider>
+            <AppWithRouter />
+            <NotificationContainer />
+          </NotificationPreferencesProvider>
+        </NotificationProvider>
+      </AuthProvider>
     </Router>
   );
 };

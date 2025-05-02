@@ -185,26 +185,28 @@ const StatsWidget: React.FC<StatsWidgetProps> = ({
                         arrow
                         placement="top"
                       >
-                        <Typography 
-                          variant="body2" 
-                          sx={{ 
-                            fontWeight: 600, 
-                            color: stat.change.isPositive 
-                              ? theme.palette.success.main 
-                              : theme.palette.error.main,
-                            display: 'flex',
-                            alignItems: 'center',
-                            background: stat.change.isPositive
-                              ? alpha(theme.palette.success.main, 0.1)
-                              : alpha(theme.palette.error.main, 0.1),
-                            px: 1,
-                            py: 0.5,
-                            borderRadius: 5,
-                            fontSize: '0.75rem'
-                          }}
-                        >
-                          {stat.change.isPositive ? '+' : '-'}{stat.change.value}%
-                        </Typography>
+                        <span>
+                          <Typography 
+                            variant="body2" 
+                            sx={{ 
+                              fontWeight: 600, 
+                              color: stat.change.isPositive 
+                                ? theme.palette.success.main 
+                                : theme.palette.error.main,
+                              display: 'flex',
+                              alignItems: 'center',
+                              background: stat.change.isPositive
+                                ? alpha(theme.palette.success.main, 0.1)
+                                : alpha(theme.palette.error.main, 0.1),
+                              px: 1,
+                              py: 0.5,
+                              borderRadius: 5,
+                              fontSize: '0.75rem'
+                            }}
+                          >
+                            {stat.change.isPositive ? '+' : '-'}{stat.change.value}%
+                          </Typography>
+                        </span>
                       </Tooltip>
                     )}
                   </Box>

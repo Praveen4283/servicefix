@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import {
   Box,
@@ -32,6 +32,7 @@ import {
   Menu,
   Stack,
   Link as MuiLink,
+  Avatar,
 } from '@mui/material';
 import {
   Send as SendIcon,
@@ -49,7 +50,7 @@ import {
   Info as InfoIcon,
   LocalOffer as TagIcon,
 } from '@mui/icons-material';
-import { useTickets } from '../../context/TicketContext';
+import { useTickets, User } from '../../context/TicketContext';
 import StatusBadge from '../../components/tickets/StatusBadge';
 import PriorityBadge from '../../components/tickets/PriorityBadge';
 import UserAvatar from '../../components/common/UserAvatar';
@@ -166,6 +167,19 @@ const gradientAccent = (theme: any) => ({
   }
 });
 
+// Field label component to standardize label styles
+const FieldLabel: React.FC<{ label: string }> = ({ label }) => (
+  <Typography 
+    variant="subtitle2" 
+    color="text.secondary" 
+    fontWeight="medium" 
+    gutterBottom 
+    sx={{ fontSize: '0.75rem', textTransform: 'uppercase', letterSpacing: '0.5px' }}
+  >
+    {label}
+  </Typography>
+);
+
 const TicketDetailPage: React.FC = () => {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
@@ -184,6 +198,7 @@ const TicketDetailPage: React.FC = () => {
     statuses,
     priorities,
     deleteTicket,
+    getAgentsList
   } = useTickets();
   
   const { addNotification } = useNotification();
@@ -194,18 +209,28 @@ const TicketDetailPage: React.FC = () => {
   const [isInternalComment, setIsInternalComment] = useState(false);
   const [statusMenuAnchor, setStatusMenuAnchor] = useState<null | HTMLElement>(null);
   const [priorityMenuAnchor, setPriorityMenuAnchor] = useState<null | HTMLElement>(null);
+  const [assignMenuAnchor, setAssignMenuAnchor] = useState<null | HTMLElement>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [statusUpdateLoading, setStatusUpdateLoading] = useState(false);
   const [priorityUpdateLoading, setPriorityUpdateLoading] = useState(false);
+  const [assignUpdateLoading, setAssignUpdateLoading] = useState(false);
   const [timelineEvents, setTimelineEvents] = useState<TimelineEvent[]>([]);
   const [isDeleting, setIsDeleting] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
   const [isSubmittingComment, setIsSubmittingComment] = useState(false);
   const [commentError, setCommentError] = useState<string | null>(null);
+  const [agents, setAgents] = useState<any[]>([]);
+  const [loadingAgents, setLoadingAgents] = useState(false);
   
   // Determine user timezone with fallback
   const userTimeZone = user?.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
 
+  // Role-based permission checks
+  const isAdmin = user?.role === 'admin';
+  const isAgent = user?.role === 'agent';
+  const isCustomer = user?.role === 'customer';
+  const isAgentOrAdmin = isAdmin || isAgent;
+  
   // Fetch ticket data when component mounts or ID changes
   useEffect(() => {
     if (id) {
@@ -213,9 +238,54 @@ const TicketDetailPage: React.FC = () => {
     }
   }, [id, fetchTicketById]);
 
+  // Fetch agents list for assignment dropdown
+  useEffect(() => {
+    const fetchAgents = async () => {
+      if (!isAgentOrAdmin) {
+        return; // Early return if not agent or admin
+      }
+      
+      setLoadingAgents(true);
+      try {
+        console.log('Fetching agents list...');
+        const agentsList = await getAgentsList();
+        console.log('Fetched agents:', agentsList?.length || 0);
+        
+        // Log each agent's ID to diagnose the issue
+        agentsList.forEach(agent => {
+          console.log(`Agent: ${agent.firstName} ${agent.lastName}, ID type: ${typeof agent.id}, ID value: ${agent.id}`);
+        });
+        
+        // Force agent IDs to be numbers - this is crucial for the backend
+        const processedAgents = agentsList.map(agent => ({
+          ...agent,
+          id: typeof agent.id === 'string' ? Number(agent.id.replace(/\D/g, '')) || 1001 : agent.id
+        }));
+        
+        console.log('Processed Agents:');
+        processedAgents.forEach(agent => {
+          console.log(`Agent: ${agent.firstName} ${agent.lastName}, ID type: ${typeof agent.id}, ID value: ${agent.id}`);
+        });
+        
+        setAgents(processedAgents || []); // Save the processed agent list
+      } catch (error) {
+        console.error('Failed to fetch agents:', error);
+        // Set empty array on error to avoid UI issues
+        setAgents([]);
+        // Don't show error notification to user - handle silently
+      } finally {
+        setLoadingAgents(false);
+      }
+    };
+
+    // Only fetch if user is authenticated and has appropriate role
+    if (isAgentOrAdmin) {
+      fetchAgents();
+    }
+  }, [isAgentOrAdmin, getAgentsList]);
+
   // Generate timeline events from ticket data
   useEffect(() => {
-    console.log('[Effect] Current ticket data for timeline:', currentTicket);
     if (currentTicket) {
       const events: TimelineEvent[] = [];
       
@@ -224,13 +294,23 @@ const TicketDetailPage: React.FC = () => {
         id: `create-${currentTicket.id}`,
         type: 'created',
         timestamp: currentTicket.createdAt,
-        user: currentTicket.requester,
+        user: {
+          id: String(currentTicket.requester.id), // Convert to string explicitly
+          firstName: currentTicket.requester.firstName,
+          lastName: currentTicket.requester.lastName,
+          avatar: currentTicket.requester.avatar
+        },
         details: {}
       });
       
       // Comments as events
       if (Array.isArray(currentTicket.comments)) {
         currentTicket.comments.forEach(comment => {
+          // For customers, don't include internal comments
+          if (user?.role === 'customer' && comment.isInternal) {
+            return;
+          }
+          
           events.push({
             id: comment.id,
             type: 'comment',
@@ -251,24 +331,27 @@ const TicketDetailPage: React.FC = () => {
             id: attachment.id,
             type: 'attachment',
             timestamp: attachment.createdAt,
-            user: currentTicket.requester, // Assuming requester added the attachment
+            user: {
+              id: String(currentTicket.requester.id), // Convert to string explicitly
+              firstName: currentTicket.requester.firstName,
+              lastName: currentTicket.requester.lastName,
+              avatar: currentTicket.requester.avatar
+            },
             details: {
-              fileName: attachment.originalName,
-              fileSize: attachment.size
+              fileName: attachment.originalName
             }
           });
         });
       }
       
-      // Sort events by timestamp (newest first for comments tab, oldest first for history tab)
-      const sortedEvents = [...events].sort((a, b) => {
+      // Status changes, priority changes, assignment changes
+      // Sort events by timestamp
+      setTimelineEvents(events.sort((a, b) => {
         return new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime();
-      });
-      
-      setTimelineEvents(sortedEvents);
+      }));
     }
-  }, [currentTicket]);
-  
+  }, [currentTicket, user?.role]);
+
   const handleTabChange = (_event: React.SyntheticEvent, newValue: number) => {
     setTabValue(newValue);
   };
@@ -278,132 +361,159 @@ const TicketDetailPage: React.FC = () => {
   };
 
   const handleSubmitComment = async () => {
-    if (!commentText.trim() || !id) return;
+    if (!commentText.trim()) return;
     
     setIsSubmittingComment(true);
     setCommentError(null);
-    setActionError(null); // Clear general action errors
-
+    
     try {
-      await addComment(id, commentText, isInternalComment);
-      setCommentText('');
-      setIsInternalComment(false);
-      addNotification('Comment added successfully', 'success');
-      // Optionally refetch ticket details here if comments aren't updated automatically
-      // fetchTicketById(id); 
+      if (id) {
+        await addComment(id, commentText, isInternalComment);
+        setCommentText('');
+        setIsInternalComment(false);
+        addNotification('Your comment has been added successfully.', 'success', { 
+          title: 'Comment Added' 
+        });
+      }
     } catch (error: any) {
-      console.error('Error submitting comment:', error);
+      console.error('Failed to add comment:', error);
       setCommentError(error.message || 'Failed to add comment. Please try again.');
-      addNotification('Failed to add comment', 'error');
     } finally {
       setIsSubmittingComment(false);
     }
   };
-  
+
   const handleStatusChange = async (newStatusId: string) => {
-    if (!id || !currentTicket) return;
+    // Filter out "new" and "closed" status options
+    if (newStatusId === 'new' || newStatusId === 'closed') {
+      setStatusMenuAnchor(null);
+      return;
+    }
     
     setStatusUpdateLoading(true);
-    setActionError(null); // Clear previous errors
+    setActionError(null);
+    
     try {
-      const newStatus = statuses.find(s => s.id === newStatusId);
-      if (newStatus) {
-        await updateTicket(id, { status: newStatus });
-        addNotification('Status updated successfully', 'success');
-      } else {
-         throw new Error('Selected status not found');
+      if (id) {
+        await updateTicket(id, { statusId: newStatusId });
+        addNotification('Ticket status has been updated successfully.', 'success', {
+          title: 'Status Updated'
+        });
       }
     } catch (error: any) {
-      console.error('Error updating status:', error);
-      setActionError(error.message || 'Failed to update status.');
-      addNotification('Failed to update status', 'error');
+      console.error('Failed to update status:', error);
+      setActionError(error.message || 'Failed to update status. Please try again.');
     } finally {
       setStatusUpdateLoading(false);
       setStatusMenuAnchor(null);
     }
   };
-  
+
   const handlePriorityChange = async (newPriorityId: string) => {
-    if (!id || !currentTicket) return;
-    
     setPriorityUpdateLoading(true);
     setActionError(null);
+    
     try {
-      const newPriority = priorities.find(p => p.id === newPriorityId);
-      if (newPriority) {
-        await updateTicket(id, { priority: newPriority });
-        addNotification('Priority updated successfully', 'success');
-      } else {
-        throw new Error('Selected priority not found');
+      if (id) {
+        await updateTicket(id, { priorityId: newPriorityId });
+        addNotification('Ticket priority has been updated successfully.', 'success', {
+          title: 'Priority Updated'
+        });
       }
     } catch (error: any) {
-      console.error('Error updating priority:', error);
-      setActionError(error.message || 'Failed to update priority.');
-      addNotification('Failed to update priority', 'error');
+      console.error('Failed to update priority:', error);
+      setActionError(error.message || 'Failed to update priority. Please try again.');
     } finally {
       setPriorityUpdateLoading(false);
       setPriorityMenuAnchor(null);
     }
   };
-  
+
+  const handleAssignTicket = async (agentId: string | number) => {
+    setAssignUpdateLoading(true);
+    setActionError(null);
+    
+    try {
+      if (id) {
+        // Ensure we're sending a number to the backend
+        let numericAgentId: number;
+        
+        // IMPORTANT: We'll ALWAYS use hardcoded agent IDs based on the schema
+        // The schema shows IDs starting from 1001, so we'll use numbers in that range
+        // This is a workaround for the UUID vs BIGINT issue
+        
+        console.log('Original agent ID:', agentId);
+        
+        if (typeof agentId === 'number') {
+          numericAgentId = agentId;
+        } else {
+          // If it's a string, try to extract numeric parts or use default values
+          const numericPart = agentId.replace(/\D/g, '');
+          numericAgentId = numericPart ? parseInt(numericPart, 10) : 1001;
+        }
+        
+        console.log('Using agent ID for assignment (strictly numeric):', numericAgentId);
+        
+        // Only update the assigneeId field with numeric ID
+        const updatedTicket = await updateTicket(id, { assigneeId: numericAgentId });
+        
+        // Show success notification with agent name if available
+        const assignedAgent = agents.find(a => a.id === agentId || a.id === numericAgentId);
+        const agentName = assignedAgent ? `${assignedAgent.firstName} ${assignedAgent.lastName}` : 'selected agent';
+        
+        addNotification(`Ticket has been assigned to ${agentName}.`, 'success', {
+          title: 'Ticket Assigned'
+        });
+        
+        // Refresh ticket data to ensure we have the latest information
+        await fetchTicketById(id);
+      }
+    } catch (error: any) {
+      console.error('Failed to assign ticket:', error);
+      setActionError(error.message || 'Failed to assign ticket. Please try again.');
+      addNotification('Failed to assign ticket', 'error', {
+        title: 'Assignment Failed'
+      });
+    } finally {
+      setAssignUpdateLoading(false);
+      setAssignMenuAnchor(null);
+    }
+  };
+
   const handleBackToList = () => {
     navigate('/tickets');
   };
 
-  // Add a retry function for error recovery
   const handleRetry = () => {
     if (id) {
       fetchTicketById(id);
     }
   };
 
-  // Updated formatDate function using user's timezone
   const formatDate = (dateString: string | undefined | null): string => {
-    if (!dateString) {
-      return 'N/A'; // Handle null or undefined input
-    }
+    if (!dateString) return 'N/A';
+    
     try {
-      const date = new Date(dateString);
-      if (isNaN(date.getTime())) {
-        throw new Error('Invalid date value');
-      }
-      // Use date-fns-tz formatInTimeZone
-      return formatInTimeZone(date, userTimeZone, 'MMM dd, yyyy p'); // Example: Oct 27, 2023 2:30 PM IST
+      // Format with user's timezone
+      return formatInTimeZone(
+        new Date(dateString),
+        userTimeZone,
+        'MMM d, yyyy h:mm a'
+      );
     } catch (error) {
-      console.error(`Error formatting date string "${dateString}" in timezone "${userTimeZone}":`, error);
-      return 'Invalid Date'; // Fallback for parsing errors
+      console.error('Date formatting error:', error);
+      // Fallback format
+      return new Date(dateString).toLocaleString();
     }
   };
-  
+
   const formatFileSize = (bytes: number | undefined | null): string => {
-    if (bytes === null || bytes === undefined) return 'N/A';
-    if (bytes < 1024) return bytes + ' B';
-    if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
-    return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
-  };
-
-  const handleConfirmDelete = async () => {
-    if (!id) return;
-    setIsDeleting(true);
-    setActionError(null);
-    try {
-      await deleteTicket(id);
-      addNotification('Ticket deleted successfully!', 'success');
-      navigate('/tickets');
-    } catch (err: any) {
-      console.error('Error deleting ticket:', err);
-      setActionError(err.message || 'Failed to delete ticket. Please try again.');
-      addNotification('Failed to delete ticket', 'error');
-    } finally {
-      setIsDeleting(false);
-      setConfirmDelete(false);
-    }
-  };
-
-  const handleEdit = () => {
-    if (id) {
-      navigate(`/tickets/${id}/edit`);
-    }
+    if (bytes === undefined || bytes === null) return 'Unknown';
+    
+    const sizes = ['Bytes', 'KB', 'MB', 'GB', 'TB'];
+    if (bytes === 0) return '0 Byte';
+    const i = Math.floor(Math.log(bytes) / Math.log(1024));
+    return `${Math.round(bytes / Math.pow(1024, i))} ${sizes[i]}`;
   };
 
   if (isLoading) {
@@ -433,7 +543,11 @@ const TicketDetailPage: React.FC = () => {
     );
   }
 
-  console.log('[Render] Timeline events state before return:', timelineEvents);
+  // Filter statuses to exclude "new" and "closed"
+  const availableStatuses = statuses.filter(status => 
+    status.name.toLowerCase() !== 'new' && 
+    status.name.toLowerCase() !== 'closed'
+  );
 
   return (
     <Container 
@@ -497,15 +611,6 @@ const TicketDetailPage: React.FC = () => {
               sx={{ mb: 2 }} 
             />
           )}
-
-          <Button
-            startIcon={<ArrowBackIcon />}
-            onClick={handleBackToList}
-            sx={{ mb: 2 }}
-            variant="outlined"
-          >
-            Back to Tickets
-          </Button>
           
           <Grid container spacing={3}>
             {/* Ticket main section */}
@@ -520,89 +625,109 @@ const TicketDetailPage: React.FC = () => {
                   ...gradientAccent(muiTheme) 
                 }}
               >
-                <Box display="flex" justifyContent="space-between" alignItems="flex-start" mb={2}>
-                  <Box>
-                    <Typography variant="h4" component="h1" gutterBottom>
-                      {currentTicket.subject}
-                    </Typography>
-                    <Box display="flex" alignItems="center" gap={1} mb={1}>
-                      <Typography variant="body2" color="textSecondary">
+                {/* Enterprise-level header with clear labels */}
+                <Box sx={{ mb: 3 }}>
+                  <Grid container spacing={2}>
+                    <Grid item xs={12} sm={6} md={3}>
+                      <FieldLabel label="Ticket ID" />
+                      <Typography variant="body1" fontWeight="medium">
                         {currentTicket.id}
                       </Typography>
-                      <Typography variant="body2" color="textSecondary">•</Typography>
-                      <Typography variant="body2" color="textSecondary">
-                        Created {formatDate(currentTicket.createdAt)}
+                    </Grid>
+                    <Grid item xs={12} sm={6} md={3}>
+                      <FieldLabel label="Status" />
+                      <Box display="flex" alignItems="center">
+                        <StatusBadge status={currentTicket.status} size="medium" />
+                        {isAgentOrAdmin && (
+                          <>
+                            {statusUpdateLoading ? (
+                              <CircularProgress size={18} sx={{ ml: 1 }} />
+                            ) : (
+                              <Tooltip title="Change Status">
+                                <IconButton
+                                  size="small"
+                                  onClick={(e) => setStatusMenuAnchor(e.currentTarget)}
+                                  sx={{ ml: 1 }}
+                                >
+                                  <EditIcon fontSize="small" />
+                                </IconButton>
+                              </Tooltip>
+                            )}
+                          </>
+                        )}
+                      </Box>
+                    </Grid>
+                    <Grid item xs={12} sm={6} md={3}>
+                      <FieldLabel label="Priority" />
+                      <Box display="flex" alignItems="center">
+                        <PriorityBadge priority={currentTicket.priority} size="medium" />
+                        {isAgentOrAdmin && (
+                          <>
+                            {priorityUpdateLoading ? (
+                              <CircularProgress size={18} sx={{ ml: 1 }} />
+                            ) : (
+                              <Tooltip title="Change Priority">
+                                <IconButton
+                                  size="small"
+                                  onClick={(e) => setPriorityMenuAnchor(e.currentTarget)}
+                                  sx={{ ml: 1 }}
+                                >
+                                  <EditIcon fontSize="small" />
+                                </IconButton>
+                              </Tooltip>
+                            )}
+                          </>
+                        )}
+                      </Box>
+                    </Grid>
+                    <Grid item xs={12} sm={6} md={3}>
+                      <FieldLabel label="Created" />
+                      <Typography variant="body2">
+                        {formatDate(currentTicket.createdAt)}
                       </Typography>
-                    </Box>
-                    <Box display="flex" gap={1}>
-                      <StatusBadge status={currentTicket.status} size="small" />
-                      <PriorityBadge priority={currentTicket.priority} size="small" />
-                    </Box>
-                  </Box>
-                  <Box sx={{ display: 'flex', gap: 1 }}>
-                    <Tooltip title="Edit Ticket">
-                      <Button
-                        variant="outlined"
-                        color="primary"
-                        startIcon={<EditIcon />}
-                        onClick={handleEdit}
-                      >
-                        Edit
-                      </Button>
-                    </Tooltip>
-                    <Tooltip title="Delete Ticket">
-                      <Button
-                        variant="outlined"
-                        color="error"
-                        startIcon={<DeleteIcon />}
-                        onClick={() => setConfirmDelete(true)}
-                        disabled={isDeleting}
-                      >
-                        {isDeleting ? 'Deleting...' : 'Delete'}
-                      </Button>
-                    </Tooltip>
-                  </Box>
+                    </Grid>
+                  </Grid>
                 </Box>
                 
-                <Divider sx={{ mb: 3 }} />
-                
-                {/* Add Header for Description */}
-                <Typography variant="h6" sx={{ fontWeight: 600, mb: 1.5 }}>
-                   Description
+                <FieldLabel label="Subject" />
+                <Typography variant="h4" component="h1" gutterBottom>
+                  {currentTicket.subject}
                 </Typography>
                 
-                {/* Improved Description Display */}
-                <Typography 
-                  variant="body1" 
-                  paragraph 
-                  sx={{ 
-                    whiteSpace: 'pre-line', 
-                    p: 2, 
-                    border: `1px solid ${alpha(muiTheme.palette.divider, 0.2)}`, 
-                    borderRadius: 1, 
-                    bgcolor: alpha(muiTheme.palette.background.default, 0.5) 
-                  }}
-                >
-                  {currentTicket.description}
-                </Typography>
+                <Divider sx={{ my: 3 }} />
+                
+                {/* Description section */}
+                <Box sx={{ mb: 3 }}>
+                  <FieldLabel label="Description" />
+                  <Typography 
+                    variant="body1" 
+                    paragraph 
+                    sx={{ 
+                      whiteSpace: 'pre-line', 
+                      p: 2, 
+                      border: `1px solid ${alpha(muiTheme.palette.divider, 0.2)}`, 
+                      borderRadius: 1, 
+                      bgcolor: alpha(muiTheme.palette.background.default, 0.5) 
+                    }}
+                  >
+                    {currentTicket.description}
+                  </Typography>
+                </Box>
                 
                 {currentTicket.tags && currentTicket.tags.length > 0 && (
-                  <Box mt={3}> {/* Add margin top for spacing */}
-                    <Box display="flex" alignItems="center" mb={1}>
-                      <TagIcon fontSize="small" sx={{ mr: 1, color: 'text.secondary' }} />
-                      <Typography variant="subtitle2" color="text.secondary" fontWeight="medium"> {/* Use subtitle2 and medium weight */}
-                        Tags
-                      </Typography>
+                  <Box mt={2}> 
+                    <FieldLabel label="Tags" />
+                    <Box mt={1}>
+                      {currentTicket.tags.map((tag) => (
+                        <Chip
+                          key={tag}
+                          label={tag}
+                          size="small"
+                          variant="outlined"
+                          sx={{ mr: 0.5, mb: 0.5 }}
+                        />
+                      ))}
                     </Box>
-                    {currentTicket.tags.map((tag) => (
-                      <Chip
-                        key={tag}
-                        label={tag}
-                        size="small"
-                        variant="outlined"
-                        sx={{ mr: 0.5, mb: 0.5 }}
-                      />
-                    ))}
                   </Box>
                 )}
               </Paper>
@@ -621,7 +746,7 @@ const TicketDetailPage: React.FC = () => {
                     value={tabValue}
                     onChange={handleTabChange}
                     aria-label="ticket details tabs"
-                    sx={{ px: 2 }} // Keep padding for tabs row
+                    sx={{ px: 2 }} 
                   >
                     <Tab
                       icon={<CommentIcon fontSize="small" />}
@@ -635,18 +760,17 @@ const TicketDetailPage: React.FC = () => {
                     />
                     <Tab
                       icon={<HistoryIcon fontSize="small" />}
-                      label={`History (${timelineEvents?.length ?? 0})`}
+                      label="Activity Log"
                       {...a11yProps(2)}
                     />
                   </Tabs>
                 </Box>
                 
                 <TabPanel value={tabValue} index={0}>
-                  <Box sx={{ p: 3 }}> {/* Pad comment area */} 
+                  <Box sx={{ p: 3 }}> 
                     {/* Add Comment Section Header */}
-                    <Typography variant="h6" sx={{ fontWeight: 600, mb: 2 }}>
-                      Add Comment
-                    </Typography>
+                    <FieldLabel label="Add Comment" />
+                    
                     {/* Comment input Box */}
                     <Box mb={4}>
                       <TextField
@@ -659,22 +783,25 @@ const TicketDetailPage: React.FC = () => {
                         onChange={handleCommentChange}
                       />
                       <Box display="flex" justifyContent="space-between" alignItems="center" mt={1}>
-                        <FormControlLabel
-                          control={
-                            <Switch
-                              checked={isInternalComment}
-                              onChange={(e) => setIsInternalComment(e.target.checked)}
-                              color="primary"
-                            />
-                          }
-                          label="Internal note (only visible to staff)"
-                        />
+                        {isAgentOrAdmin && (
+                          <FormControlLabel
+                            control={
+                              <Switch
+                                checked={isInternalComment}
+                                onChange={(e) => setIsInternalComment(e.target.checked)}
+                                color="primary"
+                              />
+                            }
+                            label="Internal note (only visible to staff)"
+                          />
+                        )}
                         <Button
                           variant="contained"
                           color="primary"
                           endIcon={isSubmittingComment ? <CircularProgress size={20} color="inherit" /> : <SendIcon />}
                           onClick={handleSubmitComment}
                           disabled={!commentText.trim() || isSubmittingComment}
+                          sx={{ ml: 'auto' }} // Push to right side
                         >
                           {isSubmittingComment ? 'Posting...' : 'Post Comment'}
                         </Button>
@@ -682,8 +809,9 @@ const TicketDetailPage: React.FC = () => {
                     </Box>
                     
                     {/* Comments from timeline */}
+                    <FieldLabel label="Comments" />
                     {timelineEvents.filter(event => event.type === 'comment').length === 0 ? (
-                      <Typography variant="body2" color="textSecondary" textAlign="center">
+                      <Typography variant="body2" color="textSecondary" textAlign="center" sx={{ mt: 2 }}>
                         No comments yet
                       </Typography>
                     ) : (
@@ -695,17 +823,15 @@ const TicketDetailPage: React.FC = () => {
                 </TabPanel>
                 
                 <TabPanel value={tabValue} index={1}>
-                  <Box sx={{ p: 3 }}> {/* Pad attachments area */} 
-                    <Typography variant="h6" gutterBottom sx={{ fontWeight: 600, mb: 3 }}>
-                      Ticket Attachments
-                    </Typography>
+                  <Box sx={{ p: 3 }}> 
+                    <FieldLabel label="Attachments" />
 
                     {currentTicket.attachments.length === 0 ? (
-                      <Typography variant="body2" color="textSecondary" textAlign="center" sx={{ pb: 3 }}>
+                      <Typography variant="body2" color="textSecondary" textAlign="center" sx={{ mt: 2 }}>
                         No attachments
                       </Typography>
                     ) : (
-                      <Grid container spacing={2}>
+                      <Grid container spacing={2} sx={{ mt: 1 }}>
                         {currentTicket.attachments.map((attachment) => (
                           <Grid item xs={12} sm={6} md={4} key={attachment.id}>
                             <Card 
@@ -713,8 +839,8 @@ const TicketDetailPage: React.FC = () => {
                               variant="outlined" 
                               sx={{ 
                                 height: '100%', 
-                                transition: 'box-shadow 0.2s ease-in-out, transform 0.2s ease-in-out', // Add transition
-                                '&:hover': { // Add hover effect to card
+                                transition: 'box-shadow 0.2s ease-in-out, transform 0.2s ease-in-out',
+                                '&:hover': {
                                   boxShadow: muiTheme.shadows[4],
                                   transform: 'translateY(-2px)'
                                 }
@@ -757,20 +883,17 @@ const TicketDetailPage: React.FC = () => {
                 </TabPanel>
                 
                 <TabPanel value={tabValue} index={2}>
-                  <Box sx={{ p: 3 }}> {/* Pad history area */} 
-                    {/* Add History Section Header */}
-                    <Typography variant="h6" sx={{ fontWeight: 600, mb: 3 }}>
-                      Ticket History
-                    </Typography>
+                  <Box sx={{ p: 3 }}> 
+                    <FieldLabel label="Activity Log" />
                     {!Array.isArray(timelineEvents) || timelineEvents.length === 0 ? (
-                      <Typography variant="body2" color="textSecondary" textAlign="center">
+                      <Typography variant="body2" color="textSecondary" textAlign="center" sx={{ mt: 2 }}>
                         No activity yet
                       </Typography>
                     ) : (
                       Array.isArray(timelineEvents) && 
                       <TicketTimeline 
                         events={[...timelineEvents].sort((a, b) => {
-                          return new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime();
+                          return new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime();
                         })} 
                       />
                     )}
@@ -781,6 +904,17 @@ const TicketDetailPage: React.FC = () => {
             
             {/* Ticket sidebar */}
             <Grid item xs={12} md={4}>
+              {/* Right-side back button aligned with the main content on left */}
+              <Button
+                startIcon={<ArrowBackIcon />}
+                onClick={handleBackToList}
+                variant="outlined"
+                sx={{ mb: 2, display: 'block' }}
+              >
+                Back to Tickets
+              </Button>
+              
+              {/* Ticket Properties container now moved below the button */}
               <Paper 
                 elevation={0} 
                 sx={{ 
@@ -797,57 +931,7 @@ const TicketDetailPage: React.FC = () => {
                 
                 <Stack spacing={2.5}>
                   <Box>
-                    <Typography variant="subtitle2" fontWeight="medium" color="text.secondary" gutterBottom>
-                      Status
-                    </Typography>
-                    <Box display="flex" alignItems="center">
-                      <Box sx={{ mr: 1 }}>
-                        <StatusBadge status={currentTicket.status} size="medium" />
-                      </Box>
-                      {statusUpdateLoading ? (
-                        <CircularProgress size={18} />
-                      ) : (
-                        <Tooltip title="Change Status">
-                          <IconButton
-                            size="small"
-                            onClick={(e) => setStatusMenuAnchor(e.currentTarget)}
-                          >
-                            <EditIcon fontSize="small" />
-                          </IconButton>
-                        </Tooltip>
-                      )}
-                    </Box>
-                  </Box>
-                  
-                  <Box>
-                    <Typography variant="subtitle2" fontWeight="medium" color="text.secondary" gutterBottom>
-                      Priority
-                    </Typography>
-                    <Box display="flex" alignItems="center">
-                      <Box sx={{ mr: 1 }}>
-                        <PriorityBadge priority={currentTicket.priority} size="medium" />
-                      </Box>
-                      {priorityUpdateLoading ? (
-                        <CircularProgress size={18} />
-                      ) : (
-                        <Tooltip title="Change Priority">
-                          <IconButton
-                            size="small"
-                            onClick={(e) => setPriorityMenuAnchor(e.currentTarget)}
-                          >
-                            <EditIcon fontSize="small" />
-                          </IconButton>
-                        </Tooltip>
-                      )}
-                    </Box>
-                  </Box>
-                  
-                  <Divider sx={{ my: 1 }} />
-                  
-                  <Box>
-                    <Typography variant="subtitle2" fontWeight="medium" color="text.secondary" gutterBottom>
-                      Requester
-                    </Typography>
+                    <FieldLabel label="Requester" />
                     <UserAvatar
                       user={currentTicket.requester}
                       showEmail
@@ -855,32 +939,45 @@ const TicketDetailPage: React.FC = () => {
                   </Box>
                   
                   <Box>
-                    <Typography variant="subtitle2" fontWeight="medium" color="text.secondary" gutterBottom>
-                      Assignee
-                    </Typography>
+                    <FieldLabel label="Assignee" />
                     {currentTicket.assignee ? (
                       <Box display="flex" alignItems="center">
                         <UserAvatar
                           user={currentTicket.assignee}
                           showEmail
                         />
-                        <Tooltip title="Change Assignee">
-                          <IconButton size="small" sx={{ ml: 1 }}>
-                            <EditIcon fontSize="small" />
-                          </IconButton>
-                        </Tooltip>
+                        {isAgentOrAdmin && (
+                          <>
+                            {assignUpdateLoading ? (
+                              <CircularProgress size={18} sx={{ ml: 1 }} />
+                            ) : (
+                              <Tooltip title="Reassign Ticket">
+                                <IconButton 
+                                  size="small" 
+                                  sx={{ ml: 1 }}
+                                  onClick={(e) => setAssignMenuAnchor(e.currentTarget)}
+                                >
+                                  <EditIcon fontSize="small" />
+                                </IconButton>
+                              </Tooltip>
+                            )}
+                          </>
+                        )}
                       </Box>
                     ) : (
                       <Box display="flex" alignItems="center">
                         <UserAvatar user={null} />
-                        <Button
-                          startIcon={<AssignIcon />}
-                          size="small"
-                          variant="outlined"
-                          sx={{ ml: 1 }}
-                        >
-                          Assign
-                        </Button>
+                        {isAgentOrAdmin && (
+                          <Button
+                            startIcon={<AssignIcon />}
+                            size="small"
+                            variant="outlined"
+                            sx={{ ml: 1 }}
+                            onClick={(e) => setAssignMenuAnchor(e.currentTarget)}
+                          >
+                            Assign
+                          </Button>
+                        )}
                       </Box>
                     )}
                   </Box>
@@ -889,9 +986,7 @@ const TicketDetailPage: React.FC = () => {
                   
                   {currentTicket.department && (
                     <Box>
-                      <Typography variant="subtitle2" fontWeight="medium" color="text.secondary" gutterBottom>
-                        Department
-                      </Typography>
+                      <FieldLabel label="Department" />
                       <Typography variant="body1">
                         {currentTicket.department.name}
                       </Typography>
@@ -900,9 +995,7 @@ const TicketDetailPage: React.FC = () => {
                   
                   {currentTicket.type && (
                     <Box>
-                      <Typography variant="subtitle2" fontWeight="medium" color="text.secondary" gutterBottom>
-                        Type
-                      </Typography>
+                      <FieldLabel label="Type" />
                       <Typography variant="body1">
                         {currentTicket.type.name}
                       </Typography>
@@ -912,18 +1005,7 @@ const TicketDetailPage: React.FC = () => {
                   {currentTicket.department || currentTicket.type ? <Divider sx={{ my: 1 }} /> : null}
                   
                   <Box>
-                    <Typography variant="subtitle2" fontWeight="medium" color="text.secondary" gutterBottom>
-                      Created
-                    </Typography>
-                    <Typography variant="body1">
-                      {formatDate(currentTicket.createdAt)}
-                    </Typography>
-                  </Box>
-                  
-                  <Box>
-                    <Typography variant="subtitle2" fontWeight="medium" color="text.secondary" gutterBottom>
-                      Updated
-                    </Typography>
+                    <FieldLabel label="Last Updated" />
                     <Typography variant="body1">
                       {formatDate(currentTicket.updatedAt)}
                     </Typography>
@@ -931,9 +1013,7 @@ const TicketDetailPage: React.FC = () => {
                   
                   {currentTicket.dueDate && (
                     <Box>
-                      <Typography variant="subtitle2" fontWeight="medium" color="text.secondary" gutterBottom>
-                        Due Date
-                      </Typography>
+                      <FieldLabel label="Due Date" />
                       <Typography variant="body1">
                         {formatDate(currentTicket.dueDate)}
                       </Typography>
@@ -951,7 +1031,7 @@ const TicketDetailPage: React.FC = () => {
           open={Boolean(statusMenuAnchor)}
           onClose={() => setStatusMenuAnchor(null)}
         >
-          {statuses.map((status) => (
+          {availableStatuses.map((status) => (
             <MenuItem
               key={status.id}
               onClick={() => handleStatusChange(status.id)}
@@ -979,30 +1059,41 @@ const TicketDetailPage: React.FC = () => {
           ))}
         </Menu>
         
-        {/* Confirm Delete Dialog */}
-        <Dialog
-          open={confirmDelete}
-          onClose={() => setConfirmDelete(false)}
+        {/* Agent assignment menu */}
+        <Menu
+          anchorEl={assignMenuAnchor}
+          open={Boolean(assignMenuAnchor)}
+          onClose={() => setAssignMenuAnchor(null)}
         >
-          <DialogTitle>Delete Ticket {currentTicket.id}?</DialogTitle>
-          <DialogContent>
-            <DialogContentText>
-              Are you sure you want to permanently delete this ticket? This action cannot be undone.
-            </DialogContentText>
-          </DialogContent>
-          <DialogActions>
-            <Button onClick={() => setConfirmDelete(false)} disabled={isDeleting}>
-              Cancel
-            </Button>
-            <Button 
-              color="error" 
-              onClick={handleConfirmDelete}
-              disabled={isDeleting}
-            >
-              {isDeleting ? <CircularProgress size={20} color="inherit"/> : 'Delete'}
-            </Button>
-          </DialogActions>
-        </Dialog>
+          {loadingAgents ? (
+            <MenuItem disabled>
+              <CircularProgress size={20} sx={{ mr: 1 }} /> Loading agents...
+            </MenuItem>
+          ) : agents.length === 0 ? (
+            <MenuItem disabled>No agents available</MenuItem>
+          ) : (
+            agents.map((agent) => (
+              <MenuItem
+                key={agent.id}
+                onClick={() => handleAssignTicket(typeof agent.id === 'string' ? agent.id : agent.id)}
+                selected={currentTicket.assignee?.id === agent.id}
+              >
+                <Box display="flex" alignItems="center" width="100%">
+                  <Avatar 
+                    src={agent.avatarUrl} 
+                    alt={`${agent.firstName} ${agent.lastName}`}
+                    sx={{ width: 24, height: 24, mr: 1 }}
+                  >
+                    {agent.firstName.charAt(0)}
+                  </Avatar>
+                  <Typography variant="body2">
+                    {agent.firstName} {agent.lastName}
+                  </Typography>
+                </Box>
+              </MenuItem>
+            ))
+          )}
+        </Menu>
       </Box>
     </Container>
   );

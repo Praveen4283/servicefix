@@ -11,14 +11,11 @@ export const testLocalStorage = () => {
     localStorage.removeItem('test-item');
     
     if (retrieved === 'working') {
-      console.log('✅ localStorage is working correctly');
       return true;
     } else {
-      console.error('❌ localStorage is not returning correct values');
       return false;
     }
   } catch (error) {
-    console.error('❌ localStorage error:', error);
     return false;
   }
 };
@@ -28,24 +25,27 @@ export const checkAuthState = () => {
   const authToken = localStorage.getItem('authToken');
   const userData = localStorage.getItem('user');
   
-  console.log('Auth token exists:', !!authToken);
   if (authToken) {
-    console.log('Auth token length:', authToken.length);
+    if (authToken.length) {
+      return {
+        hasToken: !!authToken,
+        hasUserData: !!userData
+      };
+    }
   }
   
-  console.log('User data exists:', !!userData);
   if (userData) {
     try {
       const user = JSON.parse(userData);
-      console.log('User data:', {
-        id: user.id,
-        email: user.email,
-        role: user.role,
-        firstName: user.firstName,
-        lastName: user.lastName
-      });
+      return {
+        hasToken: !!authToken,
+        hasUserData: !!userData
+      };
     } catch (error) {
-      console.error('Error parsing user data:', error);
+      return {
+        hasToken: !!authToken,
+        hasUserData: !!userData
+      };
     }
   }
   
@@ -61,10 +61,8 @@ export const clearAuthData = () => {
     localStorage.removeItem('authToken');
     localStorage.removeItem('user');
     localStorage.removeItem('refreshToken');
-    console.log('✅ Authentication data cleared');
     return true;
   } catch (error) {
-    console.error('❌ Error clearing authentication data:', error);
     return false;
   }
 };
@@ -76,5 +74,4 @@ if (typeof window !== 'undefined') {
     checkAuthState,
     clearAuthData
   };
-  console.log('Debug tools available at window.debugAuth');
 } 

@@ -1,7 +1,7 @@
 import React, { createContext, useContext, useEffect, useState, ReactNode, useCallback } from 'react';
 import apiClient from '../services/apiClient';
 import { useNavigate } from 'react-router-dom';
-import { useNotification } from './NotificationContext';
+import notificationService from '../services/notificationService';
 
 // Define user interface
 export interface User {
@@ -23,7 +23,7 @@ export interface User {
   lastLogin?: string;
   createdAt?: string;
   updatedAt?: string;
-  notificationSettings?: Record<string, boolean>;
+  notificationSettings?: Record<string, { email: boolean; push: boolean; in_app: boolean }>;
 }
 
 // Interface for profile update data that can include a file
@@ -79,9 +79,26 @@ interface AuthProviderProps {
   children: ReactNode;
 }
 
+// Define a type for notification events
+export enum NotificationEventType {
+  AUTH_SUCCESS = 'auth:success',
+  AUTH_ERROR = 'auth:error'
+}
+
+export interface NotificationEventDetail {
+  message: string;
+  type: 'success' | 'error' | 'warning' | 'info';
+  title?: string;
+  duration?: number;
+}
+
+// Helper to dispatch notification events
+const dispatchNotificationEvent = (type: NotificationEventType, detail: NotificationEventDetail) => {
+  window.dispatchEvent(new CustomEvent<NotificationEventDetail>(type, { detail }));
+};
+
 export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   const [state, setState] = useState<AuthState>(initialState);
-  const { addNotification } = useNotification();
 
   // Initialize the auth state
   useEffect(() => {
@@ -182,6 +199,35 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         error: null,
         registrationSuccess: false
       });
+
+      // Dispatch a custom event to notify components to refresh data (like notifications)
+      window.dispatchEvent(new CustomEvent('user:login-success'));
+      
+      // Choose between frontend notification or backend notification to avoid duplicates
+      // Option 1: Frontend-only approach (faster, doesn't persist in DB)
+      dispatchNotificationEvent(NotificationEventType.AUTH_SUCCESS, { 
+        message: `Welcome back, ${finalUserData.firstName}!`, 
+        type: 'success', 
+        duration: 5000,
+        title: 'Login Successful'
+      });
+      
+      // Option 2: Backend approach (persists in DB, but may be slower)
+      // Uncomment this and comment out the dispatchNotificationEvent above if you want
+      // to use the backend approach instead of the frontend approach
+      /*
+      try {
+        await notificationService.createBackendNotification(
+          'Login Successful',
+          `Welcome back, ${finalUserData.firstName}! You logged in at ${new Date().toLocaleString()}`,
+          'success',
+          '/dashboard'
+        );
+      } catch (error) {
+        console.error('Failed to create backend welcome notification:', error);
+      }
+      */
+      
       return true; // Indicate success
     } catch (error: any) {
       // Get the error message
@@ -223,6 +269,9 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         registrationSuccess: true
       });
       
+      // Dispatch success notification event
+      dispatchNotificationEvent(NotificationEventType.AUTH_SUCCESS, { message: 'Registration successful! Please log in.', type: 'success', duration: 5000 });
+      
       return true; // Indicate success
     } catch (error: any) {
       // Get the error message 
@@ -236,8 +285,8 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         registrationSuccess: false
       });
       
-      // Show error notification (keep this? or let page handle via useEffect? Let's keep for now)
-      addNotification(errorMessage, 'error');
+      // Dispatch error notification event
+      dispatchNotificationEvent(NotificationEventType.AUTH_ERROR, { message: errorMessage, type: 'error', duration: 5000 });
       
       return false; // Indicate failure
     }
@@ -273,11 +322,13 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     try {
       // Placeholder: Call backend forgot password endpoint
       await apiClient.post('/auth/forgot-password', { email }); 
-      addNotification('Password reset email sent. Please check your inbox.', 'success');
+      // Dispatch success notification event
+      dispatchNotificationEvent(NotificationEventType.AUTH_SUCCESS, { message: 'Password reset email sent. Please check your inbox.', type: 'success', duration: 5000 });
     } catch (error: any) {
       const errorMessage = error.message || 'Failed to send reset email.';
       setState({ ...state, isLoading: false, error: errorMessage });
-      addNotification(errorMessage, 'error');
+      // Dispatch error notification event
+      dispatchNotificationEvent(NotificationEventType.AUTH_ERROR, { message: errorMessage, type: 'error', duration: 5000 });
       throw new Error(errorMessage);
     } finally {
       setState({ ...state, isLoading: false });
@@ -296,7 +347,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         ...state,
         error: errorMessage,
       });
-      addNotification(errorMessage, 'error');
+      dispatchNotificationEvent(NotificationEventType.AUTH_ERROR, { message: errorMessage, type: 'error', duration: 5000 });
       throw new Error(errorMessage);
     }
     
@@ -318,9 +369,26 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         isLoading: false,
       });
       
-      // Show success notification
-      // Note: Success notification is now handled in the component using the form validation hook
-      // addNotification('Profile updated successfully', 'success');
+      // Send success notification
+      dispatchNotificationEvent(NotificationEventType.AUTH_SUCCESS, { 
+        message: 'Profile updated successfully', 
+        type: 'success', 
+        duration: 5000 
+      });
+
+      // Also save a persistent notification to the backend
+      try {
+        await notificationService.createBackendNotification(
+          'Profile Updated',
+          'Your profile information was successfully updated.',
+          'success',
+          '/profile' // Optional link to the profile page
+        );
+      } catch (error) {
+        console.error('Failed to create backend profile update notification:', error);
+        // Non-critical, don't fail the whole update if this fails
+      }
+      
     } catch (error: any) {
       // Get error message
       const errorMessage = error.message || 'Failed to update profile. Please try again.';
@@ -333,8 +401,8 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         error: errorMessage, // This might be overridden by the form hook
       });
       
-      // Show error notification
-      addNotification(errorMessage, 'error'); // Keep this for general errors
+      // Dispatch error notification event
+      dispatchNotificationEvent(NotificationEventType.AUTH_ERROR, { message: errorMessage, type: 'error', duration: 5000 });
       
       // Throw error for form handling
       throw new Error(errorMessage);
@@ -348,12 +416,19 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
      try {
        // Send 'oldPassword' instead of 'currentPassword' to match backend
        await apiClient.post('/auth/change-password', { oldPassword: currentPassword, newPassword }); 
-       // No need to update state.user here as password is not stored
-       addNotification('Password changed successfully', 'success');
+       
+       // Send success notification
+       dispatchNotificationEvent(NotificationEventType.AUTH_SUCCESS, { 
+         message: 'Password changed successfully', 
+         type: 'success', 
+         duration: 5000 
+       });
      } catch (error: any) {
        const errorMessage = error.message || 'Failed to change password.';
        setState({ ...state, isLoading: false, error: errorMessage });
-       addNotification(errorMessage, 'error');
+       
+       // Dispatch error notification event
+       dispatchNotificationEvent(NotificationEventType.AUTH_ERROR, { message: errorMessage, type: 'error', duration: 5000 });
        throw new Error(errorMessage); // Rethrow for form handling
      } finally {
        setState({ ...state, isLoading: false });
@@ -375,6 +450,22 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       registrationSuccess: false
     }));
   }, []);
+
+  // Listener for forced logout (token expiration)
+  useEffect(() => {
+    const handleForceLogout = () => {
+      console.log('Force logout triggered');
+      // Perform logout, but with a specific "session expired" message
+      logout();
+      // No need to notify here, as the NotificationContext already does this
+    };
+    
+    window.addEventListener('user:force-logout', handleForceLogout);
+    
+    return () => {
+      window.removeEventListener('user:force-logout', handleForceLogout);
+    };
+  }, [logout]); // Make sure logout is in dependency array
 
   // Provide auth context
   const contextValue: AuthContextType = {

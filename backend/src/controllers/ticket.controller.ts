@@ -57,9 +57,11 @@ export const getTickets = async (
       conditions.push(`requester_id = $${params.length}`);
     }
     
-    if (assignee) {
-      params.push(assignee);
-      conditions.push(`assignee_id = $${params.length}`);
+    // Handle assignee filter - if query param exists OR if user is agent
+    const assigneeFilterValue = assignee || (req.user.role === 'agent' ? req.user.id : undefined);
+    if (assigneeFilterValue) {
+        params.push(assigneeFilterValue);
+        conditions.push(`t.assignee_id = $${params.length}`);
     }
     
     if (type) {
@@ -676,6 +678,10 @@ export const updateTicket = async (
   res: Response,
   next: NextFunction
 ) => {
+  console.log('[updateTicket] Received PUT request');
+  console.log('[updateTicket] req.params:', JSON.stringify(req.params));
+  console.log('[updateTicket] req.body:', JSON.stringify(req.body, null, 2));
+  
   try {
     const { id } = req.params;
     const {
@@ -689,6 +695,9 @@ export const updateTicket = async (
       dueDate,
       tags,
     } = req.body;
+    
+    console.log('[updateTicket] Extracted assigneeId:', assigneeId, typeof assigneeId);
+    console.log('[updateTicket] req.user.id:', req.user?.id, typeof req.user?.id); // Log user ID
     
     // Get ticket to check access and track changes
     const ticketResult = await query(
@@ -839,12 +848,18 @@ export const updateTicket = async (
       // Update ticket if there are changes
       if (updateFields.length > 0) {
         values.push(id);
+        
+        // Log the values array right before the query
+        console.log('[updateTicket] Values array before query:', JSON.stringify(values));
+        console.log('[updateTicket] updateFields:', updateFields.join(', '));
+        
         const updateQuery = `
           UPDATE tickets
           SET ${updateFields.join(', ')}, updated_at = NOW()
           WHERE id = $${values.length}
         `;
         
+        console.log('[updateTicket] Executing update query:', updateQuery);
         await client.query(updateQuery, values);
         
         // Add changes to history
@@ -870,21 +885,30 @@ export const updateTicket = async (
               
               if (change.newValue) {
                 const newUserResult = await client.query(
-                  'SELECT first_name, last_name FROM users WHERE id = $1',
+                  'SELECT first_name, last_name, email FROM users WHERE id = $1', // Select email as well
                   [change.newValue]
                 );
                 if (newUserResult.rows.length > 0) {
                   const user = newUserResult.rows[0];
-                  newValueLabel = `${user.first_name} ${user.last_name}`;
+                  // Update the label to include name and email
+                  newValueLabel = `${user.first_name} ${user.last_name} (${user.email})`; 
                 }
               } else {
                 newValueLabel = 'Unassigned';
               }
             } else {
               // Get name for other relations
-              const tableName = change.field === 'department' 
-                ? 'departments' 
-                : `ticket_${change.field}s`;
+              let tableName = '';
+              if (change.field === 'department') {
+                tableName = 'departments';
+              } else if (change.field === 'status') {
+                tableName = 'ticket_statuses'; // Correct table name for status
+              } else if (change.field === 'priority') {
+                tableName = 'ticket_priorities'; // Correct table name for priority
+              } else {
+                // Default logic for type (ticket_types is correct)
+                tableName = `ticket_${change.field}s`; 
+              }
               
               if (change.oldValue) {
                 const oldResult = await client.query(
@@ -912,19 +936,24 @@ export const updateTicket = async (
             }
           }
           
+          // Ensure IDs are numbers for the history table
+          const numericTicketId = parseInt(id, 10);
+          const numericUserId = parseInt(req.user.id, 10);
+          
+          // Log before inserting into history
+          console.log(`[updateTicket] Inserting history: ticketId=${numericTicketId}, userId=${numericUserId}, field=${change.field}, old=${oldValueLabel}, new=${newValueLabel}`);
+
           await client.query(
             `INSERT INTO ticket_history (
-              id,
               ticket_id,
               user_id,
               field_name,
               old_value,
               new_value
-            ) VALUES ($1, $2, $3, $4, $5, $6)`,
+            ) VALUES ($1, $2, $3, $4, $5)`,
             [
-              uuidv4(),
-              id,
-              req.user.id,
+              numericTicketId, // Use numeric ticket ID
+              numericUserId,   // Use numeric user ID
               change.field,
               oldValueLabel,
               newValueLabel,

@@ -1,4 +1,7 @@
 import nodemailer from 'nodemailer';
+import { AppDataSource } from '../config/database';
+import { Notification } from '../models/Notification';
+import socketService from './socket.service';
 
 interface EmailOptions {
   to: string;
@@ -11,6 +14,8 @@ interface NotificationContent {
   title: string;
   message: string;
   link?: string;
+  type?: string;
+  metadata?: any;
 }
 
 class NotificationService {
@@ -96,19 +101,209 @@ class NotificationService {
   }
   
   /**
-   * Store an in-app notification (to be implemented with a database model)
+   * Store an in-app notification in the database and send real-time update
    * @param userId Recipient user ID
    * @param content Notification content
    * @returns Promise resolving to success status
    */
   async createInAppNotification(userId: string, content: NotificationContent): Promise<boolean> {
     try {
-      // This would typically save to a notifications table in the database
-      // For now, we'll just log it
-      console.log(`In-app notification for user ${userId}:`, content);
+      const notificationRepository = AppDataSource.getRepository(Notification);
+      
+      // Create a new notification entity
+      const notification = new Notification();
+      notification.userId = parseInt(userId, 10);
+      notification.title = content.title;
+      notification.message = content.message;
+      notification.isRead = false;
+      notification.type = content.type || 'general';
+      
+      if (content.link) {
+        notification.link = content.link;
+      }
+      
+      if (content.metadata) {
+        notification.metadata = content.metadata;
+      }
+      
+      // Save to database
+      const savedNotification = await notificationRepository.save(notification);
+      
+      // Send real-time notification if user is online
+      if (socketService.isUserOnline(notification.userId)) {
+        socketService.sendNotification(notification.userId, {
+          id: savedNotification.id,
+          title: savedNotification.title,
+          message: savedNotification.message,
+          type: savedNotification.type,
+          link: savedNotification.link,
+          createdAt: savedNotification.createdAt,
+          isRead: savedNotification.isRead
+        });
+      }
+      
+      // Log for debugging
+      console.log(`Created in-app notification for user ${userId}:`, content);
       return true;
     } catch (error) {
       console.error('Error creating in-app notification:', error);
+      return false;
+    }
+  }
+  
+  /**
+   * Get all notifications for a user
+   * @param userId User ID to fetch notifications for
+   * @param options Options for pagination and filtering
+   * @returns Promise resolving to notifications array
+   */
+  async getUserNotifications(
+    userId: string, 
+    options: { limit?: number; offset?: number; unreadOnly?: boolean } = {}
+  ): Promise<{ notifications: Notification[]; total: number }> {
+    try {
+      const notificationRepository = AppDataSource.getRepository(Notification);
+      const { limit = 20, offset = 0, unreadOnly = false } = options;
+      
+      // Build query
+      const queryBuilder = notificationRepository
+        .createQueryBuilder('notification')
+        .where('notification.userId = :userId', { userId: parseInt(userId, 10) })
+        .orderBy('notification.createdAt', 'DESC')
+        .take(limit)
+        .skip(offset);
+      
+      // Add filter for unread only if specified
+      if (unreadOnly) {
+        queryBuilder.andWhere('notification.isRead = false');
+      }
+      
+      // Execute query
+      const [notifications, total] = await queryBuilder.getManyAndCount();
+      
+      return { notifications, total };
+    } catch (error) {
+      console.error('Error fetching user notifications:', error);
+      return { notifications: [], total: 0 };
+    }
+  }
+  
+  /**
+   * Mark a notification as read
+   * @param notificationId ID of the notification to mark as read
+   * @param userId User ID for verification
+   * @returns Promise resolving to success status
+   */
+  async markNotificationAsRead(notificationId: string, userId: string): Promise<boolean> {
+    try {
+      const notificationRepository = AppDataSource.getRepository(Notification);
+      
+      // Find the notification
+      const notification = await notificationRepository.findOneBy({ 
+        id: parseInt(notificationId, 10),
+        userId: parseInt(userId, 10) 
+      });
+      
+      if (!notification) {
+        return false;
+      }
+      
+      // Update notification
+      notification.isRead = true;
+      await notificationRepository.save(notification);
+      
+      // Send real-time update if user is online
+      if (socketService.isUserOnline(notification.userId)) {
+        socketService.sendNotification(notification.userId, {
+          action: 'mark_read',
+          id: notification.id
+        });
+      }
+      
+      return true;
+    } catch (error) {
+      console.error('Error marking notification as read:', error);
+      return false;
+    }
+  }
+  
+  /**
+   * Mark all notifications for a user as read
+   * @param userId User ID to mark all notifications as read
+   * @returns Promise resolving to success status
+   */
+  async markAllNotificationsAsRead(userId: string): Promise<boolean> {
+    try {
+      const notificationRepository = AppDataSource.getRepository(Notification);
+      
+      // Update all unread notifications for the user
+      await notificationRepository
+        .createQueryBuilder()
+        .update(Notification)
+        .set({ isRead: true })
+        .where('userId = :userId AND isRead = false', { userId: parseInt(userId, 10) })
+        .execute();
+      
+      // Send real-time update if user is online
+      if (socketService.isUserOnline(parseInt(userId, 10))) {
+        socketService.sendNotification(parseInt(userId, 10), {
+          action: 'mark_all_read'
+        });
+      }
+      
+      return true;
+    } catch (error) {
+      console.error('Error marking all notifications as read:', error);
+      return false;
+    }
+  }
+
+  /**
+   * Delete a notification
+   * @param notificationId ID of the notification to delete
+   * @param userId User ID for verification
+   * @returns Promise resolving to success status
+   */
+  async deleteNotification(notificationId: string, userId: number): Promise<boolean> {
+    try {
+      const notificationRepository = AppDataSource.getRepository(Notification);
+      
+      // Delete the notification
+      const result = await notificationRepository.delete({
+        id: parseInt(notificationId, 10),
+        userId: userId
+      });
+      
+      // Check if any row was affected
+      return result.affected !== undefined && result.affected !== null && result.affected > 0;
+    } catch (error) {
+      console.error(`Error deleting notification ${notificationId} for user ${userId}:`, error);
+      return false;
+    }
+  }
+
+  /**
+   * Delete all notifications for a specific user
+   * @param userId User ID whose notifications should be deleted
+   * @returns Promise resolving to success status
+   */
+  async deleteAllUserNotifications(userId: string): Promise<boolean> {
+    try {
+      const notificationRepository = AppDataSource.getRepository(Notification);
+      const userIdNum = parseInt(userId, 10);
+
+      if (isNaN(userIdNum)) {
+        console.error('Invalid userId for deleteAllUserNotifications:', userId);
+        return false;
+      }
+      
+      // Delete all notifications for the user
+      const result = await notificationRepository.delete({ userId: userIdNum });
+      
+      console.log(`Deleted ${result.affected ?? 0} notifications for user ${userId}`);
+      return true; // Return true even if 0 were deleted
+    } catch (error) {
+      console.error(`Error deleting all notifications for user ${userId}:`, error);
       return false;
     }
   }
