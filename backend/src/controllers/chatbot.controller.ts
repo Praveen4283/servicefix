@@ -77,9 +77,8 @@ class ChatbotController {
       if (!conversationId) {
         return res.status(400).json({ message: 'Conversation ID is required.' });
       }
-      if (!senderType || !['user', 'bot'].includes(senderType)) {
-        // Only allow user or bot messages via this endpoint for now.
-        // Agent messages might have different logic/endpoints.
+      if (!senderType || !['user', 'bot', 'agent'].includes(senderType)) {
+        // Allow all valid sender types
         return res.status(400).json({ message: 'Invalid sender type specified.' });
       }
        if (!content || typeof content !== 'string' || content.trim() === '') {
@@ -90,7 +89,7 @@ class ChatbotController {
       }
       
       // Determine senderId - currently only set if it's the authenticated user
-      const senderId = (senderType === 'user') ? userId : undefined;
+      const senderId = (senderType === 'user' || senderType === 'agent') ? userId : undefined;
       // If bots or agents need specific IDs, logic needs adjustment here.
 
       const message = await chatbotService.addMessageToConversation({
@@ -113,6 +112,43 @@ class ChatbotController {
          return res.status(400).json({ message: error.message });
       }
       return res.status(500).json({ message: 'Failed to add message due to server error.' });
+    }
+  }
+
+  /**
+   * @route   GET /api/chat/conversations/:id/messages
+   * @desc    Get all messages for a conversation
+   * @access  Private (Requires authentication)
+   */
+  async getMessagesHandler(req: Request, res: Response): Promise<Response> {
+    try {
+      const conversationId = req.params.id;
+      const userId = req.user?.id;
+      const organizationId = req.user?.organizationId;
+
+      // --- Validation ---
+      if (!conversationId) {
+        return res.status(400).json({ message: 'Conversation ID is required.' });
+      }
+      if (!userId || !organizationId) {
+        return res.status(401).json({ message: 'Authentication required to access conversation messages.' });
+      }
+
+      // Get messages for the conversation
+      const messages = await chatbotService.getConversationMessages(conversationId, organizationId);
+
+      // Wrap in standard success response structure
+      return res.status(200).json({ status: 'success', data: messages });
+    } catch (error: any) {
+      console.error(`Error getting messages for conversation ${req.params.id}:`, error);
+      // Handle specific errors
+      if (error.message.includes('not found')) {
+        return res.status(404).json({ message: error.message });
+      }
+      if (error.message.includes('Invalid') || error.message.includes('required')) {
+        return res.status(400).json({ message: error.message });
+      }
+      return res.status(500).json({ message: 'Failed to retrieve conversation messages due to server error.' });
     }
   }
 }

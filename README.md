@@ -14,6 +14,7 @@ A comprehensive service desk and ticket management system built with React, Node
 - 🔄 **Workflow Automation**: Custom SLAs, escalation rules, and automation triggers for efficient ticket handling
 - 🔌 **Integrations**: APIs for connecting with other business tools like CRM, billing, and communication systems
 - 🎨 **Modern UI/UX**: Intuitive interface with light/dark mode and responsive design optimized for all device sizes
+- 🔒 **Privacy Compliance**: GDPR-compliant cookie consent management, data handling, and user privacy controls
 
 ## Technical Architecture
 
@@ -998,9 +999,20 @@ ServiceFix integrates with various third-party services to enhance functionality
 
 ## Recent Improvements
 
+### Cookie Consent and Privacy Controls
+- **Cookie Consent Management**: Added comprehensive cookie consent system with granular category control
+- **Privacy Policy Page**: Implemented detailed cookie policy page with management options
+- **GDPR Compliance**: Enhanced forms with proper consent checkboxes and privacy notices
+- **Preference Persistence**: Added cookie preferences that persist across sessions
+
 ### Bug Fixes and Optimizations
-- **Fixed Profile Page Form**: Corrected initialization logic in the Profile Page form to prevent errors when user data is not immediately available on render.
-- **Fixed Customer Dashboard Pagination**: Corrected server-side pagination for the "My Open Tickets" section on the customer dashboard, ensuring all open tickets are displayed correctly across pages.
+- **Fixed Cookie Persistence**: Resolved issues with cookie preferences not persisting after page refresh
+- **Fixed Cookie Banner Display**: Corrected conditional rendering logic for cookie consent banner
+- **WebSocket Connection Management**: Fixed memory leaks in WebSocket connections
+- **Search Pagination**: Fixed pagination in search results to respect search parameters
+- **Notification Deduplication**: Added logic to prevent duplicate notifications
+- **Fixed Profile Page Form**: Corrected initialization logic in the Profile Page form to prevent errors when user data is not immediately available on render
+- **Fixed Customer Dashboard Pagination**: Corrected server-side pagination for the "My Open Tickets" section on the customer dashboard, ensuring all open tickets are displayed correctly across pages
 - **Removed Test Notifications**: Fixed an issue where test notifications would appear when opening or refreshing login and register pages
 - **Improved Performance**: Optimized component rendering and reduced unnecessary re-renders
 - **Enhanced Error Handling**: Better error recovery and user feedback for failed operations
@@ -1013,26 +1025,18 @@ The system now includes a comprehensive Reports page with:
 - Tabbed interface for different report types
 - Export capabilities for report data
 - Real-time data updates
+- New performance metrics dashboard
 
-### Layout Improvements
-- **Enhanced MainLayout**: 
-  - Streamlined sidebar with better spacing and visual hierarchy
-  - Improved AppBar with consistent styling
-  - Direct theme toggle button in the header
-  - Better active state highlighting for navigation items
-- **Responsive Design**: Improved responsiveness across all device sizes
-- **Visual Consistency**: Maintained consistent styling patterns throughout the application
+### Authentication Enhancements
+- **Multi-Factor Authentication**: Added MFA support for higher security accounts
+- **Enhanced Register Flow**: Added privacy consent options during registration
+- **Improved Password Reset**: Enhanced security for password reset process
+- **Password Strength Meter**: Visual indication of password security during creation/change
 
-### Ticket Creation Page
-- **Step-by-step Wizard Interface**: Implemented a 3-step process for creating tickets
-- **AI-Powered Field Suggestions**: Added intelligent field suggestions based on ticket description
-- **Enhanced Form Validation**: Added more robust validation with clear error messages
-- **Improved File Attachment**: Better file type validation and handling
-
-### Dashboard Page
+### Dashboard Improvements
 - **Interactive Dashboard**: Added collapsible sections for better organization
-- **Enhanced Statistics**: Improved visual representation of key metrics
-- **Recent Tickets Table**: Added compact, informative ticket list
+- **Enhanced Statistics**: Improved visual representation of key metrics with trend indicators
+- **Real-time Activity Feed**: Added live updates to activity notifications
 - **Improved Charts**: Added better visualizations for ticket distribution
 - **Loading States**: Added skeleton loaders for better UX during data fetching
 
@@ -1041,6 +1045,7 @@ The system now includes a comprehensive Reports page with:
 - Improved search functionality
 - Enhanced article editor
 - Better navigation between related articles
+- Added related article recommendations
 
 ## Performance Optimizations
 
@@ -1221,20 +1226,22 @@ Key frontend components and their latest significant changes:
 
 | Component | Latest Version | Last Updated | File Path |
 |-----------|---------------|-------------|-----------|
-| LandingPage | 2.3.0 | Mar 14, 2024 | frontend/src/pages/LandingPage.tsx |
-| HeroSection | 3.1.2 | Mar 14, 2024 | frontend/src/components/landing/HeroSection.tsx |
-| FeaturesSection | 2.8.0 | Mar 14, 2024 | frontend/src/components/landing/FeaturesSection.tsx |
-| TestimonialsSection | 2.5.1 | Mar 14, 2024 | frontend/src/components/landing/TestimonialsSection.tsx |
-| PricingSection | 2.4.0 | Mar 14, 2024 | frontend/src/components/landing/PricingSection.tsx |
-| ContactSection | 2.2.0 | Mar 14, 2024 | frontend/src/components/landing/ContactSection.tsx |
-| FooterSection | 1.9.0 | Mar 14, 2024 | frontend/src/components/landing/FooterSection.tsx |
-| ChatbotWidget | 2.6.0 | Mar 09, 2024 | frontend/src/components/ChatbotWidget.tsx |
-| ReportsPage | 3.0.0 | Mar 17, 2024 | frontend/src/pages/ReportsPage.tsx |
-| KnowledgeBasePage | 2.7.0 | Mar 17, 2024 | frontend/src/pages/KnowledgeBasePage.tsx |
-| AnalyticsDashboardPage | 2.9.0 | Mar 16, 2024 | frontend/src/pages/AnalyticsDashboardPage.tsx |
-| TicketContext | 3.2.0 | Mar 14, 2024 | frontend/src/context/TicketContext.tsx |
-| AuthContext | 2.5.0 | Mar 12, 2024 | frontend/src/context/AuthContext.tsx |
-| ThemeContext | 1.4.0 | Mar 18, 2024 | frontend/src/context/ThemeContext.tsx |
+| LandingPage | 2.4.0 | May 22, 2024 | frontend/src/pages/LandingPage.tsx |
+| HeroSection | 3.2.0 | May 22, 2024 | frontend/src/components/landing/HeroSection.tsx |
+| FeaturesSection | 2.9.0 | May 22, 2024 | frontend/src/components/landing/FeaturesSection.tsx |
+| TestimonialsSection | 2.6.0 | May 22, 2024 | frontend/src/components/landing/TestimonialsSection.tsx |
+| PricingSection | 2.5.0 | May 22, 2024 | frontend/src/components/landing/PricingSection.tsx |
+| ContactSection | 2.3.0 | May 22, 2024 | frontend/src/components/landing/ContactSection.tsx |
+| FooterSection | 2.0.0 | May 22, 2024 | frontend/src/components/landing/FooterSection.tsx |
+| ChatbotWidget | 2.7.0 | May 22, 2024 | frontend/src/components/ChatbotWidget.tsx |
+| ReportsPage | 3.1.0 | May 22, 2024 | frontend/src/pages/ReportsPage.tsx |
+| KnowledgeBasePage | 2.8.0 | May 22, 2024 | frontend/src/pages/KnowledgeBasePage.tsx |
+| AnalyticsDashboardPage | 3.0.0 | May 22, 2024 | frontend/src/pages/AnalyticsDashboardPage.tsx |
+| CookiesPage | 1.0.0 | May 22, 2024 | frontend/src/pages/CookiesPage.tsx |
+| TicketContext | 3.3.0 | May 22, 2024 | frontend/src/context/TicketContext.tsx |
+| AuthContext | 2.6.0 | May 22, 2024 | frontend/src/context/AuthContext.tsx |
+| ThemeContext | 1.5.0 | May 22, 2024 | frontend/src/context/ThemeContext.tsx |
+| CookieConsentContext | 1.1.0 | May 22, 2024 | frontend/src/context/CookieConsentContext.tsx |
 
 ### How to Restore Previous Versions
 

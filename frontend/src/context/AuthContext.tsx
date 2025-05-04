@@ -202,20 +202,16 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
 
       // Dispatch a custom event to notify components to refresh data (like notifications)
       window.dispatchEvent(new CustomEvent('user:login-success'));
-      
-      // Choose between frontend notification or backend notification to avoid duplicates
-      // Option 1: Frontend-only approach (faster, doesn't persist in DB)
-      dispatchNotificationEvent(NotificationEventType.AUTH_SUCCESS, { 
+
+      // Restore Frontend-only notification dispatch for immediate toast feedback
+      dispatchNotificationEvent(NotificationEventType.AUTH_SUCCESS, {
         message: `Welcome back, ${finalUserData.firstName}!`, 
-        type: 'success', 
+        type: 'success',
         duration: 5000,
         title: 'Login Successful'
       });
-      
-      // Option 2: Backend approach (persists in DB, but may be slower)
-      // Uncomment this and comment out the dispatchNotificationEvent above if you want
-      // to use the backend approach instead of the frontend approach
-      /*
+
+      // Keep Backend approach for persistence
       try {
         await notificationService.createBackendNotification(
           'Login Successful',
@@ -226,7 +222,6 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       } catch (error) {
         console.error('Failed to create backend welcome notification:', error);
       }
-      */
       
       return true; // Indicate success
     } catch (error: any) {
@@ -368,19 +363,50 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         user: updatedUser,
         isLoading: false,
       });
-      
-      // Send success notification
-      dispatchNotificationEvent(NotificationEventType.AUTH_SUCCESS, { 
-        message: 'Profile updated successfully', 
-        type: 'success', 
-        duration: 5000 
+
+      // --- Generate Dynamic Notification Message START ---
+      const keyToReadableName: Record<string, string> = {
+        firstName: 'First name',
+        lastName: 'Last name',
+        phoneNumber: 'Phone number',
+        designation: 'Designation',
+        timezone: 'Timezone',
+        language: 'Language',
+        // Add other mappable fields here if necessary
+      };
+
+      const hasAvatarChange = !!userData.avatarFile;
+      // Identify changed fields EXCLUDING avatarFile
+      const changedFieldKeys = Object.keys(userData).filter(key => key !== 'avatarFile' && keyToReadableName[key]);
+      const readableNames = changedFieldKeys.map(key => keyToReadableName[key]);
+
+      let dynamicMessage = 'Profile updated successfully'; // Default
+
+      if (hasAvatarChange && readableNames.length === 0) {
+        dynamicMessage = 'Avatar updated successfully.';
+      } else if (!hasAvatarChange && readableNames.length === 1) {
+        dynamicMessage = `${readableNames[0]} updated successfully.`;
+      } else if (hasAvatarChange && readableNames.length === 1) {
+        dynamicMessage = `Avatar and ${readableNames[0]} updated successfully.`;
+      } else if (hasAvatarChange && readableNames.length > 1) {
+        dynamicMessage = 'Avatar and profile information updated successfully.';
+      } else if (!hasAvatarChange && readableNames.length > 1) {
+        dynamicMessage = 'Profile information updated successfully.';
+      }
+      // --- Generate Dynamic Notification Message END ---
+
+      // Restore frontend success notification for immediate toast feedback
+      dispatchNotificationEvent(NotificationEventType.AUTH_SUCCESS, {
+        message: dynamicMessage, // Use dynamic message
+        type: 'success',
+        duration: 5000
       });
 
       // Also save a persistent notification to the backend
       try {
         await notificationService.createBackendNotification(
           'Profile Updated',
-          'Your profile information was successfully updated.',
+          dynamicMessage, // Use dynamic message
           'success',
           '/profile' // Optional link to the profile page
         );

@@ -26,6 +26,17 @@ router.post(
   chatbotController.addMessageHandler
 );
 
+/**
+ * @route   GET /api/chat/conversations/:id/messages
+ * @desc    Get all messages for a conversation
+ * @access  Private
+ */
+router.get(
+  '/conversations/:id/messages',
+  authenticate, // Ensure user is logged in
+  chatbotController.getMessagesHandler
+);
+
 // Add other routes if needed (e.g., GET /conversations/:id/messages)
 
 export default router;

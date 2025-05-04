@@ -23,15 +23,22 @@ let notificationCountMap = new Map<string, number>();
 let recentNotifications = new Map<string, number>(); // Tracks fingerprints and their timestamps
 
 // Helper function to generate a fingerprint for similar notifications
-const getNotificationFingerprint = (notification: Notification): string => {
+const getNotificationFingerprint = (notification: Notification, ignoreCategoryForCommonAuth: boolean = false): string => {
   // For better deduplication, normalize the message by removing timestamps, IDs, etc.
   const normalizedMessage = notification.message
     .replace(/\d{1,2}:\d{1,2}(:\d{1,2})?\s*(AM|PM)?/gi, '') // Remove time
     .replace(/\d{1,2}[/-]\d{1,2}[/-]\d{2,4}/g, '')  // Remove dates
+    .replace(/ \(.+\)$/, '') // Remove counts like (2)
+    .replace(/ at \d{1,2}:\d{1,2}:\d{1,2}\s*(AM|PM)?/, '') // Remove specific time like "at 10:30:00 AM"
+    .replace(/Welcome back, .+!/, 'Welcome back!') // Normalize welcome message
     .replace(/\s+/g, ' ')  // Normalize whitespace
     .trim();
-    
-  return `${notification.type}:${normalizedMessage}:${notification.category}`;
+
+  const categoryPart = (ignoreCategoryForCommonAuth && (normalizedMessage === 'Welcome back!' || normalizedMessage === 'Profile updated successfully'))
+    ? 'common-auth' // Use a constant category for these specific messages if ignoring category
+    : notification.category;
+
+  return `${notification.type}:${normalizedMessage}:${categoryPart}`;
 };
 
 // Helper to generate unique ID
@@ -72,8 +79,8 @@ const notificationService = {
    * @returns Promise that resolves to success status
    */
   createBackendNotification: async (
-    title: string, 
-    message: string, 
+    title: string,
+    message: string,
     type: string = 'info',
     link?: string,
     metadata?: any
@@ -183,14 +190,15 @@ const notificationService = {
         title: apiNotification.title || '',
         category: 'app' // API notifications are always app notifications
       }));
-      
+
       // Merge with existing notifications in local storage (keeping most recent 100)
       const existingNotifications = getNotificationsFromLocalStorage();
       const mergedNotifications = mergeNotifications(existingNotifications, transformedNotifications);
-      
+
       // Update local storage with fetched notifications
       saveNotificationsToLocalStorage(mergedNotifications);
-      
+
+      // Return the original transformed list (no filtering here)
       return transformedNotifications;
     } catch (error) {
       console.error('Error fetching notifications:', error);
@@ -272,75 +280,89 @@ const notificationService = {
   },
   
   /**
-   * Add a new notification
+   * Add a new notification, applying deduplication logic.
    * @param notification Notification to add
-   * @returns Promise that resolves to the added notification
+   * @returns Promise that resolves to the added notification or the existing one if deduplicated
    */
   addNotification: async (notification: Notification): Promise<Notification> => {
     const now = Date.now();
     
-    // Create a fingerprint for deduplication
-    const fingerprint = getNotificationFingerprint(notification);
+    // Create a fingerprint for deduplication (ignoring category for specific messages)
+    const isCommonAuthMessage = notification.message.startsWith('Welcome back') || notification.message === 'Profile updated successfully';
+    const fingerprint = getNotificationFingerprint(notification, isCommonAuthMessage);
     
     // Check for duplicates within the deduplication window
     const lastSimilarTimestamp = recentNotifications.get(fingerprint);
     if (lastSimilarTimestamp && (now - lastSimilarTimestamp < DEDUPLICATION_WINDOW_MS)) {
-      return notification; // Skip adding duplicate notification
+      console.log('[Deduplication] Skipping notification:', notification.message);
+      // Return the *existing* similar notification from storage if possible, or the current one
+      const existing = getNotificationsFromLocalStorage().find(n => getNotificationFingerprint(n, isCommonAuthMessage) === fingerprint);
+      return existing || notification;
     }
     
     // Track this notification fingerprint to detect future duplicates
     recentNotifications.set(fingerprint, now);
     
-    // Clean up old fingerprints periodically
+    // Clean up old fingerprints periodically (simple cleanup)
     if (recentNotifications.size > 100) {
-      // Only keep recent entries
-      const oldEntries = [...recentNotifications.entries()]
-        .filter(([_, timestamp]) => now - timestamp > 60000); // Older than 1 minute
-      oldEntries.forEach(([key]) => recentNotifications.delete(key));
+        const cutoff = now - 60000; // Older than 1 minute
+        recentNotifications.forEach((timestamp, key) => {
+            if (timestamp < cutoff) {
+                recentNotifications.delete(key);
+            }
+        });
     }
     
-    // Create a fingerprint for counting similar notifications (same type/message)
-    // Check if we've seen this notification recently for counter increments
-    if (notificationCountMap.has(fingerprint)) {
-      const count = notificationCountMap.get(fingerprint)!;
+    // Throttling logic based on *exact* fingerprint (including category now)
+    const throttleFingerprint = getNotificationFingerprint(notification, false); // Use exact fingerprint for throttling
+    if (notificationCountMap.has(throttleFingerprint)) {
+      const count = notificationCountMap.get(throttleFingerprint)!;
       
       // If this is a rapid repeat, increment counter instead of showing new notification
       if (now - lastNotificationTimestamp < NOTIFICATION_THROTTLE_MS) {
-        notificationCountMap.set(fingerprint, count + 1);
+        notificationCountMap.set(throttleFingerprint, count + 1);
         
         // Get stored notifications
         const notifications = getNotificationsFromLocalStorage();
         
-        // Find the most recent similar notification
-        const existingIndex = notifications.findIndex(n => 
-          getNotificationFingerprint(n) === fingerprint
+        // Find the most recent similar notification (using exact fingerprint)
+        const existingIndex = notifications.findIndex(n =>
+          getNotificationFingerprint(n, false) === throttleFingerprint
         );
         
         if (existingIndex >= 0) {
           // Update the existing notification with a count
-          const updatedNotification = { 
+          const updatedNotification = {
             ...notifications[existingIndex],
-            message: notification.message.replace(/ \(\d+\)$/, '') + ` (${count + 1})`,
+            message: notifications[existingIndex].message.replace(/ \(\d+\)$/, '') + ` (${count + 1})`,
             timestamp: now // Update timestamp to keep it recent
           };
           
           // Replace the old notification
           notifications[existingIndex] = updatedNotification;
           saveNotificationsToLocalStorage(notifications);
-          
+          console.log('[Throttling] Updated count for:', updatedNotification.message);
           return updatedNotification;
         }
       }
     }
     
     // New or non-throttled notification
-    notificationCountMap.set(fingerprint, 1);
+    notificationCountMap.set(throttleFingerprint, 1);
     lastNotificationTimestamp = now;
     
     // Store in local storage
     const notifications = getNotificationsFromLocalStorage();
-    const updatedNotifications = [...notifications, notification];
-    saveNotificationsToLocalStorage(updatedNotifications);
+    // Ensure the new notification doesn't already exist by ID before adding
+    if (!notifications.some(n => n.id === notification.id)) {
+        const updatedNotifications = [...notifications, notification];
+        saveNotificationsToLocalStorage(updatedNotifications);
+        console.log('[Notification Added] Added:', notification.message);
+    } else {
+        console.log('[Notification Skipped] Already exists by ID:', notification.message);
+        // Optionally update the existing one if needed, but for now, just skip adding
+        return notifications.find(n => n.id === notification.id) || notification;
+    }
     
     return notification;
   },
@@ -373,7 +395,7 @@ const notificationService = {
    */
   removeNotification: async (id: string): Promise<void> => {
     try {
-      // This endpoint would need to be implemented on the backend
+      // Call backend delete endpoint
       await apiClient.delete(`/notifications/${id}`);
       
       // Update local storage

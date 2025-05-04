@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import {
   Box,
@@ -33,6 +33,9 @@ import {
   Stack,
   Link as MuiLink,
   Avatar,
+  Fade,
+  Backdrop,
+  Alert,
 } from '@mui/material';
 import {
   Send as SendIcon,
@@ -49,6 +52,8 @@ import {
   AttachFile as AttachFileIcon,
   Info as InfoIcon,
   LocalOffer as TagIcon,
+  CloudUpload as CloudUploadIcon,
+  FileUpload as FileUploadIcon,
 } from '@mui/icons-material';
 import { useTickets, User } from '../../context/TicketContext';
 import StatusBadge from '../../components/tickets/StatusBadge';
@@ -60,6 +65,7 @@ import { SystemAlert, useNotification } from '../../context/NotificationContext'
 import { format } from 'date-fns';
 import { formatInTimeZone } from 'date-fns-tz';
 import { useAuth } from '../../context/AuthContext';
+import apiClient from '../../services/apiClient';
 
 interface TabPanelProps {
   children?: React.ReactNode;
@@ -180,6 +186,19 @@ const FieldLabel: React.FC<{ label: string }> = ({ label }) => (
   </Typography>
 );
 
+// Add file size limit and accepted file types constants (matching CreateTicketPage)
+const FILE_SIZE_LIMIT = 10 * 1024 * 1024; // 10MB
+const ACCEPTED_FILE_TYPES = [
+  'image/jpeg', 
+  'image/png', 
+  'image/gif', 
+  'application/pdf', 
+  'application/msword', 
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  'text/plain',
+  'application/zip'
+];
+
 const TicketDetailPage: React.FC = () => {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
@@ -198,7 +217,9 @@ const TicketDetailPage: React.FC = () => {
     statuses,
     priorities,
     deleteTicket,
-    getAgentsList
+    getAgentsList,
+    addAttachment,  // Add this function to the context
+    getTicketHistory // Add this function to the context
   } = useTickets();
   
   const { addNotification } = useNotification();
@@ -221,6 +242,18 @@ const TicketDetailPage: React.FC = () => {
   const [commentError, setCommentError] = useState<string | null>(null);
   const [agents, setAgents] = useState<any[]>([]);
   const [loadingAgents, setLoadingAgents] = useState(false);
+  
+  // State for file uploads
+  const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
+  const [isUploading, setIsUploading] = useState(false);
+  const [uploadError, setUploadError] = useState<string | null>(null);
+  const [uploadSuccess, setUploadSuccess] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  
+  // Fetch activity history when component mounts
+  const [ticketHistory, setTicketHistory] = useState<any[]>([]);
+  const [isHistoryLoading, setIsHistoryLoading] = useState(false);
+  const [historyError, setHistoryError] = useState<string | null>(null);
   
   // Determine user timezone with fallback
   const userTimeZone = user?.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
@@ -368,12 +401,21 @@ const TicketDetailPage: React.FC = () => {
     
     try {
       if (id) {
-        await addComment(id, commentText, isInternalComment);
+        // Direct API call instead of using the context
+        await apiClient.post(`/tickets/${id}/comments`, {
+          content: commentText,
+          isInternal: isInternalComment
+        });
+        
+        // Clear the input and reset the internal flag
         setCommentText('');
         setIsInternalComment(false);
-        addNotification('Your comment has been added successfully.', 'success', { 
-          title: 'Comment Added' 
-        });
+        
+        // Show success notification
+        addNotification('Comment added successfully', 'success');
+        
+        // Refresh ticket data to get the updated comments
+        await fetchTicketById(id);
       }
     } catch (error: any) {
       console.error('Failed to add comment:', error);
@@ -514,6 +556,124 @@ const TicketDetailPage: React.FC = () => {
     if (bytes === 0) return '0 Byte';
     const i = Math.floor(Math.log(bytes) / Math.log(1024));
     return `${Math.round(bytes / Math.pow(1024, i))} ${sizes[i]}`;
+  };
+
+  // File handling functions
+  const handleFileSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
+    if (event.target.files) {
+      const newFiles = Array.from(event.target.files);
+      
+      // Filter out files that exceed the size limit or have invalid types
+      const validFiles = newFiles.filter(file => {
+        const isValidSize = file.size <= FILE_SIZE_LIMIT;
+        const isValidType = ACCEPTED_FILE_TYPES.includes(file.type);
+        
+        if (!isValidSize) {
+          setUploadError(`File ${file.name} exceeds the maximum size limit of 10MB`);
+        } else if (!isValidType) {
+          setUploadError(`File ${file.name} has an unsupported file type`);
+        }
+        
+        return isValidSize && isValidType;
+      });
+      
+      setSelectedFiles(prevFiles => [...prevFiles, ...validFiles]);
+    }
+  };
+
+  const handleRemoveFile = (index: number) => {
+    setSelectedFiles(prevFiles => prevFiles.filter((_, i) => i !== index));
+  };
+
+  const handleUploadAttachments = async () => {
+    if (!id || selectedFiles.length === 0) return;
+    
+    setIsUploading(true);
+    setUploadError(null);
+    setUploadSuccess(null);
+    
+    try {
+      // Create FormData for the file upload
+      const formData = new FormData();
+      selectedFiles.forEach((file) => {
+        formData.append('attachments', file, file.name);
+      });
+      
+      // Add the ticket ID
+      formData.append('ticketId', id);
+      
+      // Call the addAttachment function from context
+      await addAttachment(id, formData);
+      
+      // Clear selected files and show success message
+      setSelectedFiles([]);
+      setUploadSuccess('Attachments uploaded successfully!');
+      
+      // Refresh ticket data to show new attachments
+      await fetchTicketById(id);
+      
+      // Reset file input
+      if (fileInputRef.current) {
+        fileInputRef.current.value = '';
+      }
+    } catch (error: any) {
+      console.error('Error uploading attachments:', error);
+      setUploadError(error.message || 'Failed to upload attachments. Please try again.');
+    } finally {
+      setIsUploading(false);
+    }
+  };
+
+  // Fetch activity history when component mounts
+  useEffect(() => {
+    const fetchTicketHistory = async () => {
+      if (!id) return;
+      
+      setIsHistoryLoading(true);
+      setHistoryError(null);
+      
+      try {
+        const history = await getTicketHistory(id);
+        setTicketHistory(history || []);
+      } catch (error: any) {
+        console.error('Failed to fetch ticket history:', error);
+        setHistoryError(error.message || 'Failed to load ticket history.');
+      } finally {
+        setIsHistoryLoading(false);
+      }
+    };
+
+    if (tabValue === 2) { // Only fetch when activity tab is active
+      fetchTicketHistory();
+    }
+  }, [id, getTicketHistory, tabValue]);
+
+  // Handle attachment download
+  const handleDownloadAttachment = async (attachmentId: string) => {
+    try {
+      // Call the API to get the download URL
+      const response = await apiClient.get(`/tickets/attachments/download/${attachmentId}`);
+      
+      if (response.downloadUrl) {
+        // Create a temporary link and simulate a click to download
+        const link = document.createElement('a');
+        link.href = response.downloadUrl;
+        link.target = '_blank';
+        
+        // Set download attribute with filename if available
+        if (response.filename) {
+          link.download = response.filename;
+        }
+        
+        // Append to body, click, and remove
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+      }
+    } catch (error) {
+      console.error('Error downloading attachment:', error);
+      addNotification('Failed to download attachment. Please try again.', 'error');
+    }
   };
 
   if (isLoading) {
@@ -714,19 +874,45 @@ const TicketDetailPage: React.FC = () => {
                   </Typography>
                 </Box>
                 
-                {currentTicket.tags && currentTicket.tags.length > 0 && (
+                {/* Tags section with better type handling */}
+                {currentTicket.tags && Array.isArray(currentTicket.tags) && currentTicket.tags.length > 0 && (
                   <Box mt={2}> 
                     <FieldLabel label="Tags" />
                     <Box mt={1}>
-                      {currentTicket.tags.map((tag) => (
-                        <Chip
-                          key={tag}
-                          label={tag}
-                          size="small"
-                          variant="outlined"
-                          sx={{ mr: 0.5, mb: 0.5 }}
-                        />
-                      ))}
+                      {currentTicket.tags.map((tagItem, index) => {
+                        // Extract tag text based on type
+                        let tagText = '';
+                        
+                        if (typeof tagItem === 'string') {
+                          tagText = tagItem;
+                        } else if (tagItem && typeof tagItem === 'object') {
+                          // Try to extract name from common tag object formats
+                          const tagObj = tagItem as any;
+                          tagText = tagObj.name || tagObj.value || tagObj.tag || String(tagItem);
+                        }
+                        
+                        // Only render chip if we have tag text
+                        if (tagText) {
+                          return (
+                            <Chip
+                              key={`tag-${index}`}
+                              label={tagText}
+                              size="small"
+                              variant="outlined"
+                              color="primary"
+                              sx={{ 
+                                mr: 0.5, 
+                                mb: 0.5,
+                                borderRadius: '16px',
+                                '&:hover': {
+                                  boxShadow: 1
+                                }
+                              }}
+                            />
+                          );
+                        }
+                        return null; // Skip invalid tags
+                      })}
                     </Box>
                   </Box>
                 )}
@@ -824,8 +1010,94 @@ const TicketDetailPage: React.FC = () => {
                 
                 <TabPanel value={tabValue} index={1}>
                   <Box sx={{ p: 3 }}> 
-                    <FieldLabel label="Attachments" />
+                    <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
+                      <FieldLabel label="Attachments" />
+                      
+                      <Button
+                        variant="outlined"
+                        startIcon={<CloudUploadIcon />}
+                        onClick={() => fileInputRef.current?.click()}
+                        disabled={isUploading}
+                      >
+                        Add Attachments
+                      </Button>
+                      <input
+                        type="file"
+                        multiple
+                        ref={fileInputRef}
+                        onChange={handleFileSelect}
+                        accept={ACCEPTED_FILE_TYPES.join(',')}
+                        style={{ display: 'none' }}
+                      />
+                    </Box>
 
+                    {/* Upload success/error messages */}
+                    {uploadSuccess && (
+                      <Alert severity="success" sx={{ mb: 2 }} onClose={() => setUploadSuccess(null)}>
+                        {uploadSuccess}
+                      </Alert>
+                    )}
+                    
+                    {uploadError && (
+                      <Alert severity="error" sx={{ mb: 2 }} onClose={() => setUploadError(null)}>
+                        {uploadError}
+                      </Alert>
+                    )}
+                    
+                    {/* Selected files section */}
+                    {selectedFiles.length > 0 && (
+                      <Paper variant="outlined" sx={{ p: 2, mb: 3 }}>
+                        <Typography variant="subtitle2" gutterBottom>
+                          Selected Files ({selectedFiles.length})
+                        </Typography>
+                        
+                        <Grid container spacing={1}>
+                          {selectedFiles.map((file, index) => (
+                            <Grid item xs={12} key={`selected-${index}`}>
+                              <Box 
+                                sx={{ 
+                                  display: 'flex', 
+                                  alignItems: 'center',
+                                  p: 1,
+                                  borderRadius: 1,
+                                  bgcolor: alpha(theme.palette.background.default, 0.5),
+                                }}
+                              >
+                                <AttachmentIcon sx={{ mr: 1.5, color: 'text.secondary' }} />
+                                <Box sx={{ flexGrow: 1, overflow: 'hidden' }}>
+                                  <Typography variant="body2" noWrap>
+                                    {file.name}
+                                  </Typography>
+                                  <Typography variant="caption" color="text.secondary">
+                                    {formatFileSize(file.size)}
+                                  </Typography>
+                                </Box>
+                                <IconButton 
+                                  size="small" 
+                                  onClick={() => handleRemoveFile(index)}
+                                  sx={{ color: theme.palette.error.main }}
+                                >
+                                  <DeleteIcon fontSize="small" />
+                                </IconButton>
+                              </Box>
+                            </Grid>
+                          ))}
+                        </Grid>
+                        
+                        <Box sx={{ mt: 2, display: 'flex', justifyContent: 'flex-end' }}>
+                          <Button
+                            variant="contained"
+                            onClick={handleUploadAttachments}
+                            disabled={isUploading}
+                            startIcon={isUploading ? <CircularProgress size={20} /> : <FileUploadIcon />}
+                          >
+                            {isUploading ? 'Uploading...' : 'Upload Files'}
+                          </Button>
+                        </Box>
+                      </Paper>
+                    )}
+
+                    {/* Existing attachments */}
                     {currentTicket.attachments.length === 0 ? (
                       <Typography variant="body2" color="textSecondary" textAlign="center" sx={{ mt: 2 }}>
                         No attachments
@@ -847,19 +1119,16 @@ const TicketDetailPage: React.FC = () => {
                               }}
                             >
                               <CardContent sx={{ display: 'flex', alignItems: 'center', p: 1.5 }}>
-                                <MuiLink 
-                                  href={`${process.env.REACT_APP_API_BASE_URL}/${attachment.filePath}`}
-                                  target="_blank" 
-                                  rel="noopener noreferrer"
-                                  underline="hover"
+                                <Box
                                   sx={{ 
                                     display: 'flex', 
                                     alignItems: 'center', 
                                     width: '100%',
-                                    color: 'inherit',
                                     p: 0.5, 
                                     borderRadius: 1,
+                                    cursor: 'pointer',
                                   }}
+                                  onClick={() => handleDownloadAttachment(attachment.id)}
                                 >
                                   <AttachmentIcon sx={{ mr: 1.5, color: 'text.secondary', fontSize: '1.8rem' }} />
                                   <Box sx={{ flexGrow: 1, overflow: 'hidden' }}>
@@ -872,7 +1141,19 @@ const TicketDetailPage: React.FC = () => {
                                       {formatFileSize(attachment.size)} • {formatDate(attachment.createdAt)}
                                     </Typography>
                                   </Box>
-                                </MuiLink>
+                                  <Tooltip title="Download">
+                                    <IconButton 
+                                      size="small" 
+                                      color="primary"
+                                      onClick={(e) => {
+                                        e.stopPropagation(); // Prevent the parent click
+                                        handleDownloadAttachment(attachment.id);
+                                      }}
+                                    >
+                                      <DownloadIcon fontSize="small" />
+                                    </IconButton>
+                                  </Tooltip>
+                                </Box>
                               </CardContent>
                             </Card>
                           </Grid>
@@ -885,14 +1166,47 @@ const TicketDetailPage: React.FC = () => {
                 <TabPanel value={tabValue} index={2}>
                   <Box sx={{ p: 3 }}> 
                     <FieldLabel label="Activity Log" />
-                    {!Array.isArray(timelineEvents) || timelineEvents.length === 0 ? (
+                    
+                    {isHistoryLoading ? (
+                      <Box display="flex" justifyContent="center" py={4}>
+                        <CircularProgress size={30} />
+                      </Box>
+                    ) : historyError ? (
+                      <Alert severity="error" sx={{ mt: 2 }}>
+                        {historyError}
+                      </Alert>
+                    ) : !Array.isArray(ticketHistory) || ticketHistory.length === 0 ? (
                       <Typography variant="body2" color="textSecondary" textAlign="center" sx={{ mt: 2 }}>
-                        No activity yet
+                        No activity recorded yet
                       </Typography>
                     ) : (
-                      Array.isArray(timelineEvents) && 
                       <TicketTimeline 
-                        events={[...timelineEvents].sort((a, b) => {
+                        events={[...timelineEvents, 
+                          ...ticketHistory.map(history => ({
+                            id: `history-${history.id}`,
+                            type: history.field_name === 'status_id' ? 'status_change' : 
+                                 history.field_name === 'priority_id' ? 'priority_change' :
+                                 history.field_name === 'assignee_id' ? 'assignment' : 'edited',
+                            timestamp: history.created_at,
+                            user: history.user || {
+                              id: 'system',
+                              firstName: 'System',
+                              lastName: '',
+                              avatar: undefined
+                            },
+                            details: {
+                              field: history.field_name,
+                              from: history.old_value,
+                              to: history.new_value,
+                              oldPriority: history.field_name === 'priority_id' ? { name: history.old_value } : undefined,
+                              newPriority: history.field_name === 'priority_id' ? { name: history.new_value } : undefined,
+                              fromStatus: history.field_name === 'status_id' ? { name: history.old_value } : undefined,
+                              toStatus: history.field_name === 'status_id' ? { name: history.new_value } : undefined,
+                              fromColor: undefined, 
+                              toColor: undefined,
+                            }
+                          })) as TimelineEvent[]
+                        ].sort((a, b) => {
                           return new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime();
                         })} 
                       />

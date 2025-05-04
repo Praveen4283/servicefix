@@ -1,6 +1,6 @@
 import apiClient from './apiClient';
 
-// --- Interfaces (adjust based on your actual backend implementation) ---
+// --- Interfaces (based on backend implementation) ---
 
 export interface Conversation {
   id: string;        // UUID from the backend
@@ -14,6 +14,13 @@ export interface Conversation {
   endedAt?: string;   // Added based on controller response (Date becomes string via JSON)
 }
 
+// API response wrapper format
+export interface ApiResponse<T> {
+  status: string;
+  data: T;
+  message?: string;
+}
+
 export interface ChatMessage {
   id: string;        // UUID from the backend
   conversationId: string;
@@ -24,7 +31,7 @@ export interface ChatMessage {
 }
 
 export interface SaveMessageRequest {
-  senderType: 'user' | 'bot';
+  senderType: 'user' | 'bot' | 'agent';
   content: string;
   metadata?: any;
 }
@@ -34,33 +41,62 @@ export interface SaveMessageRequest {
 class ChatbotService {
   /**
    * Starts a new conversation.
-   * Assumes backend returns the newly created conversation object.
-   * Adjust the endpoint as needed.
+   * Returns the newly created conversation object.
    */
-  public async startConversation(): Promise<Conversation> {
-    // Optionally pass userId if available and needed by backend
-    return apiClient.post<Conversation>('/chat/conversations'); 
+  public async startConversation(metadata?: any): Promise<ApiResponse<Conversation>> {
+    try {
+      const response = await apiClient.post('/chat/conversations', { metadata });
+      // Return the full response with data wrapper
+      return response;
+    } catch (error) {
+      console.error('Failed to start conversation:', error);
+      throw new Error('Could not start chat session. Please try again later.');
+    }
   }
 
   /**
    * Saves a message to an existing conversation.
-   * Assumes backend returns the newly saved message object.
-   * Adjust the endpoint as needed.
+   * Returns the newly saved message object.
    */
   public async saveMessage(
     conversationId: string,
     messageData: SaveMessageRequest
-  ): Promise<ChatMessage> {
+  ): Promise<ApiResponse<ChatMessage>> {
     if (!conversationId) {
       throw new Error('Cannot save message without a conversation ID.');
     }
-    return apiClient.post<ChatMessage>(
-      `/chat/conversations/${conversationId}/messages`,
-      messageData
-    );
+    
+    try {
+      const response = await apiClient.post(
+        `/chat/conversations/${conversationId}/messages`,
+        messageData
+      );
+      // Return the full response with data wrapper
+      return response;
+    } catch (error) {
+      console.error('Failed to save message:', error);
+      throw new Error('Could not save message. Please try again later.');
+    }
   }
 
-  // Add other methods if needed (e.g., getConversationHistory)
+  /**
+   * Gets the conversation history.
+   * Returns a list of messages for the given conversation.
+   */
+  public async getConversationHistory(conversationId: string): Promise<ApiResponse<ChatMessage[]>> {
+    if (!conversationId) {
+      throw new Error('Cannot get history without a conversation ID.');
+    }
+    
+    try {
+      const response = await apiClient.get(`/chat/conversations/${conversationId}/messages`);
+      // Return the full response with data wrapper
+      return response;
+    } catch (error) {
+      console.error('Failed to get conversation history:', error);
+      throw new Error('Could not load chat history. Please try again later.');
+    }
+  }
 }
 
 export default new ChatbotService();

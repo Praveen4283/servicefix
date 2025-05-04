@@ -4,7 +4,7 @@ import {
   AppBar, 
   Toolbar, 
   IconButton, 
-  useTheme, 
+  useTheme as useMuiTheme, 
   CssBaseline, 
   Container,
   ThemeProvider, 
@@ -44,6 +44,7 @@ import FooterSection from '../components/landing/FooterSection';
 import { useNavigate, Link } from 'react-router-dom';
 import '../styles/logo-animation.css';
 import useIntersectionObserver from '../hooks/useIntersectionObserver';
+import { useTheme } from '../context/ThemeContext';
 
 // Navigation items
 const navigationItems = [
@@ -76,15 +77,10 @@ const navigationItems = [
   { label: 'Pricing', path: '/pricing' }
 ];
 
-interface NewLandingPageProps {
-  isDarkMode?: boolean;
-  onToggleTheme?: () => void;
-}
-
 // Header component replicated from the original LandingPage
 const Header: React.FC<{ isDarkMode: boolean; onToggleTheme: () => void }> = ({ isDarkMode, onToggleTheme }) => {
   const navigate = useNavigate();
-  const theme = useTheme();
+  const theme = useMuiTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down('md'));
   const [isScrolled, setIsScrolled] = React.useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = React.useState(false);
@@ -340,7 +336,7 @@ const Header: React.FC<{ isDarkMode: boolean; onToggleTheme: () => void }> = ({ 
             </Stack>
 
               <Box sx={{ display: 'flex', alignItems: 'center' }}>
-            <Tooltip title={`Switch to ${isDarkMode ? 'light' : 'dark'} mode`}>
+            <Tooltip title={`Switch to ${theme.palette.mode === 'dark' ? 'light' : 'dark'} mode`}>
               <IconButton
                 onClick={onToggleTheme}
                 color={theme.palette.mode === 'dark' ? "inherit" : "default"}
@@ -353,7 +349,7 @@ const Header: React.FC<{ isDarkMode: boolean; onToggleTheme: () => void }> = ({ 
                   }
                 }}
               >
-                    {isDarkMode ? <Brightness7Icon /> : <Brightness4Icon />}
+                    {theme.palette.mode === 'dark' ? <Brightness7Icon /> : <Brightness4Icon />}
               </IconButton>
             </Tooltip>
                 
@@ -396,56 +392,28 @@ const Header: React.FC<{ isDarkMode: boolean; onToggleTheme: () => void }> = ({ 
   );
 };
 
-const LandingPage: React.FC<NewLandingPageProps> = ({ isDarkMode: externalDarkMode, onToggleTheme: externalToggleTheme }) => {
-  const [internalDarkMode, setInternalDarkMode] = useState(false);
+const LandingPage: React.FC = () => {
   const navigate = useNavigate();
-  const theme = useTheme();
-
-  // If external control is provided, use it; otherwise, manage state internally
-  const darkMode = externalDarkMode !== undefined ? externalDarkMode : internalDarkMode;
-  
-  const toggleTheme = () => {
-    if (externalToggleTheme) {
-      externalToggleTheme();
-    } else {
-      setInternalDarkMode(!internalDarkMode);
-      localStorage.setItem('darkMode', (!internalDarkMode).toString());
-    }
-  };
-
-  // Load dark mode preference from localStorage on initial render when not externally controlled
-  useEffect(() => {
-    if (externalDarkMode === undefined) {
-      const savedDarkMode = localStorage.getItem('darkMode');
-      if (savedDarkMode !== null) {
-        setInternalDarkMode(savedDarkMode === 'true');
-      } else {
-        // Use system preference as fallback
-        const prefersDarkMode = window.matchMedia('(prefers-color-scheme: dark)').matches;
-        setInternalDarkMode(prefersDarkMode);
-      }
-    }
-  }, [externalDarkMode]);
-
-  const currentTheme = darkMode ? darkTheme : lightTheme;
+  const muiTheme = useMuiTheme();
+  const { isDarkMode, toggleTheme } = useTheme();
 
   return (
-    <ThemeProvider theme={currentTheme}>
+    <>
       <CssBaseline />
-    <Box sx={{ 
-      position: 'relative',
-      overflowX: 'hidden', // Prevent horizontal scrolling from animations
-    }}>
-        <Header isDarkMode={darkMode} onToggleTheme={toggleTheme} />
+      <Box sx={{ 
+        position: 'relative',
+        overflowX: 'hidden', // Prevent horizontal scrolling from animations
+      }}>
+        <Header isDarkMode={isDarkMode} onToggleTheme={toggleTheme} />
         
-      <HeroSection />
+        <HeroSection />
         <FeaturesSection />
         <TestimonialsSection />
         <PricingSection />
         <ContactSection />
         <FooterSection />
-    </Box>
-    </ThemeProvider>
+      </Box>
+    </>
   );
 };
 

@@ -90,6 +90,7 @@ import {
   buttonAnimation
 } from '../../styles/commonStyles';
 import { Ticket, PaginationState } from '../../context/TicketContext';
+import apiClient from '../../services/apiClient';
 
 // We'll use these colors for our charts
 const chartColors = [
@@ -504,6 +505,17 @@ const DashboardPage: React.FC = () => {
   const [dashboardPagination, setDashboardPagination] = useState<PaginationState>({ page: 1, limit: 5, totalCount: 0, totalPages: 1 });
   const [dashboardLoading, setDashboardLoading] = useState(false);
   const [dashboardError, setDashboardError] = useState<string | null>(null);
+  const [customerStats, setCustomerStats] = useState<{
+    total: number;
+    open: number;
+    pending: number;
+    resolved: number;
+  }>({
+    total: 0,
+    open: 0,
+    pending: 0,
+    resolved: 0
+  });
   
   // Memoize the activity columns
   const memoizedActivityColumns = React.useMemo(() => activityColumns, []);
@@ -601,6 +613,55 @@ const DashboardPage: React.FC = () => {
     }, 1500);
   }, [timeRange]);
   
+  // Calculate customer stats from tickets data
+  useEffect(() => {
+    if (tickets && tickets.length > 0) {
+      const total = tickets.length;
+      
+      // Open stats: count tickets with status new, open, in progress, or pending
+      const open = tickets.filter(ticket => 
+        typeof ticket.status === 'object' && 
+        ticket.status !== null && 
+        'name' in ticket.status && 
+        ['new', 'open', 'in progress', 'pending'].includes(ticket.status.name.toLowerCase())
+      ).length;
+      
+      // Pending stats: count tickets with status in progress or pending
+      const pending = tickets.filter(ticket => 
+        typeof ticket.status === 'object' && 
+        ticket.status !== null && 
+        'name' in ticket.status && 
+        ['in progress', 'pending'].includes(ticket.status.name.toLowerCase())
+      ).length;
+      
+      // Resolved stats: count tickets with status resolved or closed
+      const resolved = tickets.filter(ticket => 
+        typeof ticket.status === 'object' && 
+        ticket.status !== null && 
+        'name' in ticket.status && 
+        ['resolved', 'closed'].includes(ticket.status.name.toLowerCase())
+      ).length;
+      
+      // Debug logging
+      console.log('Total tickets:', total);
+      console.log('Open count:', open);
+      console.log('Pending count:', pending);
+      console.log('Resolved count:', resolved);
+      console.log('Ticket statuses:', tickets.map(t => 
+        typeof t.status === 'object' && t.status !== null && 'name' in t.status 
+          ? t.status.name 
+          : 'unknown'
+      ));
+      
+      setCustomerStats({
+        total,
+        open,
+        pending,
+        resolved
+      });
+    }
+  }, [tickets]);
+
   // Create the stats data for the overview cards
   const getStatCards = () => {
     return [
@@ -707,12 +768,82 @@ const DashboardPage: React.FC = () => {
     fetchDashboardData(model.page + 1, model.pageSize);
   };
 
+  // Fetch ALL tickets for stats
+  const fetchAllTicketsForStats = useCallback(async () => {
+    setIsStatsLoading(true);
+    try {
+      console.log('[Stats Fetch] Fetching all tickets for stats (no isOpen filter)');
+      
+      // Use a direct API call with apiClient instead of fetchTickets to ensure independence
+      const response = await apiClient.get('/tickets', { page: 1, limit: 100 });
+      
+      if (response && response.tickets) {
+        console.log(`[Stats Fetch] Fetched ${response.tickets.length} tickets for stats`);
+        
+        // Calculate customer stats from all tickets
+        const total = response.tickets.length;
+        
+        // Open stats: count tickets with status new, open, in progress, or pending
+        const open = response.tickets.filter(ticket => 
+          typeof ticket.status === 'object' && 
+          ticket.status !== null && 
+          'name' in ticket.status && 
+          ['new', 'open', 'in progress', 'pending'].includes(ticket.status.name.toLowerCase())
+        ).length;
+        
+        // Pending stats: count tickets with status in progress or pending
+        const pending = response.tickets.filter(ticket => 
+          typeof ticket.status === 'object' && 
+          ticket.status !== null && 
+          'name' in ticket.status && 
+          ['in progress', 'pending'].includes(ticket.status.name.toLowerCase())
+        ).length;
+        
+        // Resolved stats: count tickets with status resolved or closed
+        const resolved = response.tickets.filter(ticket => 
+          typeof ticket.status === 'object' && 
+          ticket.status !== null && 
+          'name' in ticket.status && 
+          ['resolved', 'closed'].includes(ticket.status.name.toLowerCase())
+        ).length;
+        
+        // Debug logging
+        console.log('[Stats Fetch] Calculated stats:', { total, open, pending, resolved });
+        console.log('[Stats Fetch] Status values:', response.tickets.map(t => 
+          typeof t.status === 'object' && t.status !== null && 'name' in t.status 
+            ? t.status.name.toLowerCase() 
+            : 'unknown'
+        ));
+        
+        setCustomerStats({
+          total,
+          open,
+          pending,
+          resolved
+        });
+      }
+    } catch (err) {
+      console.error('[Stats Fetch] Error fetching tickets for stats:', err);
+    } finally {
+      setIsStatsLoading(false);
+    }
+  }, []);
+
   // Initial fetch for dashboard
   useEffect(() => {
     if (user?.role === 'customer') { 
-        fetchDashboardData(1, 5);
+      // Fetch open tickets for the dashboard table
+      fetchDashboardData(1, 5);
+      
+      // Add a slight delay before fetching stats to ensure we get fresh data
+      const timer = setTimeout(() => {
+        // Fetch all tickets for stats card
+        fetchAllTicketsForStats();
+      }, 500);
+      
+      return () => clearTimeout(timer);
     }
-  }, [user]);
+  }, [user, fetchDashboardData, fetchAllTicketsForStats]);
 
   // Render dashboard based on user role
   const renderRoleDashboard = () => {
@@ -798,13 +929,13 @@ const DashboardPage: React.FC = () => {
         </EnhancedCard>
       </Grid>
 
-      {/* Stats Cards - Keep existing stats widget */}
+      {/* Stats Cards - Updated to use actual ticket data */}
       <Grid item xs={12}>
         <StatsWidget
           stats={[
             {
-              title: user?.role?.toLowerCase() === 'customer' ? 'Created Tickets' : 'Assigned Tickets',
-              value: stats.total - stats.unassigned, // Note: Consider if this value should also change for customers (e.g., show total created tickets)
+              title: 'Created Tickets',
+              value: customerStats.total,
               icon: <AssignmentIcon />,
               color: theme.palette.primary.main,
               change: { value: 8, isPositive: true },
@@ -812,7 +943,7 @@ const DashboardPage: React.FC = () => {
             },
             {
               title: 'Open',
-              value: stats.open,
+              value: customerStats.open,
               icon: <AccessTimeIcon />,
               color: theme.palette.info.main,
               change: { value: 5, isPositive: false },
@@ -820,22 +951,24 @@ const DashboardPage: React.FC = () => {
             },
             {
               title: 'Resolved',
-              value: stats.resolved,
+              value: customerStats.resolved,
               icon: <CheckIcon />,
               color: theme.palette.success.main,
               change: { value: 15, isPositive: true },
               progress: 82,
             },
             {
-              title: user?.role?.toLowerCase() === 'customer' ? 'Pending Tickets' : 'High Priority',
-              value: user?.role?.toLowerCase() === 'customer' ? stats.pending : stats.highPriorityCount,
+              title: 'Pending Tickets',
+              value: customerStats.pending,
               icon: <PriorityHighIcon />,
-              color: user?.role?.toLowerCase() === 'customer' ? theme.palette.warning.main : theme.palette.error.main,
-              change: { value: user?.role?.toLowerCase() === 'customer' ? 3 : 12, isPositive: false }, // Example change value, adjust if needed
-              progress: user?.role?.toLowerCase() === 'customer' ? (stats.pending / (stats.open + stats.pending)) * 100 : 22, // Example progress, adjust if needed
+              color: theme.palette.warning.main,
+              change: { value: 3, isPositive: false },
+              progress: customerStats.open + customerStats.pending > 0 
+                ? (customerStats.pending / (customerStats.open + customerStats.pending)) * 100 
+                : 0,
             },
           ]}
-          loading={isStatsLoading}
+          loading={isStatsLoading || ticketsLoading}
           columns={4}
         />
       </Grid>

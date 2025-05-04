@@ -538,7 +538,7 @@ const TicketListPage: React.FC = () => {
     setDashboardLoading(true);
     setDashboardError(null);
     try {
-      const result = await fetchTickets(page, limit, { isOpen: true });
+      const result = await fetchTickets(page, limit, {});
       if (result) {
         setDashboardTickets(result.tickets);
         setDashboardPagination(result.pagination);
@@ -854,6 +854,105 @@ const TicketListPage: React.FC = () => {
     },
   ], [navigate, theme, userTimeZone]);
 
+  // Define simplified dashboard ticket columns for the "My Open Tickets" card
+  const dashboardTicketColumns: GridColDef[] = React.useMemo(() => [
+    {
+      field: 'id',
+      headerName: 'ID',
+      width: 110,
+      renderCell: (params) => (
+        <Typography variant="body2" fontWeight={500} sx={{ 
+          color: theme.palette.primary.main,
+          '&:hover': { textDecoration: 'underline' }
+        }}>
+          {params.row.id}
+        </Typography>
+      ),
+    },
+    {
+      field: 'subject',
+      headerName: 'Subject',
+      flex: 1,
+      minWidth: 250,
+      renderCell: (params) => (
+        <Box sx={{ py: 1 }}>
+          <Typography variant="body2" fontWeight={500} sx={{ mb: 0.5 }}>
+            {params.row.subject}
+          </Typography>
+          <Typography variant="caption" color="text.secondary" noWrap>
+            {params.row.description?.substring(0, 60)}
+            {params.row.description?.length > 60 ? '...' : ''}
+          </Typography>
+        </Box>
+      ),
+    },
+    {
+      field: 'status',
+      headerName: 'Status',
+      width: 120,
+      renderCell: (params) => {
+        // Safely handle status by verifying it has the required properties
+        if (params.row.status && typeof params.row.status === 'object' && 
+            'id' in params.row.status && 'name' in params.row.status && 'color' in params.row.status) {
+          return <StatusBadge status={params.row.status} size="small" />;
+        }
+        return <Typography variant="body2">Unknown</Typography>;
+      },
+      valueGetter: (params) => {
+        return params.row.status?.name || 'Unknown';
+      },
+    },
+    {
+      field: 'priority',
+      headerName: 'Priority',
+      width: 120,
+      renderCell: (params) => {
+        // Safely handle priority by verifying it has the required properties
+        if (params.row.priority && typeof params.row.priority === 'object' && 
+            'id' in params.row.priority && 'name' in params.row.priority && 'color' in params.row.priority) {
+          return <PriorityBadge priority={params.row.priority} size="small" />;
+        }
+        return <Typography variant="body2">Unknown</Typography>;
+      },
+      valueGetter: (params) => {
+        return params.row.priority?.name || 'Unknown';
+      },
+    },
+    {
+      field: 'createdAt',
+      headerName: 'Created',
+      width: 170,
+      renderCell: (params) => (
+        <Typography variant="body2" color="text.secondary">
+          {typeof params.row.createdAt === 'string' ? getRelativeTime(params.row.createdAt, userTimeZone) : 'Unknown'}
+        </Typography>
+      ),
+      valueGetter: (params) => params.row.createdAt || '',
+    },
+    {
+      field: 'actions',
+      headerName: 'Actions',
+      width: 100,
+      renderCell: (params) => (
+        <Tooltip title="View Details">
+          <IconButton
+            size="small"
+            onClick={(e) => {
+              e.stopPropagation();
+              navigate(`/tickets/${params.row.id}`);
+            }}
+            sx={{ 
+              color: theme.palette.primary.main,
+              '&:hover': { backgroundColor: alpha(theme.palette.primary.main, 0.1) }
+            }}
+          >
+            <VisibilityIcon fontSize="small" />
+          </IconButton>
+        </Tooltip>
+      ),
+    },
+  ], [navigate, theme, userTimeZone]);
+
   // Helper function to create color from string (for avatars)
   const stringToColor = (string: string) => {
     let hash = 0;
@@ -1012,10 +1111,10 @@ const TicketListPage: React.FC = () => {
             <Grid container alignItems="center" justifyContent="space-between" spacing={3}>
               <Grid item xs={12} md={7}>
                 <Typography variant="h5" component="h1" gutterBottom>
-                Ticket Management
+                My Tickets
                 </Typography>
                 <Typography variant="subtitle1">
-                View and manage all support tickets in one place. Monitor status, assign tickets, and track issue resolution.
+                View and manage all tickets in one place. Monitor status, edit tickets, and track issue resolution.
                 </Typography>
               </Grid>
               <Grid item xs={12} md={5} sx={{ display: 'flex', justifyContent: { xs: 'flex-start', md: 'flex-end' }, alignItems: 'center', gap: 2 }}>
@@ -1042,46 +1141,44 @@ const TicketListPage: React.FC = () => {
         </Grid>
 
         <Grid item xs={12}>
-          <EnhancedCard
-            index={2}
+          <Paper
             elevation={0}
             sx={{
-              ...cardStyles,
-              minHeight: '100%',
+              p: 2,
+              borderRadius: 2,
+              ...gradientAccent(theme),
+              overflow: 'hidden',
               border: '1px solid',
               borderColor: theme.palette.divider,
-              display: 'flex',
-              flexDirection: 'column',
-              overflow: 'hidden',
-              ...gradientAccent(theme)
+              minHeight: '100%'
             }}
           >
-            <CardHeader 
+            <CardHeader
               title={
-                <Typography variant="h6" sx={{ 
-                  fontWeight: 700, 
+                <Typography variant="h6" sx={{
+                  fontWeight: 700,
                   fontSize: '1.2rem',
                   color: theme.palette.text.primary,
                   letterSpacing: '0.5px',
                   mb: 0.5
                 }}>
-                  My Assigned Tickets
+                  My Tickets
                 </Typography>
               }
               subheader={
-                <Typography variant="body2" sx={{ 
+                <Typography variant="body2" sx={{
                   color: theme.palette.text.secondary,
                   fontWeight: 500,
                   fontSize: '0.9rem',
                   lineHeight: 1.3
                 }}>
-                  Track your active support requests
+                  View all your support tickets
                 </Typography>
               }
               action={
                 <Box sx={{ display: 'flex', gap: 1 }}>
-                  <IconButton 
-                    onClick={handleRefreshData} 
+                  <IconButton
+                    onClick={handleRefreshData}
                     disabled={isStatsLoading}
                     size="small"
                     sx={{
@@ -1094,7 +1191,7 @@ const TicketListPage: React.FC = () => {
                   >
                     <RefreshIcon fontSize="small" />
                   </IconButton>
-                  <IconButton 
+                  <IconButton
                     onClick={() => navigate('/tickets')}
                     size="small"
                     sx={{
@@ -1108,16 +1205,16 @@ const TicketListPage: React.FC = () => {
                   </IconButton>
                 </Box>
               }
-              sx={{ 
-                px: 3, 
-                pt: 2,
-                pb: 1,
-                background: theme.palette.mode === 'dark' 
-                  ? alpha(theme.palette.background.paper, 0.4)
-                  : alpha(theme.palette.background.paper, 0.7),
+              sx={{
+                px: 3, pt: 2, pb: 1,
+                borderBottom: `1px solid ${theme.palette.divider}`,
+                borderTopLeftRadius: theme.shape.borderRadius * 2,
+                borderTopRightRadius: theme.shape.borderRadius * 2,
+                background: theme.palette.mode === 'dark'
+                  ? alpha(theme.palette.background.default, 0.6)
+                  : alpha(theme.palette.background.default, 0.8),
               }}
             />
-            <Divider />
             <CardContent sx={{ p: 0 }}>
               {dashboardLoading ? (
                 <Box sx={{ p: 1.5 }}>
@@ -1126,7 +1223,7 @@ const TicketListPage: React.FC = () => {
                       key={i}
                       variant="rectangular"
                       height={35}
-                      sx={{ 
+                      sx={{
                         mb: 0.75,
                         borderRadius: 1,
                         animation: 'pulse 1.5s ease-in-out infinite',
@@ -1142,40 +1239,41 @@ const TicketListPage: React.FC = () => {
               ) : dashboardError ? (
                   <Alert severity="error" sx={{ m: 2 }}>{dashboardError}</Alert>
               ) : (
-                <Box sx={{ width: '100%' }}> 
+                <Box sx={{ width: '100%' }}>
                   <DataGrid
-                    rows={dashboardTickets} 
-                    columns={ticketColumns}
-                    rowCount={dashboardPagination.totalCount} 
-                    loading={dashboardLoading} 
+                    rows={dashboardTickets}
+                    columns={dashboardTicketColumns}
+                    rowCount={dashboardPagination.totalCount}
+                    loading={dashboardLoading}
                     pageSizeOptions={[5, 10]}
-                    paginationModel={{ 
-                      page: dashboardPagination.page - 1,  
-                      pageSize: dashboardPagination.limit 
+                    paginationModel={{
+                      page: dashboardPagination.page - 1,
+                      pageSize: dashboardPagination.limit
                     }}
-                    paginationMode="server" 
+                    paginationMode="server"
                     onPaginationModelChange={handleDashboardPaginationChange}
                     disableRowSelectionOnClick
                     onRowClick={(params) => navigate(`/tickets/${params.row.id}`)}
                     autoHeight={true}
-                    rowHeight={42}
+                    rowHeight={45}
                     sx={{
                       border: 'none',
+                      '& .MuiDataGrid-columnHeaders': {
+                        backgroundColor: theme.palette.mode === 'dark'
+                          ? alpha(theme.palette.primary.dark, 0.1)
+                          : alpha(theme.palette.primary.light, 0.1),
+                        borderBottom: `1px solid ${theme.palette.divider}`,
+                        height: '40px !important',
+                        minHeight: '40px !important',
+                      },
                       '& .MuiDataGrid-cell': {
                         borderBottom: `1px solid ${theme.palette.divider}`,
                         cursor: 'pointer',
                         transition: 'all 0.2s ease',
-                        py: 0.5,
-                        '&:hover': {
+                        py: 1,
+                         '&:hover': {
                           backgroundColor: alpha(theme.palette.primary.main, 0.04),
-                          transform: 'translateX(4px)',
                         },
-                      },
-                      '& .MuiDataGrid-columnHeaders': {
-                        backgroundColor: alpha(theme.palette.background.paper, 0.8),
-                        borderBottom: `1px solid ${theme.palette.divider}`,
-                        height: '40px !important',
-                        minHeight: '40px !important',
                       },
                     }}
                   />
@@ -1184,16 +1282,23 @@ const TicketListPage: React.FC = () => {
             </CardContent>
             {dashboardPagination.totalCount > dashboardPagination.limit && (
                <Box sx={{ p: 0.5, textAlign: 'center' }}>
-                 <Button onClick={() => navigate('/tickets')} endIcon={<ArrowForwardIcon />} size="small" sx={{ 
-                   borderRadius: 8,
-                   transition: 'all 0.2s ease',
-                   '&:hover': {
-                     transform: 'translateX(4px)',
-                   }
-                 }}>View All Tickets</Button>
+                 <Button
+                   onClick={() => navigate('/tickets')}
+                   endIcon={<ArrowForwardIcon />}
+                   size="small"
+                   sx={{
+                     borderRadius: 8,
+                     transition: 'all 0.2s ease',
+                     '&:hover': {
+                       transform: 'translateX(4px)',
+                     }
+                   }}
+                 >
+                   View All Tickets
+                 </Button>
                </Box>
              )}
-          </EnhancedCard>
+          </Paper>
         </Grid>
       </EnhancedGrid>
     );

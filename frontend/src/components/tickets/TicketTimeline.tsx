@@ -36,8 +36,8 @@ export interface TimelineEvent {
     isInternal?: boolean;
     
     // For status changes
-    from?: string;
-    to?: string;
+    from?: string | { name: string };
+    to?: string | { name: string };
     fromColor?: string;
     toColor?: string;
     
@@ -57,8 +57,8 @@ export interface TimelineEvent {
     newDate?: string;
     
     // For priority changes
-    oldPriority?: string;
-    newPriority?: string;
+    oldPriority?: string | { name: string };
+    newPriority?: string | { name: string };
     oldColor?: string;
     newColor?: string;
     
@@ -175,7 +175,16 @@ const TicketTimeline: React.FC<TicketTimelineProps> = ({ events }) => {
       case 'comment':
         return `${userName} ${event.details.isInternal ? 'added an internal note' : 'commented'}`;
       case 'status_change':
-        return `${userName} changed status from "${event.details.from}" to "${event.details.to}"`;
+        // Explicit type guards for status changes
+        const fromStatus = 
+          event.details.from && typeof event.details.from === 'object' && 'name' in event.details.from 
+            ? event.details.from.name 
+            : event.details.from;
+        const toStatus = 
+          event.details.to && typeof event.details.to === 'object' && 'name' in event.details.to
+            ? event.details.to.name
+            : event.details.to;
+        return `${userName} changed status from "${fromStatus || 'N/A'}" to "${toStatus || 'N/A'}"`;
       case 'assignment':
         if (event.details.assignee) {
           const assigneeName = `${event.details.assignee.firstName} ${event.details.assignee.lastName}`;
@@ -194,7 +203,16 @@ const TicketTimeline: React.FC<TicketTimelineProps> = ({ events }) => {
         }
         return `${userName} removed the due date`;
       case 'priority_change':
-        return `${userName} changed priority from "${event.details.oldPriority}" to "${event.details.newPriority}"`;
+        // Explicit type guards for priority changes
+        const oldPriorityName = 
+          event.details.oldPriority && typeof event.details.oldPriority === 'object' && 'name' in event.details.oldPriority
+            ? event.details.oldPriority.name 
+            : event.details.oldPriority;
+        const newPriorityName = 
+          event.details.newPriority && typeof event.details.newPriority === 'object' && 'name' in event.details.newPriority
+            ? event.details.newPriority.name 
+            : event.details.newPriority;
+        return `${userName} changed priority from "${oldPriorityName || 'N/A'}" to "${newPriorityName || 'N/A'}"`;
       case 'category_change':
         return `${userName} changed ${event.details.field} from "${event.details.oldValue}" to "${event.details.newValue}"`;
       default:

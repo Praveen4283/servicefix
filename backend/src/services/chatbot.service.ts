@@ -103,7 +103,42 @@ class ChatbotService {
     return messageRepository.save(newMessage);
   }
 
-  // Add other methods as needed (e.g., findConversation, getMessages)
+  /**
+   * Gets all messages for a conversation.
+   * Validates that the conversation belongs to the specified organization.
+   * Returns messages sorted by createdAt timestamp.
+   */
+  async getConversationMessages(
+    conversationId: string,
+    organizationId: string
+  ): Promise<ChatMessage[]> {
+    const conversationRepository = this.getConversationRepository();
+    const messageRepository = this.getMessageRepository();
+
+    // Convert conversationId to number for finding the entity
+    const convIdNumber = parseInt(conversationId, 10);
+    if (isNaN(convIdNumber)) {
+      throw new Error('Invalid conversation ID format');
+    }
+
+    // Ensure the conversation exists and belongs to the specified organization
+    const conversation = await conversationRepository.findOneBy({ 
+      id: convIdNumber,
+      organizationId: parseInt(organizationId, 10)
+    });
+    
+    if (!conversation) {
+      throw new Error('Conversation not found or access denied');
+    }
+
+    // Fetch messages for the conversation
+    const messages = await messageRepository.find({
+      where: { conversationId: convIdNumber },
+      order: { createdAt: 'ASC' } // Sort by creation timestamp ascending
+    });
+
+    return messages;
+  }
 }
 
 // Export a singleton instance

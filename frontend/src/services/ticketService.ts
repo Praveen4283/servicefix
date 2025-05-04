@@ -3,16 +3,25 @@ import apiClient from './apiClient';
 // Ticket type definition
 export interface Ticket {
   id: string;
-  title: string;
+  subject: string;
   description: string;
-  status: TicketStatus;
-  priority: TicketPriority;
+  status: { id: number; name: string; color: string; isResolved?: boolean } | TicketStatus;
+  priority: TicketPriority | { id: number; name: string; color: string };
+  requester?: { id: string; email: string; firstName: string; lastName: string };
+  assignee?: { id: string; email: string; firstName: string; lastName: string };
+  department?: { id: string; name: string };
+  type?: { id: string; name: string };
   createdAt: string;
   updatedAt: string;
-  assignedTo?: string;
-  customerEmail?: string;
-  category?: string;
-  tags?: string[];
+  resolvedAt?: string;
+  closedAt?: string;
+  dueDate?: string;
+  sentimentScore?: number;
+  aiSummary?: string;
+  source?: string;
+  isSpam?: boolean;
+  tags?: Array<{ id: number; name: string; color: string }>;
+  commentCount?: number;
   attachments?: string[];
 }
 
@@ -47,9 +56,12 @@ export enum TicketPriority {
 
 // Create ticket request
 export interface CreateTicketRequest {
-  title: string;
+  subject: string;
   description: string;
-  priority?: TicketPriority;
+  requesterId: string;
+  priorityId?: number;
+  departmentId?: string;
+  typeId?: string;
   customerEmail?: string;
   category?: string;
   tags?: string[];
@@ -76,58 +88,98 @@ class TicketService {
 
   /**
    * Get a single ticket by ID
+   * Returns an object containing the ticket details nested under a 'ticket' key.
    */
-  public async getTicketById(id: string): Promise<Ticket> {
-    return apiClient.get(`/tickets/${id}`);
+  public async getTicketById(id: string): Promise<{ ticket: Ticket }> {
+    // The API response structure is { status: 'success', data: { ticket: { ... } } }
+    // The apiClient.get method extracts the 'data' part.
+    return apiClient.get<{ ticket: Ticket }>(`/tickets/${id}`);
   }
   
   /**
    * Create a new ticket
    */
   public async createTicket(ticket: CreateTicketRequest): Promise<Ticket> {
+    // Prepare data to send, ensuring priorityId is included if present
+    const dataToSend: any = { ...ticket }; 
+    // Backend expects priorityId, remove the enum field if it exists
+    if ('priority' in dataToSend) {
+        delete dataToSend.priority;
+    }
+    if (dataToSend.priorityId === undefined) {
+      // Backend requires priorityId, add a default if missing?
+      // Let's assume default medium priority ID is 1002 based on previous fixes
+      console.warn('PriorityId missing, defaulting to Medium (1002).');
+      dataToSend.priorityId = 1002; 
+    }
+    
+    // Stringify tags array if it exists for JSON field
+    if (dataToSend.tags && Array.isArray(dataToSend.tags)) {
+      // Backend might expect a JSON string or handle the array directly.
+      // If sending as JSON, the backend needs to parse it.
+      // Assuming backend handles plain array for now based on controller logic.
+      // If sending FormData, tags might need different handling.
+    }
+
     // Handle case with attachments
-    if (ticket.attachments && ticket.attachments.length > 0) {
+    if (dataToSend.attachments && dataToSend.attachments.length > 0) {
       const formData = new FormData();
       
-      // Add ticket data as JSON
-      const ticketData = { ...ticket };
-      delete ticketData.attachments;
-      formData.append('ticket', JSON.stringify(ticketData));
+      // Add ticket data fields individually to FormData
+      Object.keys(dataToSend).forEach(key => {
+        if (key !== 'attachments') {
+          const value = dataToSend[key];
+          if (key === 'tags' && Array.isArray(value)) {
+             // Send tags as a JSON string within FormData
+            formData.append(key, JSON.stringify(value));
+          } else if (value !== undefined && value !== null) {
+            formData.append(key, String(value));
+          }
+        }
+      });
       
       // Add attachments
-      ticket.attachments.forEach((file, index) => {
-        formData.append(`attachments`, file);
+      dataToSend.attachments.forEach((file: File, index: number) => {
+        formData.append(`attachments`, file, file.name); // Ensure correct field name `attachments`
       });
       
       return apiClient.post('/tickets', formData, {
         headers: {
-          'Content-Type': 'multipart/form-data',
+          // Content-Type is set automatically for FormData
         },
       });
     }
     
-    // No attachments case
-    return apiClient.post('/tickets', ticket);
+    // No attachments case (send as JSON)
+    // Make sure to send the processed dataToSend
+    return apiClient.post('/tickets', dataToSend);
   }
   
   /**
    * Create a ticket from chat conversation
+   * NOTE: This method requires the requesterId and ideally priorityId.
+   * The caller needs to provide these, possibly fetching user ID from context.
    */
   public async createTicketFromChat(
-    title: string, 
+    subject: string,
     chatMessages: Array<{sender: string, text: string, timestamp: Date}>,
+    requesterId: string,
+    priorityId?: number,
     customerEmail?: string
   ): Promise<Ticket> {
     const description = chatMessages
       .map(msg => `${msg.sender === 'user' ? 'Customer' : 'AI Assistant'} (${new Date(msg.timestamp).toLocaleString()}): ${msg.text}`)
       .join('\n\n');
       
-    return this.createTicket({
-      title,
+    const ticketRequest: CreateTicketRequest = {
+      subject,
       description,
-      customerEmail,
-      priority: TicketPriority.MEDIUM
-    });
+      requesterId,
+      priorityId: priorityId || 1002,
+      customerEmail
+    };
+    
+    return this.createTicket(ticketRequest);
   }
   
   /**

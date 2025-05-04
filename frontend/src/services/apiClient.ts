@@ -192,19 +192,33 @@ class ApiClient {
     params?: Record<string, any>,
     config?: AxiosRequestConfig
   ): Promise<T> {
+    console.log(`[API Client] GET Request: ${url}`, { params, config }); // Log request details
     return this.client
       .get<ApiResponse<T>>(url, { ...config, params })
       .then((response) => {
-        // Check if the response has the expected format
-        if (response.data && 'status' in response.data) {
+        console.log(`[API Client] GET Response Raw Data for ${url}:`, JSON.stringify(response.data)); // Log raw response data
+        
+        // Check if the response has the expected wrapper format
+        if (response.data && typeof response.data === 'object' && 'status' in response.data) {
           if (response.data.status === 'success') {
+            console.log(`[API Client] GET Success Data for ${url}:`, JSON.stringify(response.data.data)); // Log extracted data
             return response.data.data as T;
           } else {
-            throw new Error(response.data.message || 'Request failed');
+            // Throw an error based on the API response message if available
+            const errorMessage = response.data.message || 'Request failed with status: ' + response.data.status;
+            console.error(`[API Client] GET Error Status in Response for ${url}:`, errorMessage);
+            throw new Error(errorMessage);
           }
         }
-        // Fallback for unexpected response format
+        // Fallback for unexpected response format (e.g., direct data without wrapper)
+        console.warn(`[API Client] GET Unexpected Response Format for ${url}. Returning raw data.`);
         return response.data as T;
+      })
+      .catch(error => {
+        // Log the processed error from the interceptor or a new error
+        console.error(`[API Client] GET Request Failed for ${url}:`, error);
+        // Re-throw the error so downstream handlers catch it
+        throw error; 
       });
   }
 

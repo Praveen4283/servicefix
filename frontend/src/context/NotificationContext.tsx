@@ -85,6 +85,7 @@ interface NotificationContextValue {
   loading: boolean;
   fetchNotifications: (options?: { limit?: number; offset?: number; unreadOnly?: boolean }) => Promise<void>;
   networkStatus: NetworkStatusType;
+  temporaryToasts: Notification[];
 }
 
 // Create the context
@@ -97,21 +98,13 @@ interface NotificationProviderProps {
 
 export const NotificationProvider: React.FC<NotificationProviderProps> = ({ children }) => {
   const [notifications, setNotifications] = useState<Notification[]>([]);
+  const [temporaryToasts, setTemporaryToasts] = useState<Notification[]>([]);
   const [notificationMenuAnchorEl, setNotificationMenuAnchorEl] = useState<null | HTMLElement>(null);
   const [loading, setLoading] = useState<boolean>(false);
   const [networkStatus, setNetworkStatus] = useState<NetworkStatusType>('online');
   const isNotificationMenuOpen = Boolean(notificationMenuAnchorEl);
   
-  // Handle the case when AuthProvider is not available
-  let isAuthenticated = false;
-  let user: User | null = null;
-  try {
-    const auth = useAuth();
-    isAuthenticated = auth.isAuthenticated;
-    user = auth.user;
-  } catch (error) {
-    console.warn('AuthContext not available, defaulting to unauthenticated state');
-  }
+  const { isAuthenticated } = useAuth();
   
   const socket = useSocket();
   
@@ -119,6 +112,99 @@ export const NotificationProvider: React.FC<NotificationProviderProps> = ({ chil
   const generateId = (): string => {
     return Math.random().toString(36).substring(2, 9);
   };
+
+  // Internal function to add temporary toast directly to state
+  const _addTemporaryToast = useCallback((
+    message: string,
+    type: NotificationType,
+    options?: { title?: string, duration?: number }
+  ) => {
+    const effectiveDuration = options?.duration ?? 5000;
+    const toastId = generateId();
+    const toastNotification: Notification = {
+      id: toastId,
+      message,
+      type,
+      duration: effectiveDuration,
+      timestamp: Date.now(),
+      isRead: true, // Mark as read immediately, not relevant for transient toast
+      title: options?.title,
+      category: 'system' // Toasts are system category
+    };
+
+    // Add to the dedicated temporary toast state
+    setTemporaryToasts(prev => [...prev, toastNotification].sort((a, b) => b.timestamp - a.timestamp));
+
+    // Set timeout for removal from temporary state
+    if (effectiveDuration > 0) {
+      setTimeout(() => {
+        setTemporaryToasts(prev => prev.filter(n => n.id !== toastId));
+      }, effectiveDuration);
+    }
+  }, []); // No dependencies needed
+
+  // Internal function to handle persistent notifications via the service
+  const _addPersistentNotification = useCallback(async (
+    notificationToAdd: Notification
+  ): Promise<void> => {
+    try {
+      const addedOrExistingNotification = await notificationService.addNotification(notificationToAdd);
+
+      // Update state based on the service result (handles deduplication/throttling)
+      setNotifications(currentNotifications => {
+         const existingInState = currentNotifications.find(n => n.id === addedOrExistingNotification.id);
+         if (existingInState && JSON.stringify(existingInState) === JSON.stringify(addedOrExistingNotification)) {
+             return currentNotifications; // No change
+         }
+         const existingIndex = currentNotifications.findIndex(n => n.id === addedOrExistingNotification.id);
+         let newState;
+         if (existingIndex === -1) {
+           newState = [...currentNotifications, addedOrExistingNotification];
+         } else {
+           newState = [...currentNotifications];
+           newState[existingIndex] = addedOrExistingNotification;
+         }
+         return newState.sort((a, b) => b.timestamp - a.timestamp);
+       });
+
+       // Note: Auto-removal for system notifications handled by _addTemporaryToast
+       // Service-added notifications are typically category 'app' and don't auto-remove
+
+    } catch (error) {
+       console.error("Error processing notification via service:", error);
+    }
+  }, []); // No dependencies needed
+
+  // Public function exposed by context (for useSystemNotification etc.)
+  const addNotification = useCallback(
+    async (
+      message: string,
+      type: NotificationType = 'info',
+      options?: { title?: string, duration?: number, category?: 'app' | 'system' }
+    ): Promise<void> => {
+      const effectiveDuration = options?.duration ?? 5000;
+      const notificationId = generateId();
+      const notificationToAdd: Notification = {
+        id: notificationId,
+        message,
+        type,
+        duration: effectiveDuration,
+        timestamp: Date.now(),
+        isRead: false,
+        title: options?.title,
+        category: options?.category || 'app' // Default to 'app' if not specified
+      };
+
+      // If it's meant to be a system toast, use the temporary method
+      if (notificationToAdd.category === 'system' && effectiveDuration > 0) {
+        _addTemporaryToast(message, type, { title: options?.title, duration: effectiveDuration });
+      } else {
+        // Otherwise, handle as persistent notification
+        await _addPersistentNotification(notificationToAdd);
+      }
+    },
+    [_addTemporaryToast, _addPersistentNotification] // Dependencies
+  );
 
   // Remove notification (stable reference needed)
   const removeNotification = useCallback(async (id: string): Promise<void> => {
@@ -142,47 +228,6 @@ export const NotificationProvider: React.FC<NotificationProviderProps> = ({ chil
       // console.log(`Skipping backend delete for non-app notification ID: ${id}`); // Optional debug log
     }
   }, []); // No external dependencies
-
-  // Add notification (stable reference needed for dependent hooks)
-  const addNotification = useCallback(
-    async (
-      message: string,
-      type: NotificationType = 'info',
-      options?: { 
-        title?: string, 
-        duration?: number,
-        category?: 'app' | 'system' 
-      }
-    ): Promise<void> => {
-      const duration = options?.duration ?? 5000;
-      const id = generateId(); // Internal helper doesn't need to be a dependency
-      const newNotification: Notification = {
-        id,
-        message,
-        type,
-        duration,
-        timestamp: Date.now(),
-        isRead: false,
-        title: options?.title,
-        category: options?.category || 'app'
-      };
-  
-      // Update state immediately for responsiveness
-      setNotifications((prev) => [...prev, newNotification]);
-      
-      // Persist the notification
-      await notificationService.addNotification(newNotification);
-  
-      // Auto-remove toast notifications
-      if (duration > 0) {
-        setTimeout(() => {
-          // Use the memoized removeNotification inside setTimeout
-          removeNotification(id);
-        }, duration);
-      }
-    },
-    [removeNotification] // Depends on the stable removeNotification
-  );
 
   // Clear all notifications (stable reference needed)
   const clearNotifications = useCallback(async (): Promise<void> => {
@@ -237,6 +282,7 @@ export const NotificationProvider: React.FC<NotificationProviderProps> = ({ chil
     try {
       // If authenticated, fetch from server and update local storage
       if (isAuthenticated) {
+        // Fetch notifications from the service (which now handles deduplication internally)
         const serverNotifications = await notificationService.fetchNotifications(options);
 
         // Merge with existing system notifications, ensuring uniqueness
@@ -248,7 +294,7 @@ export const NotificationProvider: React.FC<NotificationProviderProps> = ({ chil
             existingNotificationsMap.set(n.id, n);
           });
 
-          // Add or update with server notifications (app category)
+          // Add or update with server notifications (app category) - these are already filtered by the service
           serverNotifications.forEach(n => {
             existingNotificationsMap.set(n.id, n);
           });
@@ -315,7 +361,8 @@ export const NotificationProvider: React.FC<NotificationProviderProps> = ({ chil
     
     // Set up login event listener to refresh notifications when user logs in
     const handleLoginSuccess = () => {
-      console.log('User logged in, fetching notifications');
+      console.log('User logged in, fetching notifications immediately.');
+      // Remove the delay
       fetchNotifications();
     };
     
@@ -342,25 +389,44 @@ export const NotificationProvider: React.FC<NotificationProviderProps> = ({ chil
               console.log('Socket notification received:', notification);
               // Handle notifications from the socket
               if (!notification) return;
-              
-              // Create a notification object from socket data
-              const newNotification = {
-                id: notification.id || generateId(),
-                message: notification.message || '',
-                type: notification.type || 'info',
-                duration: 0, // App notifications don't auto-dismiss
-                timestamp: notification.timestamp || Date.now(),
-                isRead: notification.isRead || false,
-                title: notification.title || '',
-                category: 'app' // Socket notifications are always app notifications
-              };
-              
-              // Add to our state and local storage
-              addNotification(newNotification.message, newNotification.type, {
-                title: newNotification.title,
-                duration: newNotification.duration,
-                category: (newNotification.category as 'app' | 'system')
-              });
+
+              const isLoginOrProfileUpdate = notification.title === 'Login Successful' || notification.title === 'Profile Updated';
+
+              if (isLoginOrProfileUpdate) {
+                // Frontend event (dispatchNotificationEvent in AuthContext) already handled the toast.
+                // Backend call (createBackendNotification in AuthContext) handled persistence.
+                // We just log that the backend confirmation arrived via socket, but don't trigger another UI update.
+                console.log(`Ignoring socket notification for ${notification.title} as it was handled by frontend event.`);
+              } else {
+                // For all other backend notifications, treat them as app notifications for the menu
+                const newNotification: Notification = {
+                  id: notification.id?.toString() || generateId(), // Ensure ID is string
+                  message: notification.message || '',
+                  type: (notification.type || 'info') as NotificationType,
+                  duration: 0, // App notifications don't auto-dismiss from menu
+                  timestamp: new Date(notification.createdAt || Date.now()).getTime(), // Use createdAt from backend if available
+                  isRead: notification.isRead || false,
+                  title: notification.title || '',
+                  category: 'app' // Socket notifications are typically app notifications
+                };
+
+                // Add to our state and local storage for the menu using the service
+                notificationService.addNotification(newNotification).then(addedOrExistingNotification => {
+                  // Update the React state to ensure the menu reflects the latest
+                  setNotifications(prev => {
+                    const existingIndex = prev.findIndex(n => n.id === addedOrExistingNotification.id);
+                    if (existingIndex === -1) {
+                      // Add if it's truly new (deduplication might return existing)
+                      return [...prev, addedOrExistingNotification].sort((a, b) => b.timestamp - a.timestamp);
+                    } else {
+                      // Update if it exists (e.g., throttling might have updated count)
+                      const newState = [...prev];
+                      newState[existingIndex] = addedOrExistingNotification;
+                      return newState.sort((a, b) => b.timestamp - a.timestamp);
+                    }
+                  });
+                });
+              }
             });
             
             // Setup system notification handlers
@@ -461,13 +527,10 @@ export const NotificationProvider: React.FC<NotificationProviderProps> = ({ chil
       if (event.detail) {
         const { message, type, title, duration } = event.detail;
         console.log('Auth success event received:', message);
-        
-        // Add notification with the system category
-        addNotification(message, type, {
-          title,
-          duration: duration || 5000,
-          category: 'system'
-        });
+
+        // Restore temporary toast call for these immediate UI feedbacks
+        _addTemporaryToast(message, type, { title, duration: duration || 5000 });
+        // console.log('Ignoring Auth success event for toast, relying on backend notification.');
       }
     };
 
@@ -475,13 +538,9 @@ export const NotificationProvider: React.FC<NotificationProviderProps> = ({ chil
       if (event.detail) {
         const { message, type, title, duration } = event.detail;
         console.log('Auth error event received:', message);
-        
-        // Add notification with the system category
-        addNotification(message, type, {
-          title,
-          duration: duration || 5000,
-          category: 'system'
-        });
+
+        // Error messages can also be temporary toasts
+        _addTemporaryToast(message, type, { title, duration: duration || 5000 });
       }
     };
 
@@ -494,7 +553,7 @@ export const NotificationProvider: React.FC<NotificationProviderProps> = ({ chil
       window.removeEventListener(NotificationEventType.AUTH_SUCCESS, handleAuthSuccess as EventListener);
       window.removeEventListener(NotificationEventType.AUTH_ERROR, handleAuthError as EventListener);
     };
-  }, [addNotification]);
+  }, [_addTemporaryToast]); // Dependency added
 
   // Context value
   const value: NotificationContextValue = {
@@ -511,7 +570,8 @@ export const NotificationProvider: React.FC<NotificationProviderProps> = ({ chil
     notificationMenuAnchorEl,
     loading,
     fetchNotifications,
-    networkStatus
+    networkStatus,
+    temporaryToasts
   };
 
   return <NotificationContext.Provider value={value}>{children}</NotificationContext.Provider>;
@@ -880,19 +940,19 @@ export const useAppNotification = () => {
   };
 };
 
-// Toast Notification container (for display in layout) - only for system notifications (alerts, errors, etc.)
-export const NotificationContainer: React.FC = () => {
+// Toast Notification container (for display in layout) - reads from temporaryToasts state
+const NotificationContainerInternal: React.FC = () => {
   const theme = useTheme();
-  const { notifications, removeNotification } = useNotification();
+  // Read from temporaryToasts state
+  const { temporaryToasts } = useNotification();
+  // Note: removeNotification is now implicitly handled by the setTimeout in _addTemporaryToast
 
-  // Filter for system notifications with duration > 0
   // Sort by newest first and limit to 5 at a time to prevent overload
-  const systemToastNotifications = notifications
-    .filter(n => n.duration > 0 && n.category === 'system')
+  const toastsToShow = temporaryToasts
     .sort((a, b) => b.timestamp - a.timestamp)
     .slice(0, 5); // Limit to showing maximum 5 notifications at once
-  
-  if (systemToastNotifications.length === 0) {
+
+  if (toastsToShow.length === 0) {
     return null;
   }
 
@@ -918,11 +978,10 @@ export const NotificationContainer: React.FC = () => {
         }
       }}
     >
-      {systemToastNotifications.map((notification, index) => (
+      {toastsToShow.map((notification, index) => (
         <Paper
           key={notification.id}
           elevation={3}
-          onClick={() => removeNotification(notification.id)}
           sx={{
             p: 1.5,
             borderRadius: 2,
@@ -971,13 +1030,16 @@ export const NotificationContainer: React.FC = () => {
               </Typography>
             </Box>
           </Box>
-          <IconButton 
-            size="small" 
+          <IconButton
+            size="small"
             onClick={(e) => {
               e.stopPropagation();
-              removeNotification(notification.id);
+              // Need a way to remove from temporaryToasts state here if button is kept
+              // This might require exposing a removeTemporaryToast function from context
+              // For simplicity, let's assume timeout handles removal for now.
+              // removeNotification(notification.id); // This interacts with main state, not temporary
             }}
-            sx={{ 
+            sx={{
               color: theme.palette.text.secondary,
               p: 0.5,
               ml: 1,
@@ -993,6 +1055,9 @@ export const NotificationContainer: React.FC = () => {
     </Box>
   );
 };
+
+// Export the memoized version
+export const NotificationContainer = React.memo(NotificationContainerInternal);
 
 // SystemAlert component for direct inline use of system notifications in components
 interface SystemAlertProps {
@@ -1086,7 +1151,7 @@ const addNotificationStyles = () => {
         opacity: 1;
       }
     }
-    
+
     @keyframes pulse {
       0% {
         transform: scale(1);
@@ -1098,7 +1163,7 @@ const addNotificationStyles = () => {
         transform: scale(1);
       }
     }
-    
+
     .notification-container > *:nth-child(1) { transform: translateY(0); }
     .notification-container > *:nth-child(2) { transform: translateY(0); }
     .notification-container > *:nth-child(3) { transform: translateY(0); }
@@ -1124,7 +1189,7 @@ USAGE EXAMPLES:
 
    const MyComponent = () => {
      const { showSuccess, showError, showWarning, showInfo } = useSystemNotification();
-     
+
      const handleSave = async () => {
        try {
          await saveData();
@@ -1144,11 +1209,11 @@ USAGE EXAMPLES:
 
    const FormWithWarning = () => {
      const [showWarning, setShowWarning] = useState(true);
-     
+
      return (
        <Box>
          {showWarning && (
-           <SystemAlert 
+           <SystemAlert
              type="warning"
              title="Unsaved Changes"
              message="You have unsaved changes. Are you sure you want to leave this page?"
@@ -1173,18 +1238,18 @@ USAGE EXAMPLES:
 
    const TicketComponent = () => {
      const { showTicketUpdate, showComment, showSLA } = useAppNotification();
-     
+
      useEffect(() => {
        // Show notification when a ticket is assigned
        showTicketUpdate('Ticket #1234 has been assigned to you');
-       
+
        // Show notification for a new comment
        showComment('John added a comment to Ticket #1234');
-       
+
        // Show an SLA notification
        showSLA('Ticket #1234 is approaching its SLA deadline');
      }, []);
 
      return <div>Ticket component</div>;
    };
-*/ 
+*/

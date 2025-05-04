@@ -13,7 +13,11 @@ import {
   getAllDepartments,
   getAllPriorities,
   getAllTypes,
-  getAllStatuses
+  getAllStatuses,
+  uploadTicketAttachments,
+  downloadTicketAttachment,
+  getTicketHistory,
+  addTicketComment
 } from '../controllers/ticket.controller';
 import { validateRequest } from '../middleware/validate-request.middleware';
 import { authenticate } from '../middleware/auth.middleware';
@@ -39,6 +43,51 @@ router.get('/priorities', getAllPriorities);
 router.get('/types', getAllTypes);
 router.get('/statuses', getAllStatuses);
 // --- End routes for options ---
+
+// --- NEW ROUTES for attachments, comments, and history ---
+// Upload attachments to a ticket
+router.post(
+  '/:id/attachments',
+  [
+    param('id').isInt({ min: 1 }).withMessage('Invalid ticket ID format'),
+    validateRequest,
+  ],
+  upload.array('attachments', 10), // Allow up to 10 files
+  uploadTicketAttachments
+);
+
+// Download an attachment
+router.get(
+  '/attachments/download/:attachmentId',
+  [
+    param('attachmentId').isInt({ min: 1 }).withMessage('Invalid attachment ID format'),
+    validateRequest,
+  ],
+  downloadTicketAttachment
+);
+
+// Get ticket history
+router.get(
+  '/:id/history',
+  [
+    param('id').isInt({ min: 1 }).withMessage('Invalid ticket ID format'),
+    validateRequest,
+  ],
+  getTicketHistory
+);
+
+// Add comment to ticket (enhanced version)
+router.post(
+  '/:id/comments',
+  [
+    param('id').isInt({ min: 1 }).withMessage('Invalid ticket ID format'),
+    body('content').notEmpty().withMessage('Comment content is required'),
+    body('isInternal').optional().isBoolean().withMessage('isInternal must be a boolean'),
+    validateRequest,
+  ],
+  addTicketComment
+);
+// --- END NEW ROUTES ---
 
 // Get all tickets
 router.get(

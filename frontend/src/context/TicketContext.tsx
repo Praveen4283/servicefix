@@ -159,6 +159,8 @@ interface TicketContextType {
   searchTickets: (query: string) => void;
   clearFilters: () => void;
   getAgentsList: () => Promise<User[]>;
+  addAttachment: (ticketId: string, formData: FormData) => Promise<void>;
+  getTicketHistory: (ticketId: string) => Promise<any[]>;
 }
 
 const TicketContext = createContext<TicketContextType | undefined>(undefined);
@@ -465,41 +467,34 @@ export const TicketProvider: React.FC<{ children: ReactNode }> = ({ children }) 
 
   // Add a comment to a ticket
   const addComment = useCallback(async (ticketId: string, comment: string, isInternal: boolean) => {
-    if (!isAuthenticated || !currentTicket) return;
+    if (!isAuthenticated) return;
     
     setIsLoading(true);
     setError(null);
     
     try {
-      // In a real app, this would be an API call
-      await new Promise(resolve => setTimeout(resolve, 600)); // Simulate network request
-      
-      const newComment: Comment = {
-        id: `comment-${Date.now()}`,
+      // Use direct API call to add the comment
+      const response = await apiClient.post(`/tickets/${ticketId}/comments`, {
         content: comment,
-        createdAt: new Date().toISOString(),
-        isInternal,
-        user: {
-          id: '1', // Current user
-          firstName: 'Current',
-          lastName: 'User',
-          avatar: undefined,
-        },
-      };
-      
-      setCurrentTicket({
-        ...currentTicket,
-        comments: [...currentTicket.comments, newComment],
-        lastActivity: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
+        isInternal
       });
-    } catch (err) {
-      setError('Failed to add comment. Please try again.');
+      
+      // If the API call is successful, refresh the ticket data
+      if (response) {
+        if (currentTicket && currentTicket.id === ticketId) {
+          await fetchTicketById(ticketId);
+        }
+      }
+      
+      return response;
+    } catch (err: any) {
       console.error('Error adding comment:', err);
+      setError(err.message || 'Failed to add comment. Please try again.');
+      throw err;
     } finally {
       setIsLoading(false);
     }
-  }, [isAuthenticated, currentTicket]);
+  }, [isAuthenticated, currentTicket, fetchTicketById]);
 
   // Filter tickets based on criteria
   const filterTickets = useCallback((filters: any) => {
@@ -622,6 +617,54 @@ export const TicketProvider: React.FC<{ children: ReactNode }> = ({ children }) 
     }
   }, [isAuthenticated]);
 
+  // Add addAttachment implementation after existing functions
+  const addAttachment = useCallback(async (ticketId: string, formData: FormData) => {
+    if (!isAuthenticated) return;
+    
+    setIsLoading(true);
+    setError(null);
+    
+    try {
+      // Use apiClient to upload attachments
+      const response = await apiClient.post(`/tickets/${ticketId}/attachments`, formData, {
+        headers: {
+          // Content-Type is automatically set when using FormData
+          'Content-Type': 'multipart/form-data',
+        }
+      });
+      
+      // If we are viewing the current ticket being updated, refresh the data
+      if (currentTicket && currentTicket.id === ticketId) {
+        await fetchTicketById(ticketId);
+      }
+      
+      return response;
+    } catch (err: any) {
+      console.error('Error uploading attachments:', err);
+      setError(err.message || 'Failed to upload attachments. Please try again.');
+      throw err;
+    } finally {
+      setIsLoading(false);
+    }
+  }, [isAuthenticated, currentTicket, fetchTicketById]);
+
+  // Add getTicketHistory implementation
+  const getTicketHistory = useCallback(async (ticketId: string) => {
+    if (!isAuthenticated) return [];
+    
+    try {
+      // Call the API to get ticket history
+      const response = await apiClient.get<{ history: any[] }>(`/tickets/${ticketId}/history`);
+      
+      // Return the history array from the response
+      return response.history || [];
+    } catch (err: any) {
+      console.error('Error fetching ticket history:', err);
+      // Don't set error state here, let the component handle it
+      return [];
+    }
+  }, [isAuthenticated]);
+
   const value = {
     tickets,
     filteredTickets,
@@ -643,6 +686,8 @@ export const TicketProvider: React.FC<{ children: ReactNode }> = ({ children }) 
     searchTickets,
     clearFilters,
     getAgentsList,
+    addAttachment,
+    getTicketHistory,
   };
 
   return <TicketContext.Provider value={value}>{children}</TicketContext.Provider>;

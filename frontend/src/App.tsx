@@ -171,9 +171,7 @@ const AppWithRouter = () => {
     
     return (
       <AppLayout>
-        <TicketProvider>
-          <Component />
-        </TicketProvider>
+        <Component />
       </AppLayout>
     );
   };
@@ -210,53 +208,54 @@ const AppWithRouter = () => {
         <CssBaseline />
         <ErrorBoundary FallbackComponent={ErrorFallback}>
           <Suspense fallback={<LoadingSpinner />}>
-            {/* Global components that should appear across all pages */}
-            <CookieConsentBanner />
-            {isAuthenticated && <ChatbotWidget />}
-            
-            <Routes>
-              {/* Public routes */}
-              <Route path="/" element={<LandingPage />} />
+            {/* Wrap Routes and ChatbotWidget with TicketProvider here */}
+            <TicketProvider>
+              {/* Global components that should appear across all pages */}
+              <CookieConsentBanner />
+              {isAuthenticated && <ChatbotWidget />}
               
-              {/* Auth routes - these should not require authentication */}
-              <Route path="/login" element={withAuthLayout(LoginPage)} />
-              <Route path="/register" element={withAuthLayout(RegisterPage)} />
-              <Route path="/forgot-password" element={withAuthLayout(ForgotPasswordPage)} />
-              <Route path="/reset-password" element={withAuthLayout(ResetPasswordPage)} />
-              
-              {/* Protected routes - these require authentication */}
-              <Route path="/dashboard" element={withProtectedLayout(DashboardPage)} />
-              <Route path="/tickets">
-                <Route index element={withProtectedLayout(TicketListPage)} />
-                <Route path="create" element={withProtectedLayout(CreateTicketPage)} />
-                <Route path=":id" element={withProtectedLayout(TicketDetailPage)} />
-              </Route>
-              
-              {/* Knowledge base routes */}
-              <Route path="/knowledge">
-                <Route index element={withProtectedLayout(KnowledgeBasePage)} />
-                <Route path=":id" element={withProtectedLayout(ArticleDetailPage)} />
-              </Route>
-              
-              {/* Admin routes */}
-              <Route path="/analytics" element={withProtectedLayout(AnalyticsDashboardPage, 'admin')} />
-              <Route path="/automation" element={withProtectedLayout(WorkflowAutomationPage, 'admin')} />
-              <Route path="/reports" element={withProtectedLayout(ReportsPage)} />
-              <Route path="/users" element={withProtectedLayout(UsersPage, 'admin')} />
-              <Route path="/settings" element={withProtectedLayout(SettingsPage, 'admin')} />
-              
-              {/* User profile */}
-              <Route path="/profile" element={withProtectedLayout(ProfilePage)} />
-              
-              {/* Search */}
-              <Route path="/search" element={withProtectedLayout(SearchPage)} />
-              
-              {/* Cookies page - public */}
-              <Route path="/cookies" element={withPublicLayout(CookiesPage)} />
-              
-              {/* Not found route */}
-              <Route path="*" element={withPublicLayout(NotFoundPage)} />
-            </Routes>
+              <Routes>
+                {/* Public routes */}
+                <Route path="/" element={<LandingPage />} />
+                
+                {/* Auth routes - these should not require authentication */}
+                <Route path="/login" element={withAuthLayout(LoginPage)} />
+                <Route path="/register" element={withAuthLayout(RegisterPage)} />
+                <Route path="/forgot-password" element={withAuthLayout(ForgotPasswordPage)} />
+                <Route path="/reset-password" element={withAuthLayout(ResetPasswordPage)} />
+                
+                {/* Protected routes - these require authentication */}
+                <Route path="/dashboard" element={withProtectedLayout(DashboardPage)} />
+                <Route path="/tickets">
+                  <Route index element={withProtectedLayout(TicketListPage)} />
+                  <Route path="create" element={withProtectedLayout(CreateTicketPage)} />
+                  <Route path=":id" element={withProtectedLayout(TicketDetailPage)} />
+                </Route>
+                
+                {/* Knowledge base routes */}
+                <Route path="/knowledge">
+                  <Route index element={withProtectedLayout(KnowledgeBasePage)} />
+                  <Route path=":id" element={withProtectedLayout(ArticleDetailPage)} />
+                </Route>
+                
+                {/* Admin routes */}
+                <Route path="/analytics" element={withProtectedLayout(AnalyticsDashboardPage, 'admin')} />
+                <Route path="/automation" element={withProtectedLayout(WorkflowAutomationPage, 'admin')} />
+                <Route path="/reports" element={withProtectedLayout(ReportsPage)} />
+                <Route path="/users" element={withProtectedLayout(UsersPage, 'admin')} />
+                <Route path="/settings" element={withProtectedLayout(SettingsPage, 'admin')} />
+                
+                {/* User profile */}
+                <Route path="/profile" element={withProtectedLayout(ProfilePage)} />
+                
+                {/* Other routes */}
+                <Route path="/search" element={withProtectedLayout(SearchPage)} />
+                <Route path="/cookies" element={withPublicLayout(CookiesPage)} />
+                
+                {/* Catch-all 404 */}
+                <Route path="*" element={withPublicLayout(NotFoundPage)} />
+              </Routes>
+            </TicketProvider>
           </Suspense>
         </ErrorBoundary>
       </CookieConsentProvider>

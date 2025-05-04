@@ -7,6 +7,14 @@ import ticketService from '../services/ticket.service'; // Import the ticket ser
 import fs from 'fs'; // Import fs for cleanup
 import { Multer } from 'multer';
 import { uploadFile } from '../utils/supabase';
+import { createClient } from '@supabase/supabase-js';
+import path from 'path';
+
+// Initialize Supabase client for direct operations
+const supabaseUrl = process.env.SUPABASE_URL || '';
+const supabaseKey = process.env.SUPABASE_KEY || '';
+const bucketName = process.env.SUPABASE_BUCKET || 'ticket-attachments';
+const supabaseClient = createClient(supabaseUrl, supabaseKey);
 
 /**
  * Get all tickets with pagination, filtering, and sorting
@@ -1189,3 +1197,481 @@ export const getAllStatuses = async (
 };
 
 // --- End Controller functions for fetching options --- 
+
+/**
+ * Upload attachments to a ticket
+ */
+export const uploadTicketAttachments = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+) => {
+  try {
+    const { id } = req.params;
+    const files = req.files as Express.Multer.File[];
+    
+    if (!files || files.length === 0) {
+      return res.status(400).json({
+        status: 'error',
+        message: 'No files uploaded',
+      });
+    }
+    
+    // Check if ticket exists
+    const ticketResult = await query(
+      'SELECT * FROM tickets WHERE id = $1',
+      [id]
+    );
+    
+    if (ticketResult.rows.length === 0) {
+      throw new AppError('Ticket not found', 404);
+    }
+    
+    const ticket = ticketResult.rows[0];
+    
+    // Check if user has access to this ticket
+    if (req.user.role !== 'admin' && ticket.organization_id !== req.user.organizationId) {
+      throw new AppError('You do not have permission to upload attachments to this ticket', 403);
+    }
+    
+    // Customers can only add attachments to their own tickets
+    if (
+      req.user.role === 'customer' && 
+      ticket.requester_id !== req.user.id
+    ) {
+      throw new AppError('You can only add attachments to tickets you created', 403);
+    }
+    
+    // Start transaction
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      
+      const attachments = [];
+      
+      // Process each file
+      for (const file of files) {
+        try {
+          // Upload to Supabase Storage
+          const fileName = `${id}/${uuidv4()}${path.extname(file.originalname)}`;
+          
+          // Upload to Supabase using the helper or direct client
+          let publicUrl: string;
+          
+          if (typeof uploadFile === 'function') {
+            // Use the existing helper function if available
+            publicUrl = await uploadFile(file, 'tickets', parseInt(id));
+          } else {
+            // Upload directly with supabaseClient
+            const { data, error } = await supabaseClient.storage
+              .from(bucketName)
+              .upload(fileName, file.buffer, {
+                contentType: file.mimetype,
+                cacheControl: '3600',
+              });
+              
+            if (error) {
+              logger.error('Supabase upload error:', error);
+              throw new AppError('Failed to upload file to storage', 500);
+            }
+            
+            // Get the public URL
+            const { data: urlData } = supabaseClient.storage
+              .from(bucketName)
+              .getPublicUrl(fileName);
+              
+            publicUrl = urlData.publicUrl;
+          }
+          
+          // Save attachment record in database
+          const result = await client.query(
+            `INSERT INTO ticket_attachments 
+             (ticket_id, file_name, file_path, file_type, file_size, uploaded_by) 
+             VALUES ($1, $2, $3, $4, $5, $6) 
+             RETURNING id, created_at`,
+            [
+              id, 
+              file.originalname, 
+              fileName, // Store the path in Supabase
+              file.mimetype, 
+              file.size, 
+              req.user.id
+            ]
+          );
+          
+          const attachment = {
+            id: result.rows[0].id,
+            originalName: file.originalname,
+            filePath: publicUrl,
+            mimeType: file.mimetype,
+            size: file.size,
+            createdAt: result.rows[0].created_at
+          };
+          
+          attachments.push(attachment);
+          
+          // Add to ticket history
+          await client.query(
+            `INSERT INTO ticket_history 
+             (ticket_id, user_id, field_name, new_value) 
+             VALUES ($1, $2, $3, $4)`,
+            [id, req.user.id, 'attachment_added', file.originalname]
+          );
+        } catch (fileError) {
+          logger.error(`Error processing file ${file.originalname}:`, fileError);
+          throw fileError; // Re-throw to trigger rollback
+        }
+      }
+      
+      // Update ticket's last activity timestamp
+      await client.query(
+        'UPDATE tickets SET updated_at = NOW() WHERE id = $1',
+        [id]
+      );
+      
+      // Commit transaction
+      await client.query('COMMIT');
+      
+      res.status(201).json({
+        status: 'success',
+        data: {
+          message: 'Attachments uploaded successfully',
+          attachments,
+        },
+      });
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    } finally {
+      client.release();
+    }
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * Download an attachment
+ */
+export const downloadTicketAttachment = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+) => {
+  try {
+    const { attachmentId } = req.params;
+    
+    // Get attachment details
+    const attachmentResult = await query(
+      `SELECT ta.*, t.organization_id, t.requester_id
+       FROM ticket_attachments ta
+       JOIN tickets t ON ta.ticket_id = t.id
+       WHERE ta.id = $1`,
+      [attachmentId]
+    );
+    
+    if (attachmentResult.rows.length === 0) {
+      throw new AppError('Attachment not found', 404);
+    }
+    
+    const attachment = attachmentResult.rows[0];
+    
+    // Check if user has access to this attachment
+    if (
+      req.user.role !== 'admin' && 
+      attachment.organization_id !== req.user.organizationId
+    ) {
+      throw new AppError('You do not have permission to download this attachment', 403);
+    }
+    
+    // Customers can only download attachments from their own tickets
+    if (
+      req.user.role === 'customer' && 
+      attachment.requester_id !== req.user.id
+    ) {
+      throw new AppError('You can only download attachments from tickets you created', 403);
+    }
+    
+    try {
+      // Generate signed URL from Supabase
+      const { data, error } = await supabaseClient.storage
+        .from(bucketName)
+        .createSignedUrl(attachment.file_path, 300); // URL valid for 5 minutes
+      
+      if (error) {
+        logger.error('Error generating signed URL:', error);
+        throw new AppError('Failed to generate download URL', 500);
+      }
+      
+      if (!data || !data.signedUrl) {
+        throw new AppError('Failed to generate download URL', 500);
+      }
+      
+      // Return the signed URL to the client instead of redirecting
+      // This allows the frontend to handle the download
+      return res.status(200).json({
+        status: 'success',
+        data: {
+          downloadUrl: data.signedUrl,
+          filename: attachment.original_name
+        }
+      });
+    } catch (supabaseError) {
+      logger.error('Supabase error:', supabaseError);
+      
+      // Fallback - try to get a public URL if file is public
+      try {
+        const { data } = supabaseClient.storage
+          .from(bucketName)
+          .getPublicUrl(attachment.file_path);
+          
+        if (data && data.publicUrl) {
+          return res.status(200).json({
+            status: 'success',
+            data: {
+              downloadUrl: data.publicUrl,
+              filename: attachment.original_name
+            }
+          });
+        } else {
+          throw new AppError('Failed to generate download URL', 500);
+        }
+      } catch (fallbackError) {
+        logger.error('Public URL fallback error:', fallbackError);
+        throw new AppError('Failed to generate download URL', 500);
+      }
+    }
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * Get ticket history
+ */
+export const getTicketHistory = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+) => {
+  try {
+    const { id } = req.params;
+    
+    // Check if ticket exists
+    const ticketResult = await query(
+      'SELECT * FROM tickets WHERE id = $1',
+      [id]
+    );
+    
+    if (ticketResult.rows.length === 0) {
+      throw new AppError('Ticket not found', 404);
+    }
+    
+    const ticket = ticketResult.rows[0];
+    
+    // Check if user has access to this ticket
+    if (req.user.role !== 'admin' && ticket.organization_id !== req.user.organizationId) {
+      throw new AppError('You do not have permission to view this ticket history', 403);
+    }
+    
+    // Customers can only view history of their own tickets
+    if (
+      req.user.role === 'customer' && 
+      ticket.requester_id !== req.user.id
+    ) {
+      throw new AppError('You can only view history of tickets you created', 403);
+    }
+    
+    // Get ticket history
+    const historyResult = await query(
+      `SELECT th.*,
+          u.id as user_id,
+          u.first_name,
+          u.last_name,
+          u.email,
+          u.avatar_url
+       FROM ticket_history th
+       LEFT JOIN users u ON th.user_id = u.id
+       WHERE th.ticket_id = $1
+       ORDER BY th.created_at DESC`,
+      [id]
+    );
+    
+    // Format history data
+    const history = historyResult.rows.map((row: {
+      id: number;
+      ticket_id: number;
+      field_name: string;
+      old_value: string;
+      new_value: string;
+      created_at: string;
+      user_id?: number;
+      first_name?: string;
+      last_name?: string;
+      email?: string;
+      avatar_url?: string;
+    }) => {
+      return {
+        id: row.id,
+        ticketId: row.ticket_id,
+        field_name: row.field_name,
+        old_value: row.old_value,
+        new_value: row.new_value,
+        created_at: row.created_at,
+        user: row.user_id ? {
+          id: row.user_id,
+          firstName: row.first_name,
+          lastName: row.last_name,
+          email: row.email,
+          avatar: row.avatar_url
+        } : null
+      };
+    });
+    
+    res.status(200).json({
+      status: 'success',
+      data: {
+        history,
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * Enhanced version of addComment to properly support the frontend
+ */
+export const addTicketComment = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+) => {
+  try {
+    const { id } = req.params;
+    const { content, isInternal = false } = req.body;
+    
+    // Check if ticket exists
+    const ticketResult = await query(
+      'SELECT * FROM tickets WHERE id = $1',
+      [id]
+    );
+    
+    if (ticketResult.rows.length === 0) {
+      throw new AppError('Ticket not found', 404);
+    }
+    
+    const ticket = ticketResult.rows[0];
+    
+    // Check permissions
+    if (req.user.role !== 'admin' && ticket.organization_id !== req.user.organizationId) {
+      throw new AppError('You do not have permission to access this ticket', 403);
+    }
+    
+    // Customers can only add comments to their own tickets
+    if (
+      req.user.role === 'customer' && 
+      ticket.requester_id !== req.user.id
+    ) {
+      throw new AppError('You can only add comments to tickets you created', 403);
+    }
+    
+    // Customers cannot add internal comments
+    if (req.user.role === 'customer' && isInternal) {
+      throw new AppError('Customers cannot add internal comments', 403);
+    }
+    
+    // Process sentiment if AI is enabled (placeholder for future implementation)
+    let sentimentScore = null;
+    
+    // Start transaction
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      
+      // Add the comment
+      const commentResult = await client.query(
+        `INSERT INTO ticket_comments (
+          ticket_id,
+          user_id,
+          content,
+          is_internal,
+          sentiment_score
+        ) VALUES ($1, $2, $3, $4, $5)
+        RETURNING id, created_at`,
+        [
+          id,
+          req.user.id,
+          content,
+          isInternal,
+          sentimentScore,
+        ]
+      );
+      
+      const commentId = commentResult.rows[0].id;
+      const createdAt = commentResult.rows[0].created_at;
+      
+      // Update ticket updated_at timestamp
+      await client.query(
+        'UPDATE tickets SET updated_at = NOW() WHERE id = $1',
+        [id]
+      );
+      
+      // Add to ticket history
+      await client.query(
+        `INSERT INTO ticket_history (
+          ticket_id,
+          user_id,
+          field_name,
+          new_value
+        ) VALUES ($1, $2, $3, $4)`,
+        [
+          id,
+          req.user.id,
+          'comment_added',
+          isInternal ? 'Internal comment' : 'Public comment',
+        ]
+      );
+      
+      // Get user info
+      const userResult = await client.query(
+        `SELECT id, first_name, last_name, email, avatar_url
+         FROM users
+         WHERE id = $1`,
+        [req.user.id]
+      );
+      
+      const user = userResult.rows[0];
+      
+      // Commit transaction
+      await client.query('COMMIT');
+      
+      // Return the created comment with user info for frontend
+      res.status(201).json({
+        status: 'success',
+        data: {
+          comment: {
+            id: commentId,
+            content,
+            createdAt,
+            isInternal,
+            user: {
+              id: user.id,
+              firstName: user.first_name,
+              lastName: user.last_name,
+              email: user.email,
+              avatar: user.avatar_url
+            }
+          }
+        },
+      });
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    } finally {
+      client.release();
+    }
+  } catch (error) {
+    next(error);
+  }
+};

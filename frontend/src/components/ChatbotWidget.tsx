@@ -38,6 +38,7 @@ import ticketService, { Ticket, TicketComment, TicketStatus, TicketPriority } fr
 import chatbotService from '../services/chatbotService';
 import { useAuth } from '../context/AuthContext';
 import { useNotification } from '../context/NotificationContext';
+import { useTickets } from '../context/TicketContext'; // Import useTickets
 
 // Styled components
 const ChatContainer = styled(Paper)(({ theme }) => ({
@@ -177,6 +178,9 @@ type ConversationState =
   | 'awaiting_intent'
   | 'creating_ticket_subject'
   | 'creating_ticket_description'
+  | 'getting_department'         // Added state
+  | 'getting_ticket_type'        // Added state
+  | 'getting_tags'               // Added state
   | 'getting_ticket_id_for_status'
   | 'getting_ticket_id_for_comment'
   | 'getting_comment_text';
@@ -187,6 +191,7 @@ const ChatbotWidget: React.FC = () => {
   const theme = useTheme();
   const { user, isAuthenticated } = useAuth(); // Get authenticated user info
   const { addNotification } = useNotification();
+  const { departments, ticketTypes, priorities } = useTickets(); // Get ticket context data
   const [isOpen, setIsOpen] = useState(false);
   const [messages, setMessages] = useState<Message[]>([
     {
@@ -221,7 +226,10 @@ const ChatbotWidget: React.FC = () => {
 
   // Scroll to bottom of messages container
   const scrollToBottom = useCallback(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    // Add a slight delay to ensure the DOM is updated before scrolling
+    setTimeout(() => {
+        messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    }, 50); 
   }, []);
 
   useEffect(() => {
@@ -233,15 +241,63 @@ const ChatbotWidget: React.FC = () => {
     if (conversationId) {
       return conversationId;
     }
+    
+    if (!isAuthenticated) {
+      addNotification('You need to be logged in to use the chat.', 'warning');
+      throw new Error('Authentication required');
+    }
+    
     try {
-      const newConversation = await chatbotService.startConversation();
-      setConversationId(newConversation.id);
-      console.log('Started new conversation:', newConversation.id);
-      return newConversation.id;
-    } catch (error) {
+      // Add metadata to link this conversation to relevant context
+      const metadata = {
+        source: 'web-widget',
+        userAgent: navigator.userAgent,
+        path: window.location.pathname
+      };
+      
+      const response = await chatbotService.startConversation(metadata);
+      console.log('API Response for startConversation:', JSON.stringify(response));
+      
+      // Handle different possible response structures
+      let newConversationId;
+      
+      if (response && typeof response === 'object') {
+        // Standard API response structure { status: "success", data: { id: '...' } }
+        if (response.data && typeof response.data === 'object' && 'id' in response.data) {
+          newConversationId = (response.data as any).id;
+        }
+        // Direct data structure without wrapper { id: '...' }
+        else if ('id' in response) {
+          newConversationId = (response as any).id;
+        }
+        // If the response is another structure, try to extract ID
+        else {
+          console.warn('Unexpected conversation response structure:', response);
+          // Look for any property that might contain the ID
+          const possibleId = Object.entries(response as any)
+            .find(([key, value]) => 
+              (key.toLowerCase().includes('id') || key === 'id') && 
+              (typeof value === 'string' || typeof value === 'number')
+            );
+          
+          if (possibleId) {
+            newConversationId = String(possibleId[1]);
+          }
+        }
+      }
+      
+      if (!newConversationId) {
+        throw new Error('Failed to extract conversation ID from response');
+      }
+      
+      console.log('Extracted conversation ID:', newConversationId);
+      setConversationId(newConversationId);
+      return newConversationId;
+    } catch (error: any) {
       console.error("Failed to start conversation:", error);
-      addNotification('Could not start chat session. Please try again later.', 'error');
-      throw new Error('Failed to start conversation'); // Propagate error
+      const errorMessage = error.message || 'Could not start chat session. Please try again later.';
+      addNotification(errorMessage, 'error');
+      throw new Error(errorMessage); // Propagate error
     }
   };
 
@@ -249,38 +305,68 @@ const ChatbotWidget: React.FC = () => {
   const addMessage = async (text: string | React.ReactNode, sender: 'user' | 'bot', extraData?: Partial<Message>) => {
     const messageContent = typeof text === 'string' ? text : '[Rich Content]'; // Get string representation for saving
     
-    // 1. Ensure conversation exists
-    let currentConversationId: string;
-    try {
-      currentConversationId = await ensureConversation();
-    } catch (error) {
-      return; // Don't add message if conversation failed to start
-    }
-
-    // 2. Add message to UI state
+    // 1. Add message to UI state immediately for better UX
+    const newMessageId = `${sender}-${Date.now()}`;
     const newMessage: Message = {
-      id: `${sender}-${Date.now()}`,
+      id: newMessageId,
       text,
       sender,
       timestamp: new Date(),
       feedback: sender === 'bot' ? null : undefined,
       ...extraData
     };
+    
     setMessages(prev => [...prev, newMessage]);
     if (sender === 'bot' && !isOpen) {
       setUnreadMessages(prev => prev + 1);
     }
-
-    // 3. Save message to backend (fire and forget, but log errors)
-    chatbotService.saveMessage(currentConversationId, { 
-      senderType: sender,
-      content: messageContent,
-      metadata: extraData?.ticketInfo ? { ticketId: (extraData.ticketInfo as Ticket).id } : undefined // Example metadata
-    }).catch(error => {
+    
+    // 2. Save message to backend if user is authenticated
+    if (!isAuthenticated && sender === 'user') {
+      // If not authenticated and it's a user message, prompt to login
+      setTimeout(() => {
+        addMessage("Please log in to continue this conversation and save your chat history.", 'bot');
+      }, 500);
+      return;
+    }
+    
+    try {
+      // 3. Ensure conversation exists
+      let currentConversationId: string;
+      try {
+        currentConversationId = await ensureConversation();
+      } catch (error) {
+        // Don't proceed with saving if conversation creation failed
+        return; 
+      }
+      
+      // 4. Save message to backend
+      const response = await chatbotService.saveMessage(currentConversationId, { 
+        senderType: sender,
+        content: messageContent,
+        metadata: extraData?.ticketInfo ? { ticketId: (extraData.ticketInfo as Ticket).id } : undefined
+      });
+      
+      // 5. Optional: Update message with server-generated ID if needed
+      if (response && response.data && typeof response.data === 'object' && 'id' in response.data) {
+        const messageId = (response.data as any).id;
+        // Update the message ID in the UI to match the server ID
+        setMessages(prev => 
+          prev.map(msg => 
+            msg.id === newMessageId 
+              ? { ...msg, id: messageId.toString() } 
+              : msg
+          )
+        );
+      }
+      
+    } catch (error: any) {
       console.error(`Failed to save ${sender} message to backend:`, error);
-      // Optionally notify user, but might be too noisy
-      // addNotification('Failed to save message history.', 'warning');
-    });
+      // Only notify user about errors for user messages
+      if (sender === 'user') {
+        addNotification('Failed to save your message. You may continue chatting, but history might not be preserved.', 'warning');
+      }
+    }
   };
 
   // Handle chat toggle
@@ -288,13 +374,67 @@ const ChatbotWidget: React.FC = () => {
     setIsOpen(!isOpen);
     if (!isOpen) {
       setUnreadMessages(0);
-      // Reset conversation ID when chat is closed and reopened?
-      // setConversationId(null); // Consider implications 
+      // Try to load previous conversation if user is authenticated
+      if (isAuthenticated) {
+        loadConversationHistory();
+      }
       setTimeout(() => {
         inputRef.current?.focus();
       }, 300);
     }
   };
+
+  // Load conversation history
+  const loadConversationHistory = async () => {
+    if (!conversationId || !isAuthenticated) return;
+    
+    try {
+      setIsTyping(true); // Show loading indicator
+      const response = await chatbotService.getConversationHistory(conversationId);
+      const history = response.data || [];
+      
+      if (history && history.length > 0) {
+        // Clear welcome message if we have history
+        setMessages(prevMessages => 
+          prevMessages.filter(msg => msg.id !== 'welcome')
+        );
+        
+        // Convert API messages to UI messages
+        const uiMessages: Message[] = history.map(msg => ({
+          id: `${msg.id}`,
+          text: msg.content,
+          sender: msg.senderType as 'user' | 'bot', // Cast to expected type
+          timestamp: new Date(msg.createdAt),
+          feedback: msg.senderType === 'bot' ? null : undefined,
+          // Parse metadata if available
+          ...(msg.metadata?.ticketId ? { ticketInfo: { id: msg.metadata.ticketId } } : {})
+        }));
+        
+        // Update messages state with history
+        setMessages(prevMessages => {
+          // Keep only messages not already in the history (by ID)
+          const existingIds = new Set(uiMessages.map(m => m.id));
+          const newMessages = prevMessages.filter(m => !existingIds.has(m.id));
+          return [...uiMessages, ...newMessages];
+        });
+        
+        // Optional success notification
+        addNotification('Loaded your conversation history', 'info');
+      }
+    } catch (error: any) {
+      console.error("Failed to load conversation history:", error);
+      addNotification('Could not load conversation history', 'warning');
+    } finally {
+      setIsTyping(false);
+    }
+  };
+
+  // Effect to try loading conversation if user logs in while chat is open
+  useEffect(() => {
+    if (isAuthenticated && isOpen && !conversationId) {
+      loadConversationHistory();
+    }
+  }, [isAuthenticated, isOpen, conversationId]);
 
   // Handle input change
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -391,25 +531,126 @@ const ChatbotWidget: React.FC = () => {
         setConversationState('creating_ticket_description');
         botResponse = "Got it. Now, please provide a description for the ticket.";
         break;
+
       case 'creating_ticket_description':
-        const ticketData = { 
-            title: pendingData.subject, 
-            description: input, 
-            priority: TicketPriority.MEDIUM 
-        };
-        try {
-            const newTicket = await ticketService.createTicket(ticketData);
+        // Store description
+        setPendingData(prev => ({ ...prev, description: input }));
+        
+        // Ask for department
+        if (departments && departments.length > 0) {
+          const departmentOptions = departments.map(d => <li key={d.id}>{d.name}</li>);
+          botResponse = (
+            <>
+              Okay, which department should handle this ticket?
+              <ul>{departmentOptions}</ul>
+            </>
+          );
+          setConversationState('getting_department');
+        } else {
+          // If no departments loaded, skip to type or directly to tags/creation
+          botResponse = "Could not load departments. Let's proceed. Which type of issue is this? (e.g., Incident, Question)";
+          setConversationState('getting_ticket_type'); // Or handle error/skip
+        }
+        break;
+
+      case 'getting_department':
+        const chosenDept = departments.find(d => d.name.toLowerCase() === input.toLowerCase());
+        if (chosenDept) {
+          setPendingData(prev => ({ ...prev, departmentId: chosenDept.id }));
+          // Ask for type
+          if (ticketTypes && ticketTypes.length > 0) {
+            const typeOptions = ticketTypes.map(t => <li key={t.id}>{t.name}</li>);
             botResponse = (
               <>
+                Understood. And what type of issue is this?
+                <ul>{typeOptions}</ul>
+              </>
+            );
+            setConversationState('getting_ticket_type');
+          } else {
+            botResponse = "Could not load ticket types. Please add any relevant tags (optional, comma-separated), or just press Enter to skip.";
+            setConversationState('getting_tags');
+          }
+        } else {
+          const departmentOptions = departments.map(d => <li key={d.id}>{d.name}</li>);
+          botResponse = (
+            <>
+              Sorry, I didn't recognize that department. Please choose from:
+              <ul>{departmentOptions}</ul>
+            </>
+          );
+          // Stay in getting_department state
+        }
+        break;
+
+      case 'getting_ticket_type':
+        const chosenType = ticketTypes.find(t => t.name.toLowerCase() === input.toLowerCase());
+        if (chosenType) {
+          setPendingData(prev => ({ ...prev, typeId: chosenType.id }));
+          botResponse = "Great. You can add some tags to help categorize this ticket (optional, comma-separated), or press Enter to skip.";
+          setConversationState('getting_tags');
+        } else {
+          const typeOptions = ticketTypes.map(t => <li key={t.id}>{t.name}</li>);
+          botResponse = (
+            <>
+              Sorry, I didn't recognize that type. Please choose from:
+              <ul>{typeOptions}</ul>
+            </>
+          );
+          // Stay in getting_ticket_type state
+        }
+        break;
+
+      case 'getting_tags':
+        // Ensure user is logged in before final creation attempt
+        if (!user) {
+          addNotification('You must be logged in to create a ticket.', 'error');
+          botResponse = "Authentication error. Please log in to finalize ticket creation.";
+          setConversationState('idle');
+          setPendingData({});
+          break;
+        }
+
+        // Parse tags if provided
+        const tags = input.trim() ? input.split(',').map(tag => tag.trim()).filter(tag => tag) : [];
+        
+        // Prepare final ticket data
+        const finalTicketData = { 
+            subject: pendingData.subject, 
+            description: pendingData.description, 
+            requesterId: user.id, // From auth context
+            departmentId: pendingData.departmentId,
+            typeId: pendingData.typeId,
+            priorityId: 1002, // Defaulting to Medium (ensure this ID exists)
+            tags: tags // Add parsed tags
+        };
+        
+        try {
+            console.log("Attempting to create ticket with data:", finalTicketData);
+            const newTicket = await ticketService.createTicket(finalTicketData);
+            botResponse = (
+              <React.Fragment>
                 Ticket created successfully! <br />
                 ID: {newTicket.id} <br />
-                Subject: {newTicket.title} <br />
-                Status: {newTicket.status}
-              </>
+                Subject: {newTicket.subject} <br />
+                Status: {
+                  typeof newTicket.status === 'object' && newTicket.status?.name 
+                    ? newTicket.status.name.toUpperCase() 
+                    : String(newTicket.status || 'N/A').toUpperCase()
+                } <br />
+                Department: {departments.find(d => d.id === finalTicketData.departmentId)?.name || 'N/A'} <br />
+                Type: {ticketTypes.find(t => t.id === finalTicketData.typeId)?.name || 'N/A'}
+                {finalTicketData.tags.length > 0 && (
+                  <React.Fragment> <br /> Tags: {finalTicketData.tags.join(', ')}</React.Fragment>
+                )}
+              </React.Fragment>
             );
             addNotification('Ticket created successfully!', 'success');
         } catch (err: any) {
-            botResponse = `Failed to create ticket: ${err.message || 'Unknown error'}`;
+            console.error("Ticket creation failed:", err);
+            // Provide more specific error feedback if possible
+            const errorDetail = err.response?.data?.message || err.message || 'Unknown error';
+            botResponse = `Failed to create ticket: ${errorDetail}`;
             addNotification('Failed to create ticket', 'error');
         }
         setConversationState('idle');
@@ -419,25 +660,67 @@ const ChatbotWidget: React.FC = () => {
       // --- Get Status Flow ---
       case 'getting_ticket_id_for_status':
          try {
-            const ticket = await ticketService.getTicketById(input);
-            // Prepare the response content
+            // Attempt to fetch the ticket
+            console.log(`[ChatbotWidget] Calling ticketService.getTicketById with ID: ${input}`);
+            const ticketData = await ticketService.getTicketById(input);
+            console.log(`[ChatbotWidget] Received ticket data for ID ${input}:`, JSON.stringify(ticketData)); // Log received ticket data
+            
+            // Check if ticket data is valid and contains the nested ticket object
+            if (!ticketData || typeof ticketData !== 'object' || !ticketData.ticket) {
+              console.error(`[ChatbotWidget] Invalid or missing nested ticket data received:`, ticketData);
+              throw new Error('Received invalid ticket data structure from server.');
+            }
+            
+            const actualTicket = ticketData.ticket; // Access the nested ticket object
+            
+            // Safely construct the priority display string
+            let priorityDisplay = 'N/A';
+            if (actualTicket.priority) {
+              if (typeof actualTicket.priority === 'string') {
+                priorityDisplay = actualTicket.priority.toUpperCase();
+              } else if (typeof actualTicket.priority === 'object' && actualTicket.priority.name) {
+                priorityDisplay = actualTicket.priority.name;
+              }
+            }
+
+            // Prepare the response content with safe access to the nested object
             const responseContent = (
-              <>
+              <React.Fragment>
                 Ticket Found: <br />
-                ID: {ticket.id} <br />
-                Subject: {ticket.title} <br />
-                Status: <strong>{ticket.status.toUpperCase()}</strong> <br />
-                Priority: {ticket.priority.toUpperCase()} <br />
-                Created: {new Date(ticket.createdAt).toLocaleString()} <br />
-                Updated: {new Date(ticket.updatedAt).toLocaleString()}
-              </>
+                ID: {actualTicket.id} <br />
+                Subject: {actualTicket.subject || 'N/A'} <br /> 
+                Status: <strong>{
+                  typeof actualTicket.status === 'object' && actualTicket.status?.name 
+                    ? actualTicket.status.name.toUpperCase() 
+                    : String(actualTicket.status || 'N/A').toUpperCase()
+                }</strong> <br />
+                Priority: {priorityDisplay} <br /> 
+                Created: {(actualTicket.createdAt || (actualTicket as any).created_at) 
+                  ? new Date(actualTicket.createdAt || (actualTicket as any).created_at).toLocaleString() 
+                  : 'N/A'} <br />
+                Updated: {(actualTicket.updatedAt || (actualTicket as any).updated_at) 
+                  ? new Date(actualTicket.updatedAt || (actualTicket as any).updated_at).toLocaleString() 
+                  : 'N/A'}
+              </React.Fragment>
             );
-            // Use addMessage to display and save
-            await addMessage(responseContent, 'bot', { ticketInfo: ticket });
+            
+            // Use addMessage to display and save (pass the nested ticket for ticketInfo)
+            await addMessage(responseContent, 'bot', { ticketInfo: actualTicket });
             botResponse = null; // Prevent default response
           } catch (err: any) {
-            botResponse = `Could not find ticket ${input}: ${err.message || 'Please check the ID and try again.'}`;
-            // Error response will be added via addMessage below
+            // Log the full error for debugging
+            console.error('Error fetching ticket status:', err);
+            
+            // Construct a user-friendly message
+            let userMessage = 'Please check the ID and try again.';
+            if (err.status === 404) {
+              userMessage = 'Ticket not found. Please verify the ID.';
+            } else if (err.message) {
+              // Use the error message if available, but keep it generic
+              userMessage = `An error occurred (${err.message}). Please try again.`; 
+            }
+             
+            botResponse = `Could not find or load ticket ${input}. ${userMessage}`;
           }
         setConversationState('idle');
         break;
@@ -478,24 +761,62 @@ const ChatbotWidget: React.FC = () => {
   // Helper function to fetch and display ticket status
   const fetchAndShowTicketStatus = async (ticketId: string) => {
     try {
-      const ticket = await ticketService.getTicketById(ticketId);
+      const ticketData = await ticketService.getTicketById(ticketId);
+
+      // Check if ticket data is valid and contains the nested ticket object
+      if (!ticketData || typeof ticketData !== 'object' || !ticketData.ticket) {
+         console.error(`[ChatbotWidget] Invalid or missing nested ticket data in fetchAndShowTicketStatus:`, ticketData);
+        throw new Error('Received invalid ticket data structure from server.');
+      }
+      
+      const actualTicket = ticketData.ticket; // Access the nested ticket object
+
+      // Safely construct the priority display string
+      let priorityDisplay = 'N/A';
+      if (actualTicket.priority) {
+        if (typeof actualTicket.priority === 'string') {
+          priorityDisplay = actualTicket.priority.toUpperCase();
+        } else if (typeof actualTicket.priority === 'object' && actualTicket.priority.name) {
+          priorityDisplay = actualTicket.priority.name;
+        }
+      }
+
       addMessage(
         (
-          <>
+          <React.Fragment>
             Ticket Found: <br />
-            ID: {ticket.id} <br />
-            Subject: {ticket.title} <br />
-            Status: <strong>{ticket.status.toUpperCase()}</strong> <br />
-            Priority: {ticket.priority.toUpperCase()} <br />
-            Created: {new Date(ticket.createdAt).toLocaleString()} <br />
-            Updated: {new Date(ticket.updatedAt).toLocaleString()}
-          </>
+            ID: {actualTicket.id} <br />
+            Subject: {actualTicket.subject || 'N/A'} <br /> 
+            Status: <strong>{
+              typeof actualTicket.status === 'object' && actualTicket.status?.name 
+                ? actualTicket.status.name.toUpperCase() 
+                : String(actualTicket.status || 'N/A').toUpperCase()
+            }</strong> <br />
+            Priority: {priorityDisplay} <br /> 
+            Created: {(actualTicket.createdAt || (actualTicket as any).created_at) 
+              ? new Date(actualTicket.createdAt || (actualTicket as any).created_at).toLocaleString() 
+              : 'N/A'} <br />
+            Updated: {(actualTicket.updatedAt || (actualTicket as any).updated_at) 
+              ? new Date(actualTicket.updatedAt || (actualTicket as any).updated_at).toLocaleString() 
+              : 'N/A'}
+          </React.Fragment>
         ), 
         'bot',
-        { ticketInfo: ticket } // Store ticket info if needed later
+        { ticketInfo: actualTicket } // Pass the nested ticket for ticketInfo
       );
     } catch (err: any) {
-      addMessage(`Could not find ticket ${ticketId}: ${err.message || 'Please check the ID and try again.'}`, 'bot');
+       // Log the full error for debugging
+       console.error(`Error in fetchAndShowTicketStatus for ID ${ticketId}:`, err);
+            
+       // Construct a user-friendly message
+       let userMessage = 'Please check the ID and try again.';
+       if (err.status === 404) {
+         userMessage = 'Ticket not found. Please verify the ID.';
+       } else if (err.message) {
+         userMessage = `An error occurred (${err.message}). Please try again.`;
+       }
+       
+      addMessage(`Could not find or load ticket ${ticketId}. ${userMessage}`, 'bot');
     }
   };
   
@@ -642,11 +963,11 @@ const ChatbotWidget: React.FC = () => {
             </Box>
           </ChatHeader>
           
-          <MessagesContainer ref={messagesEndRef}>
+          <MessagesContainer>
             {messages.map((message) => (
               <Box 
                 key={message.id} 
-                      sx={{ 
+                sx={{ 
                   width: '100%', 
                   display: 'flex', 
                   flexDirection: 'column',
@@ -785,7 +1106,7 @@ const ChatbotWidget: React.FC = () => {
                 </MessageBubble>
               </Box>
             )}
-            {/* <div ref={messagesEndRef} /> */}
+            <div ref={messagesEndRef} />
           </MessagesContainer>
           
           <ChatFooter>
