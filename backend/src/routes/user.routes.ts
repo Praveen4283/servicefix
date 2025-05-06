@@ -13,6 +13,9 @@ import fs from 'fs/promises';
 import path from 'path';
 import { AppError } from '../utils/errorHandler';
 import { logger } from '../utils/logger';
+import { getCustomRepository } from 'typeorm';
+import notificationService from '../services/notification.service';
+import { getPasswordResetEmailTemplate } from '../utils/email';
 
 const router = express.Router();
 
@@ -454,20 +457,50 @@ router.post('/:id/reset-password', authenticate, authorize([UserRole.ADMIN]), as
       return res.status(404).json({ message: 'User not found' });
     }
 
-    // TODO: Implement actual password reset logic
-    // This likely involves:
-    // 1. Generating a secure reset token (similar to forgotPassword in auth.controller)
-    // 2. Saving the token and expiry to the user record
-    // 3. Sending an email to the user with the reset link/token
-    // Example (needs actual implementation):
-    // await triggerPasswordResetEmail(user.email);
+    // Generate reset token
+    const resetToken = crypto.randomBytes(32).toString('hex');
+    const resetTokenExpiry = new Date(Date.now() + 60 * 60 * 1000); // 1 hour
+    
+    // Hash token before saving to database
+    const hashedToken = await bcrypt.hash(resetToken, 10);
+    
+    // Use direct query to update the user with the correct column names
+    await userRepository.query(
+      'UPDATE users SET reset_token = $1, reset_token_expires_at = $2 WHERE id = $3',
+      [hashedToken, resetTokenExpiry, user.id]
+    );
+    
+    // Get frontend URL from environment variables with fallback
+    const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
+    
+    // Create reset URL
+    const resetUrl = `${frontendUrl}/reset-password?token=${resetToken}`;
+    
+    // Use the imported email template
+    const html = getPasswordResetEmailTemplate(user.firstName, resetToken, resetUrl);
+    
+    // Try the new dedicated notification service method
+    const emailSent = await notificationService.sendEmail({
+      to: user.email,
+      subject: 'Password Reset Requested',
+      html
+    });
+    
+    // Log the outcome and information about the email settings being used
+    if (emailSent) {
+      const settingsSummary = await notificationService.getEmailSettingsSummary();
+      logger.info(`Password reset email sent successfully for user: ${userId} (email: ${user.email}) using ${settingsSummary}`);
+    } else {
+      logger.warn(`Failed to send password reset email for user: ${userId} (email: ${user.email}). Check email settings.`);
+    }
 
-    console.log(`Password reset triggered for user: ${userId} (email: ${user.email}) - Placeholder`);
-
-    return res.status(200).json({ message: 'Password reset initiated successfully' });
+    return res.status(200).json({ 
+      message: `Password reset initiated for user: ${userId} (email: ${user.email})`,
+      emailSent // Include whether email was sent in the response
+    });
 
   } catch (error) {
-    console.error('Error triggering password reset:', error);
+    logger.error('Error triggering password reset:', error);
     return res.status(500).json({ message: 'Server error during password reset' });
   }
 });

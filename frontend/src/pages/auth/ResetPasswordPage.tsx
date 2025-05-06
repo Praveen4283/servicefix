@@ -17,16 +17,15 @@ import useFormValidation from '../../utils/useFormValidation';
 import * as Yup from 'yup';
 import { useAuth } from '../../context/AuthContext';
 import { useNotification } from '../../context/NotificationContext';
+import apiClient from '../../services/apiClient';
 
 const ResetPasswordPage: React.FC = () => {
   const navigate = useNavigate();
   const location = useLocation();
-  // Not using resetPassword yet since we're simulating the reset
-  // const { resetPassword } = useAuth();
+  const { addNotification } = useNotification();
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [isSuccess, setIsSuccess] = useState(false);
-  const { addNotification } = useNotification();
   const invalidTokenNotified = useRef(false);
 
   // Extract token from URL query parameters
@@ -66,13 +65,20 @@ const ResetPasswordPage: React.FC = () => {
         return;
       }
       
-      // In a real app, you would call an API endpoint with the token and new password
-      // For now, we'll just simulate a successful password reset
-      // await resetPassword(token, values.password);
-      await new Promise((resolve) => setTimeout(resolve, 1000)); // Simulate API call
-      
-      setIsSuccess(true);
-      // Success notification will be shown via the hook
+      try {
+        // Call the actual API endpoint to reset the password
+        await apiClient.post('/auth/reset-password', {
+          token,
+          password: values.password
+        });
+        
+        setIsSuccess(true);
+        addNotification('Your password has been successfully reset!', 'success');
+      } catch (error: any) {
+        const errorMessage = error.response?.data?.message || 'Failed to reset password. The link may have expired.';
+        addNotification(errorMessage, 'error');
+        throw new Error(errorMessage);
+      }
     },
     successMessage: 'Your password has been successfully reset!',
     showSuccessNotification: true,

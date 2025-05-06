@@ -193,6 +193,28 @@ export const register = async (
     const token = generateToken(user.id, user.role);
     const refreshToken = generateRefreshToken(user.id);
 
+    // Calculate refresh token expiry date
+    const now = Date.now();
+    const refreshTokenExpiresInMs = parseDuration(JWT_REFRESH_EXPIRES_IN);
+    
+    if (!refreshTokenExpiresInMs) {
+      logger.error(`Failed to parse JWT_REFRESH_EXPIRES_IN value: ${JWT_REFRESH_EXPIRES_IN}`);
+      throw new AppError('Server configuration error', 500);
+    }
+    
+    const refreshTokenExpiresAt = new Date(now + refreshTokenExpiresInMs);
+    
+    // Store refresh token in database
+    try {
+      await pool.query(
+        'INSERT INTO user_tokens (user_id, refresh_token, expires_at) VALUES ($1, $2, $3)',
+        [user.id, refreshToken, refreshTokenExpiresAt]
+      );
+    } catch (err) {
+      logger.error(`Failed to store refresh token in database during registration: ${err}`);
+      // Continue with registration even if token storage fails - allows fallback to stateless mode
+    }
+
     // Return user data and token
     res.status(201).json({
       status: 'success',
@@ -271,6 +293,28 @@ export const login = async (
 
     const token = generateToken(userFromDb.id, userFromDb.role);
     const refreshToken = generateRefreshToken(userFromDb.id);
+
+    // Calculate refresh token expiry date
+    const now = Date.now();
+    const refreshTokenExpiresInMs = parseDuration(JWT_REFRESH_EXPIRES_IN);
+    
+    if (!refreshTokenExpiresInMs) {
+      logger.error(`Failed to parse JWT_REFRESH_EXPIRES_IN value: ${JWT_REFRESH_EXPIRES_IN}`);
+      throw new AppError('Server configuration error', 500);
+    }
+    
+    const refreshTokenExpiresAt = new Date(now + refreshTokenExpiresInMs);
+    
+    // Store refresh token in database
+    try {
+      await pool.query(
+        'INSERT INTO user_tokens (user_id, refresh_token, expires_at) VALUES ($1, $2, $3)',
+        [userFromDb.id, refreshToken, refreshTokenExpiresAt]
+      );
+    } catch (err) {
+      logger.error(`Failed to store refresh token in database: ${err}`);
+      // Continue with login even if token storage fails - allows fallback to stateless mode
+    }
 
     // Construct the user response object carefully, mapping fields
     const userResponse = {
@@ -462,15 +506,51 @@ export const forgotPassword = async (
       [hashedToken, resetTokenExpiry, user.id]
     );
     
-    // TODO: Send email with reset token
-    logger.info(`Reset token for ${email}: ${resetToken}`);
+    // Create reset URL
+    const resetUrl = `${process.env.FRONTEND_URL}/reset-password?token=${resetToken}`;
     
+    // Create email content
+    const emailContent = {
+      to: email,
+      subject: 'ServiceFix: Password Reset Request',
+      html: `
+        <h2>Password Reset</h2>
+        <p>Hello ${user.first_name},</p>
+        <p>You requested a password reset for your ServiceFix account.</p>
+        <p>Please click the link below to reset your password:</p>
+        <p><a href="${resetUrl}" style="display: inline-block; background-color: #4CAF50; color: white; padding: 10px 20px; text-decoration: none; border-radius: 4px;">Reset Password</a></p>
+        <p>If you didn't request this password reset, please ignore this email or contact support if you're concerned.</p>
+        <p>This link will expire in 1 hour.</p>
+        <p>Thanks,<br>The ServiceFix Team</p>
+      `
+    };
+    
+    // Import notification service directly to avoid circular dependencies
+    const notificationService = require('../services/notification.service').default;
+    
+    // Send the email using the notification service
+    const emailSent = await notificationService.sendEmail(emailContent);
+    
+    // Log result but don't expose token in logs
+    if (emailSent) {
+      logger.info(`Password reset email sent successfully for user: ${user.id} (email: ${email})`);
+    } else {
+      logger.warn(`Failed to send password reset email for user: ${user.id} (email: ${email}). Check email settings.`);
+    }
+    
+    // Always return the same response regardless of email sending success
+    // to prevent email enumeration attacks
     res.status(200).json({
       status: 'success',
       message: 'If your email is registered, you will receive a password reset link'
     });
   } catch (error) {
-    next(error);
+    logger.error('Error in forgotPassword:', error);
+    // Don't expose the error, maintain consistent response
+    res.status(200).json({
+      status: 'success',
+      message: 'If your email is registered, you will receive a password reset link'
+    });
   }
 };
 

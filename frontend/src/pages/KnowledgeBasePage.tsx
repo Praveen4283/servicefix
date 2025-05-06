@@ -320,7 +320,7 @@ const KnowledgeBasePage: React.FC = () => {
           to: { opacity: 1 }
         }
       }}>
-        <EnhancedGrid container spacing={3}>
+        <EnhancedGrid container spacing={1}>
           {/* Welcome Banner / Header */}
           <Grid item xs={12}>
             <EnhancedCard 
@@ -669,7 +669,6 @@ const KnowledgeBasePage: React.FC = () => {
                       ...cardStyles, 
                       border: '1px solid', 
                       borderColor: theme.palette.divider,
-                      height: '100%',
                       ...gradientAccent(theme)
                     }}
                   >

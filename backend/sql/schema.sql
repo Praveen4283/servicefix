@@ -394,6 +394,26 @@ CREATE TABLE IF NOT EXISTS scheduled_maintenance (
   updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
+-- Settings Table
+CREATE TABLE IF NOT EXISTS settings (
+    id SERIAL PRIMARY KEY,
+    category VARCHAR(50) NOT NULL,
+    settings_data JSONB NOT NULL,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Create unique constraint on category
+CREATE UNIQUE INDEX IF NOT EXISTS idx_settings_category ON settings (category);
+
+-- Add initial default email settings
+INSERT INTO settings (category, settings_data) 
+VALUES (
+    'email', 
+    '{"smtpServer": "smtp.mailgun.org", "smtpPort": 587, "smtpUsername": "postmaster@sandboxeca4aa11a2a34b0d969c416f32d7686d.mailgun.org", "smtpPassword": "Raju@4283", "emailFromName": "ServiceFix Support", "emailReplyTo": "support@servicefix.com", "enableEmailNotifications": true}'
+)
+ON CONFLICT (category) DO NOTHING;
+
 -- Add indexes for performance
 CREATE INDEX IF NOT EXISTS idx_tickets_requester_id ON tickets(requester_id);
 CREATE INDEX IF NOT EXISTS idx_tickets_assignee_id ON tickets(assignee_id);

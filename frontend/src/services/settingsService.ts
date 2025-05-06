@@ -7,108 +7,79 @@ import {
   AdvancedSettings
 } from '../types/settings';
 
-class SettingsService {
-  private baseUrl = '/settings';
+// Get email settings
+const getEmailSettings = async (): Promise<EmailSettings> => {
+  return apiClient.get('/settings/email');
+};
 
-  /**
-   * Get general system settings
-   */
-  async getGeneralSettings(): Promise<GeneralSettings> {
-    return apiClient.get<GeneralSettings>(`${this.baseUrl}/general`);
-  }
+// Update email settings
+const updateEmailSettings = async (emailSettings: EmailSettings): Promise<EmailSettings> => {
+  return apiClient.put('/settings/email', emailSettings);
+};
 
-  /**
-   * Update general system settings
-   * @param settings - The general settings to update
-   */
-  async updateGeneralSettings(settings: GeneralSettings): Promise<GeneralSettings> {
-    return apiClient.put<GeneralSettings>(`${this.baseUrl}/general`, settings);
-  }
+// Test email settings
+const testEmailSettings = async (emailSettings: EmailSettings): Promise<{ success: boolean; message: string }> => {
+  return apiClient.post('/settings/email/test', emailSettings);
+};
 
-  /**
-   * Get email configuration settings
-   */
-  async getEmailSettings(): Promise<EmailSettings> {
-    return apiClient.get<EmailSettings>(`${this.baseUrl}/email`);
-  }
+// Get general settings
+const getGeneralSettings = async (): Promise<GeneralSettings> => {
+  return apiClient.get('/settings/general');
+};
 
-  /**
-   * Update email configuration settings
-   * @param settings - The email settings to update
-   */
-  async updateEmailSettings(settings: EmailSettings): Promise<EmailSettings> {
-    return apiClient.put<EmailSettings>(`${this.baseUrl}/email`, settings);
-  }
+// Update general settings
+const updateGeneralSettings = async (generalSettings: GeneralSettings): Promise<GeneralSettings> => {
+  return apiClient.put('/settings/general', generalSettings);
+};
 
-  /**
-   * Get ticket configuration settings
-   */
-  async getTicketSettings(): Promise<TicketSettings> {
-    return apiClient.get<TicketSettings>(`${this.baseUrl}/ticket`);
-  }
+// Get ticket settings
+const getTicketSettings = async (): Promise<TicketSettings> => {
+  return apiClient.get('/settings/ticket');
+};
 
-  /**
-   * Update ticket configuration settings
-   * @param settings - The ticket settings to update
-   */
-  async updateTicketSettings(settings: TicketSettings): Promise<TicketSettings> {
-    return apiClient.put<TicketSettings>(`${this.baseUrl}/ticket`, settings);
-  }
+// Update ticket settings
+const updateTicketSettings = async (ticketSettings: TicketSettings): Promise<TicketSettings> => {
+  return apiClient.put('/settings/ticket', ticketSettings);
+};
 
-  /**
-   * Test email configuration
-   * @param settings - The email settings to test
-   */
-  async testEmailSettings(settings: EmailSettings): Promise<{ success: boolean; message: string }> {
-    return apiClient.post<{ success: boolean; message: string }>(`${this.baseUrl}/email/test`, settings);
-  }
+// Get integration settings
+const getIntegrationSettings = async (): Promise<IntegrationSettings> => {
+  return apiClient.get('/settings/integration');
+};
 
-  /**
-   * Get integration settings
-   */
-  async getIntegrationSettings(): Promise<IntegrationSettings> {
-    return apiClient.get<IntegrationSettings>(`${this.baseUrl}/integrations`);
-  }
+// Update integration settings
+const updateIntegrationSettings = async (integrationSettings: IntegrationSettings): Promise<IntegrationSettings> => {
+  return apiClient.put('/settings/integration', integrationSettings);
+};
 
-  /**
-   * Update integration settings
-   * @param settings - The integration settings to update
-   */
-  async updateIntegrationSettings(settings: IntegrationSettings): Promise<IntegrationSettings> {
-    return apiClient.put<IntegrationSettings>(`${this.baseUrl}/integrations`, settings);
-  }
+// Test integration connection
+const testIntegrationConnection = async (type: string, settings: any): Promise<{ success: boolean; message: string }> => {
+  return apiClient.post(`/settings/integration/${type}/test`, settings);
+};
 
-  /**
-   * Test integration connection
-   * @param type - The integration type to test (slack, teams, jira, github)
-   * @param settings - The integration settings to test
-   */
-  async testIntegrationConnection(
-    type: string, 
-    settings: Partial<IntegrationSettings>
-  ): Promise<{ success: boolean; message: string }> {
-    return apiClient.post<{ success: boolean; message: string }>(
-      `${this.baseUrl}/integrations/${type}/test`, 
-      settings
-    );
-  }
+// Get advanced settings
+const getAdvancedSettings = async (): Promise<AdvancedSettings> => {
+  return apiClient.get('/settings/advanced');
+};
 
-  /**
-   * Get advanced settings
-   */
-  async getAdvancedSettings(): Promise<AdvancedSettings> {
-    return apiClient.get<AdvancedSettings>(`${this.baseUrl}/advanced`);
-  }
+// Update advanced settings
+const updateAdvancedSettings = async (advancedSettings: AdvancedSettings): Promise<AdvancedSettings> => {
+  return apiClient.put('/settings/advanced', advancedSettings);
+};
 
-  /**
-   * Update advanced settings
-   * @param settings - The advanced settings to update
-   */
-  async updateAdvancedSettings(settings: AdvancedSettings): Promise<AdvancedSettings> {
-    return apiClient.put<AdvancedSettings>(`${this.baseUrl}/advanced`, settings);
-  }
-}
+const settingsService = {
+  getEmailSettings,
+  updateEmailSettings,
+  testEmailSettings,
+  getGeneralSettings,
+  updateGeneralSettings,
+  getTicketSettings,
+  updateTicketSettings,
+  getIntegrationSettings,
+  updateIntegrationSettings,
+  testIntegrationConnection,
+  getAdvancedSettings,
+  updateAdvancedSettings
+};
 
-// Create and export a singleton instance
-const settingsService = new SettingsService();
 export default settingsService; 

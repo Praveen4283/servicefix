@@ -419,7 +419,7 @@ const AnalyticsDashboardPage: React.FC = () => {
 
   // Use the same rendering approach as TicketListPage
   const renderDashboardContent = () => (
-    <EnhancedGrid container spacing={3}>
+    <EnhancedGrid container spacing={1}>
       {/* Header */}
       <Grid item xs={12}>
         <Card 

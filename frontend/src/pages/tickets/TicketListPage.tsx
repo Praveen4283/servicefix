@@ -817,36 +817,22 @@ const TicketListPage: React.FC = () => {
     {
       field: 'actions',
       headerName: 'Actions',
-      width: 120,
+      width: 80,
       renderCell: (params) => (
         <Box sx={{ display: 'flex' }}>
-        <Tooltip title="View Ticket">
-          <IconButton
-            size="small"
-            onClick={(e) => {
-              e.stopPropagation();
-              navigate(`/tickets/${params.row.id}`);
-            }}
-              sx={{ 
-                color: theme.palette.primary.main,
-                '&:hover': { backgroundColor: alpha(theme.palette.primary.main, 0.1) }
-            }}
-          >
-            <VisibilityIcon fontSize="small" />
-          </IconButton>
-        </Tooltip>
-          <Tooltip title="Edit Ticket">
+          <Tooltip title="View Ticket">
             <IconButton
               size="small"
               onClick={(e) => {
                 e.stopPropagation();
+                navigate(`/tickets/${params.row.id}`);
               }}
               sx={{ 
-                color: theme.palette.info.main,
-                '&:hover': { backgroundColor: alpha(theme.palette.info.main, 0.1) }
+                color: theme.palette.primary.main,
+                '&:hover': { backgroundColor: alpha(theme.palette.primary.main, 0.1) }
               }}
             >
-              <EditIcon fontSize="small" />
+              <VisibilityIcon fontSize="small" />
             </IconButton>
           </Tooltip>
         </Box>
@@ -923,9 +909,14 @@ const TicketListPage: React.FC = () => {
       headerName: 'Created',
       width: 170,
       renderCell: (params) => (
-        <Typography variant="body2" color="text.secondary">
-          {typeof params.row.createdAt === 'string' ? getRelativeTime(params.row.createdAt, userTimeZone) : 'Unknown'}
-        </Typography>
+        <Box>
+          <Typography variant="body2">
+            {typeof params.row.createdAt === 'string' ? formatDate(params.row.createdAt, userTimeZone) : 'Unknown'}
+          </Typography>
+          <Typography variant="caption" color="text.secondary">
+            {typeof params.row.createdAt === 'string' ? getRelativeTime(params.row.createdAt, userTimeZone) : ''}
+          </Typography>
+        </Box>
       ),
       valueGetter: (params) => params.row.createdAt || '',
     },
@@ -1708,6 +1699,7 @@ const renderAdminDashboard = () => {
           }}
           pageSizeOptions={[5, 10, 25]}
           disableRowSelectionOnClick
+          onRowClick={(params) => navigate(`/tickets/${params.row.id}`)}
           loading={contextLoading}
           sx={{ 
             border: 'none',
@@ -1715,7 +1707,16 @@ const renderAdminDashboard = () => {
               backgroundColor: theme.palette.mode === 'dark'
                 ? alpha(theme.palette.primary.dark, 0.1) 
                 : alpha(theme.palette.primary.light, 0.1),
-            }
+            },
+            '& .MuiDataGrid-cell': {
+              borderBottom: `1px solid ${theme.palette.divider}`,
+              cursor: 'pointer',
+              transition: 'all 0.2s ease',
+              py: 1, 
+               '&:hover': {
+                backgroundColor: alpha(theme.palette.primary.main, 0.04),
+              },
+            },
           }}
         />
       </Paper>

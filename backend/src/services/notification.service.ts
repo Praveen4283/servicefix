@@ -2,6 +2,8 @@ import nodemailer from 'nodemailer';
 import { AppDataSource } from '../config/database';
 import { Notification } from '../models/Notification';
 import socketService from './socket.service';
+import { query } from '../config/database';
+import { logger } from '../utils/logger';
 
 interface EmailOptions {
   to: string;
@@ -18,20 +20,79 @@ interface NotificationContent {
   metadata?: any;
 }
 
+interface EmailSettings {
+  smtpServer: string;
+  smtpPort: number;
+  smtpUsername: string;
+  smtpPassword: string;
+  emailFromName: string;
+  emailReplyTo: string;
+  enableEmailNotifications: boolean;
+}
+
 class NotificationService {
   private emailTransporter: any;
+  private emailSettings: EmailSettings | null = null;
   
   constructor() {
-    // Initialize email transporter
-    this.emailTransporter = nodemailer.createTransport({
-      host: process.env.SMTP_HOST,
-      port: parseInt(process.env.SMTP_PORT || '587'),
-      secure: process.env.SMTP_SECURE === 'true',
-      auth: {
-        user: process.env.SMTP_USER,
-        pass: process.env.SMTP_PASSWORD,
-      },
-    });
+    // Initialize email transporter with default settings from environment variables
+    // We'll refresh this with database settings when needed
+    this.initializeEmailTransporter();
+  }
+
+  /**
+   * Initialize or refresh the email transporter with the latest settings
+   */
+  async initializeEmailTransporter() {
+    try {
+      // Try to fetch email settings from database
+      try {
+        const result = await query('SELECT settings_data FROM settings WHERE category = $1', ['email']);
+        if (result.rows.length > 0) {
+          this.emailSettings = result.rows[0].settings_data;
+          logger.info('Email settings loaded from database');
+        } else {
+          // If no settings found in database, use environment variables
+          this.emailSettings = {
+            smtpServer: process.env.SMTP_HOST || 'smtp.mailgun.org',
+            smtpPort: parseInt(process.env.SMTP_PORT || '587'),
+            smtpUsername: process.env.SMTP_USER || 'postmaster@sandboxeca4aa11a2a34b0d969c416f32d7686d.mailgun.org',
+            smtpPassword: process.env.SMTP_PASSWORD || 'Raju@4283',
+            emailFromName: process.env.EMAIL_FROM_NAME || 'ServiceFix Support',
+            emailReplyTo: process.env.EMAIL_REPLY_TO || 'support@servicefix.com',
+            enableEmailNotifications: process.env.ENABLE_EMAIL_NOTIFICATIONS !== 'false'
+          };
+          logger.info('Using default email settings from environment variables');
+        }
+      } catch (dbError: any) {
+        // If database query fails (e.g., table doesn't exist yet), use environment variables
+        logger.warn(`Failed to fetch email settings from database: ${dbError.message}. Using environment variables.`);
+        this.emailSettings = {
+          smtpServer: process.env.SMTP_HOST || 'smtp.mailgun.org',
+          smtpPort: parseInt(process.env.SMTP_PORT || '587'),
+          smtpUsername: process.env.SMTP_USER || 'postmaster@sandboxeca4aa11a2a34b0d969c416f32d7686d.mailgun.org',
+          smtpPassword: process.env.SMTP_PASSWORD || 'Raju@4283',
+          emailFromName: process.env.EMAIL_FROM_NAME || 'ServiceFix Support',
+          emailReplyTo: process.env.EMAIL_REPLY_TO || 'support@servicefix.com',
+          enableEmailNotifications: process.env.ENABLE_EMAIL_NOTIFICATIONS !== 'false'
+        };
+      }
+      
+      // Create transporter with current settings
+      this.emailTransporter = nodemailer.createTransport({
+        host: this.emailSettings?.smtpServer || process.env.SMTP_HOST || 'smtp.mailgun.org',
+        port: this.emailSettings?.smtpPort || parseInt(process.env.SMTP_PORT || '587'),
+        secure: (this.emailSettings?.smtpPort || 0) === 465,
+        auth: {
+          user: this.emailSettings?.smtpUsername || process.env.SMTP_USER || '',
+          pass: this.emailSettings?.smtpPassword || process.env.SMTP_PASSWORD || '',
+        },
+      });
+
+      logger.info(`Email transporter initialized with server: ${this.emailSettings?.smtpServer || process.env.SMTP_HOST || 'smtp.mailgun.org'}`);
+    } catch (error) {
+      logger.error('Error initializing email transporter:', error);
+    }
   }
   
   /**
@@ -41,15 +102,27 @@ class NotificationService {
    */
   async sendEmail(options: EmailOptions): Promise<boolean> {
     try {
+      // Refresh email transporter to ensure we have the latest settings
+      await this.initializeEmailTransporter();
+
+      // Check if email notifications are enabled
+      if (this.emailSettings && !this.emailSettings.enableEmailNotifications) {
+        logger.warn('Email notifications are disabled in settings. Email not sent.');
+        return false;
+      }
+      
       const mailOptions = {
-        from: process.env.EMAIL_FROM || 'noreply@servicedesk.com',
+        from: this.emailSettings?.emailFromName 
+          ? `"${this.emailSettings.emailFromName}" <${this.emailSettings.smtpUsername}>`
+          : process.env.EMAIL_FROM || 'noreply@servicedesk.com',
         ...options
       };
       
       await this.emailTransporter.sendMail(mailOptions);
+      logger.info(`Email sent successfully to ${options.to}`);
       return true;
     } catch (error) {
-      console.error('Error sending email:', error);
+      logger.error('Error sending email:', error);
       return false;
     }
   }
@@ -306,6 +379,20 @@ class NotificationService {
       console.error(`Error deleting all notifications for user ${userId}:`, error);
       return false;
     }
+  }
+
+  /**
+   * Get a summary of the current email settings for logging
+   * Returns a string like "SMTP: smtp.mailgun.org:587"
+   */
+  async getEmailSettingsSummary(): Promise<string> {
+    // Refresh settings if they might have changed
+    await this.initializeEmailTransporter();
+    
+    const server = this.emailSettings?.smtpServer || process.env.SMTP_HOST || 'unknown';
+    const port = this.emailSettings?.smtpPort || process.env.SMTP_PORT || 'unknown';
+    
+    return `SMTP: ${server}:${port}`;
   }
 }
 

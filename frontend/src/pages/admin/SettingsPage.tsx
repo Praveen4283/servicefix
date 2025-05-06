@@ -57,6 +57,7 @@ import {
   Check as CheckIcon,
   Link as LinkIcon,
   ChatBubble as SlackIcon,
+  Error as ErrorIcon,
 } from '@mui/icons-material';
 import { 
   pageContainer,
@@ -271,12 +272,12 @@ const SettingsPage: React.FC = () => {
 
   // Email settings
   const [emailSettings, setEmailSettings] = useState<EmailSettings>({
-    smtpServer: '',
+    smtpServer: 'smtp.mailgun.org',
     smtpPort: 587,
-    smtpUsername: '',
-    smtpPassword: '',
-    emailFromName: '',
-    emailReplyTo: '',
+    smtpUsername: 'postmaster@sandboxeca4aa11a2a34b0d969c416f32d7686d.mailgun.org',
+    smtpPassword: '••••••••••••',
+    emailFromName: 'ServiceFix Support',
+    emailReplyTo: 'support@servicefix.com',
     enableEmailNotifications: true,
   });
 
@@ -415,28 +416,24 @@ const SettingsPage: React.FC = () => {
   const fetchEmailSettings = async () => {
     try {
       setLoadingSettings(prev => ({ ...prev, email: true }));
+      const data = await settingsService.getEmailSettings();
       
-      // Simulate API call with a timeout
-      // In production, use: const data = await settingsService.getEmailSettings();
-      await new Promise(resolve => setTimeout(resolve, 1200));
-      const data: EmailSettings = {
-        smtpServer: 'smtp.example.com',
-        smtpPort: 587,
-        smtpUsername: 'no-reply@acmecorp.com',
-        smtpPassword: '••••••••••••',
-        emailFromName: 'Acme Support',
-        emailReplyTo: 'no-reply@acmecorp.com',
-        enableEmailNotifications: true,
-      };
-      
-      setEmailSettings(data);
-      setOriginalEmailSettings(data);
-    } catch (error) {
+      if (data && typeof data === 'object') {
+        setEmailSettings(data);
+        setOriginalEmailSettings(data);
+        setApiError(null); // Clear previous errors on success
+      } else {
+        // This case should ideally not happen if service layer normalizes response
+        throw new Error('Invalid data format received for email settings');
+      }
+    } catch (error: any) {
       console.error('Error fetching email settings:', error);
-      setApiError('Failed to load email settings. Please try again.');
+      setEmailSettings(null as any); // Explicitly set to null on error to trigger error UI
+      setOriginalEmailSettings(null as any); // Also set original to null
+      setApiError(`Failed to load email settings: ${error.message || 'Unknown error'}`);
       setNotification({
         open: true,
-        message: 'Failed to load email settings',
+        message: `Failed to load email settings: ${error.message || 'Unknown error'}`,
         type: 'error',
       });
     } finally {
@@ -977,6 +974,41 @@ const SettingsPage: React.FC = () => {
     saveSettings();
   };
 
+  // Handle save email settings
+  const handleSaveEmailSettings = async () => {
+    if (!validateForm('email')) {
+      setNotification({
+        open: true,
+        message: 'Please correct the errors before saving',
+        type: 'error',
+      });
+      return;
+    }
+    
+    setLoading(true);
+    
+    try {
+      // Save the email settings to the backend
+      const result = await settingsService.updateEmailSettings(emailSettings);
+      
+      setOriginalEmailSettings(result);
+      setNotification({
+        open: true,
+        message: 'Email settings saved successfully',
+        type: 'success',
+      });
+    } catch (error) {
+      console.error('Error saving email settings:', error);
+      setNotification({
+        open: true,
+        message: 'Failed to save email settings. Please try again.',
+        type: 'error',
+      });
+    } finally {
+      setLoading(false);
+    }
+  };
+
   // Add handleTestEmailSettings function
   const handleTestEmailSettings = async () => {
     if (!validateForm('email')) {
@@ -991,9 +1023,8 @@ const SettingsPage: React.FC = () => {
     setLoading(true);
     
     try {
-      // In production, use: const result = await settingsService.testEmailSettings(emailSettings);
-      await new Promise(resolve => setTimeout(resolve, 1500));
-      const result = { success: true, message: 'Test email sent successfully' };
+      // Use the real API to test email settings
+      const result = await settingsService.testEmailSettings(emailSettings);
       
       setNotification({
         open: true,
@@ -1189,7 +1220,7 @@ const SettingsPage: React.FC = () => {
         pointerEvents: 'none'
       }
     }}>
-      <Grid container spacing={3}>
+      <Grid container spacing={1}>
         {/* Header - Exact match to Ticket Management header */}
         <Grid item xs={12}>
           <Card 
@@ -1342,7 +1373,7 @@ const SettingsPage: React.FC = () => {
 
             {/* General Settings */}
               <TabPanel value={activeTab} index={0}>
-              <EnhancedGrid container spacing={3}>
+              <EnhancedGrid container spacing={1}>
                   <Grid item xs={12} md={6}>
                   <EnhancedCard
                     index={2}
@@ -1526,7 +1557,7 @@ const SettingsPage: React.FC = () => {
 
             {/* Email Settings */}
               <TabPanel value={activeTab} index={1}>
-              <EnhancedGrid container spacing={3}>
+              <EnhancedGrid container spacing={1}>
                   <Grid item xs={12} md={6}>
                   <EnhancedCard
                     index={2}
@@ -1575,12 +1606,12 @@ const SettingsPage: React.FC = () => {
                       <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '300px' }}>
                         <CircularProgress />
                       </Box>
-                    ) : (
+                    ) : emailSettings ? (
                       <>
                         <FormField
                           label="SMTP Server"
                           name="smtpServer"
-                          value={emailSettings.smtpServer}
+                          value={emailSettings.smtpServer || ''}
                           onChange={handleEmailSettingsChange}
                           required
                           error={!!getEmailError('smtpServer')}
@@ -1589,7 +1620,7 @@ const SettingsPage: React.FC = () => {
                         <FormField
                           label="SMTP Port"
                           name="smtpPort"
-                          value={emailSettings.smtpPort}
+                          value={emailSettings.smtpPort || 587}
                           onChange={handleEmailSettingsChange}
                           type="number"
                           required
@@ -1599,7 +1630,7 @@ const SettingsPage: React.FC = () => {
                         <FormField
                           label="SMTP Username"
                           name="smtpUsername"
-                          value={emailSettings.smtpUsername}
+                          value={emailSettings.smtpUsername || ''}
                           onChange={handleEmailSettingsChange}
                           required
                           error={!!getEmailError('smtpUsername')}
@@ -1608,7 +1639,7 @@ const SettingsPage: React.FC = () => {
                         <FormField
                           label="SMTP Password"
                           name="smtpPassword"
-                          value={emailSettings.smtpPassword}
+                          value={emailSettings.smtpPassword || ''}
                           onChange={handleEmailSettingsChange}
                           type="password"
                           required
@@ -1618,7 +1649,7 @@ const SettingsPage: React.FC = () => {
                         <FormField
                           label="From Name"
                           name="emailFromName"
-                          value={emailSettings.emailFromName}
+                          value={emailSettings.emailFromName || ''}
                           onChange={handleEmailSettingsChange}
                           error={!!getEmailError('emailFromName')}
                           helperText={getEmailError('emailFromName')}
@@ -1626,7 +1657,7 @@ const SettingsPage: React.FC = () => {
                         <FormField
                           label="Reply-To Email"
                           name="emailReplyTo"
-                          value={emailSettings.emailReplyTo}
+                          value={emailSettings.emailReplyTo || ''}
                           onChange={handleEmailSettingsChange}
                           required
                           error={!!getEmailError('emailReplyTo')}
@@ -1635,7 +1666,7 @@ const SettingsPage: React.FC = () => {
                         <FormControlLabel
                           control={
                             <Switch
-                              checked={emailSettings.enableEmailNotifications}
+                              checked={emailSettings.enableEmailNotifications ?? true}
                               onChange={handleEmailSettingsChange}
                               name="enableEmailNotifications"
                               color="primary"
@@ -1645,6 +1676,20 @@ const SettingsPage: React.FC = () => {
                           sx={{ mt: 2 }}
                         />
                       </>
+                    ) : (
+                      <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', minHeight: '300px', justifyContent: 'center' }}>
+                        <Typography color="error" gutterBottom>
+                          Failed to load email settings
+                        </Typography>
+                        <Button 
+                          variant="outlined" 
+                          startIcon={<RefreshIcon />}
+                          onClick={fetchEmailSettings}
+                          sx={{ mt: 2 }}
+                        >
+                          Retry
+                        </Button>
+                      </Box>
                     )}
                     </CardContent>
                   </EnhancedCard>
@@ -1710,7 +1755,7 @@ const SettingsPage: React.FC = () => {
                         variant="contained"
                         color="primary"
                         startIcon={loading ? <CircularProgress size={20} color="inherit" /> : <SaveIcon />}
-                        onClick={() => handleSaveSettings('email')}
+                        onClick={handleSaveEmailSettings}
                         disabled={loading || !unsavedChanges}
                       >
                         Save Email Settings
@@ -1722,7 +1767,7 @@ const SettingsPage: React.FC = () => {
 
             {/* Ticket Settings */}
               <TabPanel value={activeTab} index={2}>
-              <EnhancedGrid container spacing={3}>
+              <EnhancedGrid container spacing={1}>
                   <Grid item xs={12} md={6}>
                   <EnhancedCard
                     index={2}
@@ -1898,7 +1943,7 @@ const SettingsPage: React.FC = () => {
 
             {/* Integrations Settings */}
               <TabPanel value={activeTab} index={3}>
-              <EnhancedGrid container spacing={3}>
+              <EnhancedGrid container spacing={1}>
                 {loadingSettings.integration ? (
                   <Grid item xs={12}>
                     <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '300px' }}>
@@ -2175,7 +2220,7 @@ const SettingsPage: React.FC = () => {
 
             {/* Advanced Settings */}
               <TabPanel value={activeTab} index={4}>
-              <EnhancedGrid container spacing={3}>
+              <EnhancedGrid container spacing={1}>
                 {loadingSettings.advanced ? (
                   <Grid item xs={12}>
                     <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '300px' }}>

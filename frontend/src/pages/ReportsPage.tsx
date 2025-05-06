@@ -364,7 +364,7 @@ const ReportsPage: React.FC = () => {
           to: { opacity: 1 }
         }
       }}>
-        <EnhancedGrid container spacing={3}>
+        <EnhancedGrid container spacing={1}>
           {/* Header Banner */}
           <Grid item xs={12}>
             <EnhancedCard 

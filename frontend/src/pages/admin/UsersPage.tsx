@@ -620,7 +620,7 @@ const UsersPage = () => {
           to: { opacity: 1 }
         }
       }}>
-        <Grid container spacing={3}>
+        <Grid container spacing={1}>
           {/* Header styled like TicketListPage */}
           <Grid item xs={12}>
             <Card 

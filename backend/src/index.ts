@@ -1,16 +1,20 @@
+import dotenv from 'dotenv';
+dotenv.config(); // Load environment variables first
+
 import express, { Request, Response, NextFunction } from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
 import morgan from 'morgan';
 import compression from 'compression';
-import dotenv from 'dotenv';
 import rateLimit from 'express-rate-limit';
 import 'reflect-metadata';
 import http from 'http';
 import socketService from './services/socket.service';
 
-// Load environment variables
-dotenv.config();
+// Import utilities
+import { logger, morganStream } from './utils/logger';
+import { errorHandler } from './utils/errorHandler';
+import { diagnoseDatabaseConnection } from './utils/dbDiagnostics';
 
 // Check for critical environment variables
 if (!process.env.JWT_SECRET) {
@@ -19,11 +23,6 @@ if (!process.env.JWT_SECRET) {
 
 // Configure Database
 import { initializeDatabase } from './config/database';
-
-// Import utilities
-import { logger } from './utils/logger';
-import { errorHandler } from './utils/errorHandler';
-import { diagnoseDatabaseConnection } from './utils/dbDiagnostics';
 
 // Import routes
 import authRoutes from './routes/auth.routes';
@@ -34,6 +33,8 @@ import reportRoutes from './routes/report.routes';
 import aiRoutes from './routes/ai.routes';
 import chatbotRoutes from './routes/chatbot.routes';
 import notificationRoutes from './routes/notification.routes';
+import logRoutes from './routes/log.routes';
+import settingsRoutes from './routes/settings.routes';
 
 // Import the Supabase initialization function
 import { initBucket } from './utils/supabase';
@@ -68,7 +69,8 @@ app.use(cors({
 app.use(express.json({ limit: '10mb' })); // Parse JSON bodies with increased limit
 app.use(express.urlencoded({ extended: true, limit: '10mb' })); // Parse URL-encoded bodies with increased limit
 
-app.use(morgan(process.env.MORGAN_FORMAT || 'combined')); // HTTP request logger with production format
+// Use morgan with our winston logger stream
+app.use(morgan(process.env.MORGAN_FORMAT || 'combined', { stream: morganStream }));
 app.use(compression()); // Compress responses
 app.use(limiter); // Apply rate limiting
 
@@ -86,6 +88,8 @@ app.use('/api/reports', reportRoutes);
 app.use('/api/ai', aiRoutes);
 app.use('/api/chat', chatbotRoutes);
 app.use('/api/notifications', notificationRoutes);
+app.use('/api/logs', logRoutes);
+app.use('/api/settings', settingsRoutes);
 
 // Error handling middleware
 app.use(errorHandler);

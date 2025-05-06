@@ -114,6 +114,10 @@ export const initializeDatabase = async (): Promise<void> => {
         console.log('TypeORM database connection established successfully');
       }
       
+      // Run settings migration to ensure settings table exists
+      const { ensureSettingsTable } = require('../utils/settingsMigration');
+      await ensureSettingsTable();
+      
       connected = true;
     } catch (err: any) {
       retries++;

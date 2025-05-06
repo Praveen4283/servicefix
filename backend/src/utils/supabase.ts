@@ -5,20 +5,31 @@ import { logger } from './logger';
 const supabaseUrl = process.env.SUPABASE_URL;
 const supabaseKey = process.env.SUPABASE_KEY;
 const bucketName = process.env.SUPABASE_BUCKET || 'ticket-attachments';
+const logBucketName = process.env.SUPABASE_LOG_BUCKET || 'service-logs';
 
+// Create Supabase client only if credentials are available
+export const supabase = supabaseUrl && supabaseKey 
+  ? createClient(supabaseUrl, supabaseKey)
+  : null;
+
+// Log warning if credentials are missing
 if (!supabaseUrl || !supabaseKey) {
   logger.error('Missing Supabase credentials in environment variables');
 }
 
-// Create Supabase client
-export const supabase = createClient(supabaseUrl!, supabaseKey!);
-
 // Initialize bucket if it doesn't exist
 export const initBucket = async () => {
+  // Skip if Supabase is not initialized
+  if (!supabase) {
+    logger.warn('Skipping Supabase bucket initialization due to missing credentials');
+    return;
+  }
+  
   try {
-    // Check if bucket exists
+    // Check if buckets exist
     const { data: buckets } = await supabase.storage.listBuckets();
     const bucketExists = buckets?.some(bucket => bucket.name === bucketName);
+    const logBucketExists = buckets?.some(bucket => bucket.name === logBucketName);
     
     if (!bucketExists) {
       // Create bucket with public access
@@ -33,6 +44,20 @@ export const initBucket = async () => {
         logger.info(`Created Supabase storage bucket: ${bucketName}`);
       }
     }
+    
+    if (!logBucketExists) {
+      // Create log bucket with private access (logs shouldn't be public)
+      const { error } = await supabase.storage.createBucket(logBucketName, {
+        public: false,
+        fileSizeLimit: 10 * 1024 * 1024, // 10MB limit for log files
+      });
+      
+      if (error) {
+        logger.error(`Error creating log bucket: ${error.message}`);
+      } else {
+        logger.info(`Created Supabase storage log bucket: ${logBucketName}`);
+      }
+    }
   } catch (error: any) {
     logger.error(`Supabase bucket initialization error: ${error.message}`);
   }
@@ -44,6 +69,12 @@ export const uploadFile = async (
   folder = 'tickets',
   ticketId?: number
 ): Promise<string> => {
+  // Return placeholder URL if Supabase is not initialized
+  if (!supabase) {
+    logger.warn('Skipping file upload due to missing Supabase credentials');
+    return 'https://placeholder-file-url.com/file-not-uploaded';
+  }
+  
   // Create a unique file path
   const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
   const filePath = `${folder}/${ticketId ? `ticket-${ticketId}/` : ''}${uniqueSuffix}-${file.originalname}`;
@@ -75,6 +106,12 @@ export const uploadFile = async (
 
 // Delete file from Supabase Storage
 export const deleteFile = async (filePath: string): Promise<void> => {
+  // Skip if Supabase is not initialized
+  if (!supabase) {
+    logger.warn('Skipping file deletion due to missing Supabase credentials');
+    return;
+  }
+  
   try {
     // Extract the path from the full URL
     let path = filePath;

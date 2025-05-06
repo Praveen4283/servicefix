@@ -36,79 +36,109 @@ export const getTickets = async (
       type,
       department,
       search,
+      tags,
+      dateFrom,
+      dateTo,
       sortBy = 'created_at',
       sortOrder = 'desc',
-    } = req.query;
+    } = req.query as { [key: string]: string | undefined };
 
     const offset = (Number(page) - 1) * Number(limit);
     const params: any[] = [];
-    let whereClause = '';
+    let whereClauses: string[] = [];
     
-    // Add filters to where clause
-    const conditions: string[] = [];
+    // Organization filter based on user role
+    if (req.user.role !== 'admin') {
+      params.push(req.user.organizationId);
+      whereClauses.push(`t.organization_id = $${params.length}`);
+      
+      if (req.user.role === 'customer') {
+        params.push(req.user.id);
+        whereClauses.push(`t.requester_id = $${params.length}`);
+      }
+    }
+
     if (status) {
-      params.push(status);
-      conditions.push(`t.status_id = $${params.length}`);
+      const statusNames = (status as string).split(',').map(s => s.trim());
+      if (statusNames.length > 0) {
+        const statusPlaceholders = statusNames.map((_, i) => `$${params.length + i + 1}`).join(',');
+        params.push(...statusNames);
+        whereClauses.push(`ts.name ILIKE ANY(ARRAY[${statusPlaceholders}])`);
+      }
     }
     
     if (isOpen === 'true') {
-      conditions.push(`ts.is_resolved = FALSE`);
+      whereClauses.push(`ts.is_resolved = FALSE`);
     }
     
     if (priority) {
-      params.push(priority);
-      conditions.push(`priority_id = (SELECT id FROM ticket_priorities WHERE name ILIKE $${params.length})`);
+      const priorityNames = (priority as string).split(',').map(p => p.trim());
+      if (priorityNames.length > 0) {
+        const priorityPlaceholders = priorityNames.map((_, i) => `$${params.length + i + 1}`).join(',');
+        params.push(...priorityNames);
+        whereClauses.push(`tp.name ILIKE ANY(ARRAY[${priorityPlaceholders}])`); 
+      }
     }
     
     if (requester) {
       params.push(requester);
-      conditions.push(`requester_id = $${params.length}`);
+      whereClauses.push(`t.requester_id = $${params.length}`);
     }
     
-    // Handle assignee filter - if query param exists OR if user is agent
     const assigneeFilterValue = assignee || (req.user.role === 'agent' ? req.user.id : undefined);
     if (assigneeFilterValue) {
         params.push(assigneeFilterValue);
-        conditions.push(`t.assignee_id = $${params.length}`);
+        whereClauses.push(`t.assignee_id = $${params.length}`);
     }
     
     if (type) {
-      params.push(type);
-      conditions.push(`type_id = (SELECT id FROM ticket_types WHERE name ILIKE $${params.length})`);
+      params.push(type as string);
+      whereClauses.push(`tt.name ILIKE $${params.length}`);
     }
     
     if (department) {
       params.push(department);
-      conditions.push(`department_id = $${params.length}`);
+      whereClauses.push(`d.name ILIKE $${params.length}`);
     }
     
     if (search) {
       params.push(`%${search}%`);
-      conditions.push(`(subject ILIKE $${params.length} OR description ILIKE $${params.length})`);
+      const searchParamIndex = params.length;
+      whereClauses.push(`(t.subject ILIKE $${searchParamIndex} OR t.description ILIKE $${searchParamIndex} OR CAST(t.id AS TEXT) ILIKE $${searchParamIndex})`);
     }
-    
-    if (conditions.length > 0) {
-      whereClause = `WHERE ${conditions.join(' AND ')}`;
-    }
-    
-    // Organization filter based on user role
-    if (req.user.role !== 'admin') {
-      if (whereClause) {
-        whereClause += ' AND ';
-      } else {
-        whereClause = 'WHERE ';
-      }
-      params.push(req.user.organizationId);
-      whereClause += `t.organization_id = $${params.length}`;
-      
-      // If customer, only show their tickets
-      if (req.user.role === 'customer') {
-        params.push(req.user.id);
-        whereClause += ` AND requester_id = $${params.length}`;
+
+    if (tags) {
+      const tagNames = (tags as string).split(',').map(t => t.trim().toLowerCase());
+      if (tagNames.length > 0) {
+        const tagPlaceholders = tagNames.map((_, i) => `$${params.length + i + 1}`).join(',');
+        params.push(...tagNames);
+        whereClauses.push(`EXISTS (SELECT 1 FROM ticket_tags ttg JOIN tags tag ON ttg.tag_id = tag.id WHERE ttg.ticket_id = t.id AND LOWER(tag.name) = ANY(ARRAY[${tagPlaceholders}]))`);
       }
     }
+
+    if (dateFrom) {
+      params.push(dateFrom as string);
+      whereClauses.push(`t.created_at >= $${params.length}`);
+    }
+    if (dateTo) {
+      params.push(dateTo as string);
+      whereClauses.push(`t.created_at <= $${params.length}`);
+    }
     
-    // Build the query
+    const whereClauseString = whereClauses.length > 0 ? `WHERE ${whereClauses.join(' AND ')}` : '';
+    
+    const validSortBy = ['id', 'subject', 'created_at', 'updated_at', 'due_date', 'status_name', 'priority_name'];
+    const safeSortBy = validSortBy.includes(sortBy as string) ? sortBy : 'created_at';
+    const safeSortOrder = (sortOrder as string).toLowerCase() === 'asc' ? 'ASC' : 'DESC';
+
+    let orderByClause = `ORDER BY t.${safeSortBy} ${safeSortOrder}`;
+    if (safeSortBy === 'status_name') {
+      orderByClause = `ORDER BY ts.name ${safeSortOrder}`;
+    }
+    if (safeSortBy === 'priority_name') {
+      orderByClause = `ORDER BY tp.name ${safeSortOrder}`;
+    }
+
     const ticketsQuery = `
       SELECT 
         t.id, 
@@ -176,48 +206,79 @@ export const getTickets = async (
       LEFT JOIN ticket_priorities tp ON t.priority_id = tp.id
       LEFT JOIN departments d ON t.department_id = d.id
       LEFT JOIN ticket_types tt ON t.type_id = tt.id
-      ${whereClause}
-      ORDER BY t.${sortBy} ${sortOrder === 'asc' ? 'ASC' : 'DESC'}
+      ${whereClauseString}
+      ${orderByClause}
       LIMIT $${params.length + 1} OFFSET $${params.length + 2}
     `;
     
-    params.push(Number(limit), offset);
+    const queryParamsForTickets = [...params, Number(limit), offset];
     
-    // Get total count for pagination
     const countQuery = `
-      SELECT COUNT(*) FROM tickets t
+      SELECT COUNT(DISTINCT t.id) FROM tickets t
       JOIN users req ON t.requester_id = req.id
       LEFT JOIN users asn ON t.assignee_id = asn.id
       JOIN ticket_statuses ts ON t.status_id = ts.id
       LEFT JOIN ticket_priorities tp ON t.priority_id = tp.id
       LEFT JOIN departments d ON t.department_id = d.id
       LEFT JOIN ticket_types tt ON t.type_id = tt.id
-      ${whereClause}
+      ${whereClauseString}
     `;
     
-    // Execute queries
+    const queryParamsForCount = params; // No limit/offset for count
+        
+    logger.debug('[getTickets] Tickets Query:', ticketsQuery);
+    logger.debug('[getTickets] Tickets Params:', JSON.stringify(queryParamsForTickets));
+    logger.debug('[getTickets] Count Query:', countQuery);
+    logger.debug('[getTickets] Count Params:', JSON.stringify(queryParamsForCount));
+
     const [ticketsResult, countResult] = await Promise.all([
-      query(ticketsQuery, params),
-      query(countQuery, params.slice(0, params.length - 2)) // Remove limit and offset
+      pool.query(ticketsQuery, queryParamsForTickets),
+      pool.query(countQuery, queryParamsForCount)
     ]);
     
     const tickets = ticketsResult.rows;
     const totalCount = parseInt(countResult.rows[0].count);
     const totalPages = Math.ceil(totalCount / Number(limit));
     
+    // Map to ensure frontend gets consistent field names (e.g., priority.name, status.name)
+    const formattedTickets = tickets.map(ticket => ({
+      ...ticket,
+      id: ticket.id.toString(), // Ensure ID is string
+      status: ticket.status?.name, // Extract name for frontend
+      priority: ticket.priority?.name, // Extract name for frontend
+      tags: ticket.tags || [], // Ensure tags is an array
+      requester: ticket.requester,
+      assignee: ticket.assignee,
+      department: ticket.department,
+      type: ticket.type,
+      comment_count: parseInt(ticket.comment_count || '0', 10),
+      created_at: ticket.created_at,
+      updated_at: ticket.updated_at,
+      due_date: ticket.due_date,
+      subject: ticket.subject,
+      description: ticket.description,
+      resolved_at: ticket.resolved_at,
+      closed_at: ticket.closed_at,
+      sentiment_score: ticket.sentiment_score,
+      ai_summary: ticket.ai_summary,
+      source: ticket.source,
+      is_spam: ticket.is_spam
+    })); 
+
     res.status(200).json({
       status: 'success',
       data: {
-        tickets,
+        tickets: formattedTickets,
         pagination: {
           page: Number(page),
           limit: Number(limit),
-          totalCount,
+          total: totalCount,
           totalPages,
         },
       },
     });
   } catch (error) {
+    logger.error('[getTickets] Error:', error);
     next(error);
   }
 };
