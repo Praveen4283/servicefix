@@ -130,6 +130,11 @@ export interface PaginationState {
   totalPages: number;
 }
 
+// API Pagination Response might include 'total' instead of 'totalCount'
+interface PaginationResponse extends PaginationState {
+  total?: number; // API might return 'total' instead of 'totalCount'
+}
+
 // Update Filters interface
 interface TicketFilters {
   priorityName?: string;
@@ -149,7 +154,7 @@ interface TicketContextType {
   isLoading: boolean;
   error: string | null;
   pagination: PaginationState;
-  fetchTickets: (page?: number, limit?: number, filters?: TicketFilters) => Promise<{ tickets: Ticket[]; pagination: PaginationState } | undefined>;
+  fetchTickets: (page?: number, limit?: number, filters?: TicketFilters) => Promise<{ tickets: Ticket[]; pagination: PaginationResponse } | undefined>;
   fetchTicketById: (id: string) => Promise<void>;
   createTicket: (ticketData: any) => Promise<Ticket | undefined>;
   updateTicket: (id: string, ticketData: any) => Promise<void>;
@@ -161,6 +166,8 @@ interface TicketContextType {
   getAgentsList: () => Promise<User[]>;
   addAttachment: (ticketId: string, formData: FormData) => Promise<void>;
   getTicketHistory: (ticketId: string) => Promise<any[]>;
+  refreshCounter: number;
+  setRefreshCounter: React.Dispatch<React.SetStateAction<number>>;
 }
 
 const TicketContext = createContext<TicketContextType | undefined>(undefined);
@@ -178,6 +185,8 @@ export const TicketProvider: React.FC<{ children: ReactNode }> = ({ children }) 
     totalCount: 0,
     totalPages: 1,
   });
+  // Add refreshCounter state
+  const [refreshCounter, setRefreshCounter] = useState(0);
 
   // State for dropdown data
   const [statuses, setStatuses] = useState<TicketStatus[]>([]);
@@ -242,11 +251,13 @@ export const TicketProvider: React.FC<{ children: ReactNode }> = ({ children }) 
   }, [isAuthenticated]); // Re-fetch if auth state changes
 
   // Fetch all tickets with pagination and filtering
-  const fetchTickets = useCallback(async (page: number = 1, limit: number = 10, filters: TicketFilters = {}): Promise<{ tickets: Ticket[]; pagination: PaginationState } | undefined> => {
-    if (!isAuthenticated) return undefined;
+  const fetchTickets = useCallback(async (page = 1, limit = 10, filters: TicketFilters = {}): Promise<{ tickets: Ticket[]; pagination: PaginationResponse } | undefined> => {
+    if (!isAuthenticated) {
+      setError('Authentication required');
+      return;
+    }
     
     setIsLoading(true);
-    setError(null);
     
     try {
       // Build query parameters
@@ -269,9 +280,13 @@ export const TicketProvider: React.FC<{ children: ReactNode }> = ({ children }) 
       
       const queryString = params.toString();
       
-      const response = await apiClient.get<{ tickets: TicketBackendResponse[]; pagination: PaginationState }>(`/tickets?${queryString}`);
-      const fetchedTickets = response.tickets || [];
-      const fetchedPagination = response.pagination || { page, limit, totalCount: 0, totalPages: 1 };
+      const response = await apiClient.get<any>(`/tickets?${queryString}`);
+      console.log('API response for tickets:', response);
+      
+      // Handling response structure which may be nested under 'data'
+      const responseData = response.data || response;
+      const fetchedTickets = responseData.tickets || [];
+      const paginationData = responseData.pagination || { page, limit, total: 0, totalPages: 1 };
       
       // Map snake_case date fields to camelCase for consistency
       const normalizedTickets = fetchedTickets.map((ticket: TicketBackendResponse) => {
@@ -288,13 +303,31 @@ export const TicketProvider: React.FC<{ children: ReactNode }> = ({ children }) 
       
       setTickets(normalizedTickets);
       setFilteredTickets(normalizedTickets);
-      setPagination(fetchedPagination);
       
-      return { tickets: normalizedTickets, pagination: fetchedPagination };
-    } catch (err: any) {
-      setError(err.message || 'Failed to fetch tickets. Please try again.');
-      console.error('Error fetching tickets:', err);
-      return undefined;
+      // Normalize pagination structure
+      const normalizedPagination: PaginationResponse = {
+        page: paginationData.page || page,
+        limit: paginationData.limit || limit,
+        totalCount: paginationData.total || 0,
+        totalPages: paginationData.totalPages || 1,
+        total: paginationData.total || 0 // Include original total for backward compatibility
+      };
+      
+      // Set state with only the standard fields
+      setPagination({
+        page: normalizedPagination.page,
+        limit: normalizedPagination.limit,
+        totalCount: normalizedPagination.totalCount,
+        totalPages: normalizedPagination.totalPages
+      });
+      
+      return { tickets: normalizedTickets, pagination: normalizedPagination };
+    } catch (error) {
+      console.error('Error fetching tickets:', error);
+      setError('Failed to fetch tickets');
+      setTickets([]);
+      setFilteredTickets([]);
+      setPagination({ page, limit, totalCount: 0, totalPages: 1 });
     } finally {
       setIsLoading(false);
     }
@@ -688,6 +721,8 @@ export const TicketProvider: React.FC<{ children: ReactNode }> = ({ children }) 
     getAgentsList,
     addAttachment,
     getTicketHistory,
+    refreshCounter,
+    setRefreshCounter
   };
 
   return <TicketContext.Provider value={value}>{children}</TicketContext.Provider>;

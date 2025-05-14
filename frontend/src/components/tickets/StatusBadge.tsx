@@ -1,13 +1,17 @@
 import React from 'react';
 import { Chip, Typography, Box } from '@mui/material';
 import { CheckCircle, Pending, Schedule, ErrorOutline, Block } from '@mui/icons-material';
+import { useTickets } from '../../context/TicketContext'; // Import useTickets
+
+// Define the expected structure for a status object
+interface StatusObject {
+  id: string;
+  name: string;
+  color: string;
+}
 
 interface StatusBadgeProps {
-  status: {
-    id: string;
-    name: string;
-    color: string;
-  };
+  status?: StatusObject | string | { id: string }; // Accept full object, ID string, or object with just ID
   size?: 'small' | 'medium';
   showIcon?: boolean;
   variant?: 'filled' | 'outlined';
@@ -17,11 +21,28 @@ interface StatusBadgeProps {
  * A component for displaying ticket status with appropriate styling and icons
  */
 const StatusBadge: React.FC<StatusBadgeProps> = ({
-  status,
+  status: statusInput, // Input can be object or string ID
   size = 'medium',
   showIcon = true,
   variant = 'filled',
 }) => {
+  const { statuses: allStatuses } = useTickets(); // Get all statuses from context
+
+  let status: StatusObject | undefined = undefined;
+
+  if (typeof statusInput === 'object' && statusInput !== null) {
+    if ('name' in statusInput && 'color' in statusInput) {
+      // It's a full StatusObject
+      status = statusInput as StatusObject;
+    } else if ('id' in statusInput && allStatuses) {
+      // It's an object with at least an id, try to find the full object
+      status = allStatuses.find(s => s.id === statusInput.id);
+    }
+  } else if (typeof statusInput === 'string' && allStatuses) {
+    // It's a string ID
+    status = allStatuses.find(s => s.id === statusInput);
+  }
+
   // Choose appropriate icon based on status name or id
   const getStatusIcon = () => {
     if (!status || !status.name) {
@@ -73,7 +94,7 @@ const StatusBadge: React.FC<StatusBadgeProps> = ({
   };
   
   if (!status) {
-    // Render a placeholder or default badge if status is undefined
+    // Render a placeholder or default badge if status is undefined or not found
     return (
       <Chip
         label="Unknown"

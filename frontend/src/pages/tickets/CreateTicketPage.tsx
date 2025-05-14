@@ -45,6 +45,7 @@ import { alpha } from '@mui/material/styles';
 import { SystemAlert } from '../../context/NotificationContext';
 import { useAuth } from '../../context/AuthContext';
 import apiClient from '../../services/apiClient';
+import { useNotification } from '../../context/NotificationContext';
 
 // Available tags for ticket categorization - KEEP THIS
 const availableTags = [
@@ -96,6 +97,7 @@ const CreateTicketPage: React.FC = () => {
   const navigate = useNavigate();
   const { createTicket, departments, ticketTypes, priorities, isLoading, error } = useTickets();
   const { user } = useAuth();
+  const { addNotification } = useNotification();
   const [selectedTags, setSelectedTags] = useState<string[]>([]);
   const [files, setFiles] = useState<File[]>([]);
   const [submitError, setSubmitError] = useState<string | null>(null);
@@ -132,8 +134,10 @@ const CreateTicketPage: React.FC = () => {
       assigneeId: '',
       tags: [] as string[],
     },
+    validateOnChange: true,
+    validateOnBlur: true,
     validationSchema: Yup.object({
-      subject: Yup.string().required('Subject is required').max(100, 'Subject cannot exceed 100 characters'),
+      subject: Yup.string().required('Subject is required').min(5, 'Subject must be at least 5 characters').max(100, 'Subject cannot exceed 100 characters'),
       description: Yup.string().required('Description is required').min(10, 'Description should be at least 10 characters'),
       departmentId: Yup.string().required('Department is required'),
       typeId: Yup.string().required('Type is required'),
@@ -147,7 +151,6 @@ const CreateTicketPage: React.FC = () => {
       
       try {
         setSubmitError(null);
-        console.log('Formik values on submit:', values);
 
         // Create FormData object
         const formData = new FormData();
@@ -172,8 +175,6 @@ const CreateTicketPage: React.FC = () => {
           formData.append('attachments', file, file.name); // Use 'attachments' as the field name
         });
         
-        console.log('FormData prepared:', formData); // Cannot directly log FormData contents easily
-
         // Use the TicketContext createTicket function, assuming it's adapted for FormData
         // OR call apiClient directly if createTicket isn't designed for FormData
         // const newTicket = await createTicket(formData); 
@@ -189,30 +190,35 @@ const CreateTicketPage: React.FC = () => {
         const newTicket = response; // Assuming API returns ticket data
         // --- End Direct API Call Example ---
         
+        // Show a success toast notification
+        addNotification('Ticket created successfully!', 'success', {
+          title: 'Success',
+          duration: 5000
+        });
+        
         if (newTicket) {
-          navigate('/tickets', {
-            state: { createSuccess: true, message: 'Ticket created successfully!' }
-          });
+          navigate('/tickets');
         } else {
           console.warn('Ticket created, but no new ticket data received. Navigating to list.');
-          navigate('/tickets', { 
-            state: { createSuccess: true, message: 'Ticket created (check list).' } 
-          });
+          navigate('/tickets');
         }
       } catch (error) {
         console.error('Error creating ticket:', error);
         setSubmitError('Failed to create ticket. Please try again.');
+        // Show error notification for better visibility
+        addNotification('Failed to create ticket. Please try again.', 'error', {
+          title: 'Error',
+          duration: 0 // No auto-dismiss for errors
+        });
       }
     },
   });
 
   // Set default priority when priorities data is loaded
   useEffect(() => {
-    console.log('Priorities loaded:', priorities); // Log priorities data
     if (priorities && priorities.length > 0 && !formik.values.priorityId) {
-      const mediumPriority = priorities.find(p => p.name.toLowerCase() === 'medium');
+      const mediumPriority = priorities.find(p => p.name.toLowerCase() === 'low');
       const defaultPriorityId = mediumPriority ? mediumPriority.id : priorities[0].id;
-      console.log('Default priority ID set to:', defaultPriorityId); // Log determined default ID
       if (defaultPriorityId) {
         formik.setFieldValue('priorityId', defaultPriorityId);
       }
@@ -387,7 +393,10 @@ const CreateTicketPage: React.FC = () => {
                 onChange={formik.handleChange}
                 onBlur={formik.handleBlur}
                 error={formik.touched.subject && Boolean(formik.errors.subject)}
-                helperText={formik.touched.subject && formik.errors.subject}
+                helperText={
+                  (formik.touched.subject && formik.errors.subject) || 
+                  'Minimum 5 characters required'
+                }
                 placeholder="Briefly describe the issue"
               />
             </Grid>
@@ -756,7 +765,14 @@ const CreateTicketPage: React.FC = () => {
                     <Button
                       variant="contained"
                       onClick={handleNext}
-                      disabled={!formik.values.subject || !formik.values.description}
+                      disabled={
+                        !formik.values.subject || 
+                        !formik.values.description || 
+                        (formik.touched.subject && Boolean(formik.errors.subject)) ||
+                        (formik.touched.description && Boolean(formik.errors.description)) ||
+                        formik.values.subject.length < 5 ||
+                        formik.values.description.length < 10
+                      }
                       sx={{ 
                         ml: 1,
                         px: 3,

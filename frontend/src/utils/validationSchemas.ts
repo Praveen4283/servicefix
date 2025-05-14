@@ -91,6 +91,7 @@ export const profileSchema = Yup.object().shape({
 export const createTicketSchema = Yup.object({
   subject: Yup.string()
     .required(ERROR_MESSAGES.REQUIRED)
+    .min(5, ERROR_MESSAGES.MIN_LENGTH('Subject', 5))
     .max(100, ERROR_MESSAGES.MAX_LENGTH('Subject', 100)),
   description: Yup.string()
     .required(ERROR_MESSAGES.REQUIRED)

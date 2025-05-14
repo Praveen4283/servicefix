@@ -442,7 +442,6 @@ const SearchPage: React.FC = () => {
           return;
         }
 
-        console.log(`Performing search with endpoint: ${endpoint}, params:`, apiParams);
         response = await apiClient.get(endpoint, apiParams);
 
         // Transform response based on endpoint

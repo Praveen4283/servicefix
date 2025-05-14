@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useRef } from 'react';
+import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import {
   Box,
@@ -54,6 +54,7 @@ import {
   LocalOffer as TagIcon,
   CloudUpload as CloudUploadIcon,
   FileUpload as FileUploadIcon,
+  Settings as SettingsIcon,
 } from '@mui/icons-material';
 import { useTickets, User } from '../../context/TicketContext';
 import StatusBadge from '../../components/tickets/StatusBadge';
@@ -62,10 +63,13 @@ import UserAvatar from '../../components/common/UserAvatar';
 import TicketTimeline, { TimelineEvent } from '../../components/tickets/TicketTimeline';
 import { useTheme as useMuiTheme, alpha } from '@mui/material/styles';
 import { SystemAlert, useNotification } from '../../context/NotificationContext';
-import { format } from 'date-fns';
+import { formatDate, getRelativeTime } from '../../utils/dateUtils';
 import { formatInTimeZone } from 'date-fns-tz';
 import { useAuth } from '../../context/AuthContext';
 import apiClient from '../../services/apiClient';
+import SLABadge from '../../components/tickets/SLABadge';
+import AssignSLAModal from '../../components/tickets/AssignSLAModal';
+import slaService from '../../services/slaService';
 
 interface TabPanelProps {
   children?: React.ReactNode;
@@ -186,7 +190,7 @@ const FieldLabel: React.FC<{ label: string }> = ({ label }) => (
   </Typography>
 );
 
-// Add file size limit and accepted file types constants (matching CreateTicketPage)
+// Add a file size limit and accepted file types constants (matching CreateTicketPage)
 const FILE_SIZE_LIMIT = 10 * 1024 * 1024; // 10MB
 const ACCEPTED_FILE_TYPES = [
   'image/jpeg', 
@@ -219,7 +223,9 @@ const TicketDetailPage: React.FC = () => {
     deleteTicket,
     getAgentsList,
     addAttachment,  // Add this function to the context
-    getTicketHistory // Add this function to the context
+    getTicketHistory, // Add this function to the context
+    refreshCounter,
+    setRefreshCounter
   } = useTickets();
   
   const { addNotification } = useNotification();
@@ -264,6 +270,21 @@ const TicketDetailPage: React.FC = () => {
   const isCustomer = user?.role === 'customer';
   const isAgentOrAdmin = isAdmin || isAgent;
   
+  // Add a state variable to manage the SLA assignment modal
+  const [slaModalOpen, setSlaModalOpen] = useState(false);
+  
+  // Add a state variable for department management
+  const [departmentMenuAnchor, setDepartmentMenuAnchor] = useState<null | HTMLElement>(null);
+  const [departments, setDepartments] = useState<any[]>([]);
+  const [loadingDepartments, setLoadingDepartments] = useState(false);
+  const [departmentUpdateLoading, setDepartmentUpdateLoading] = useState(false);
+  
+  // Add function to navigate to SLA settings tab in SettingsPage
+  const navigateToSLASettings = useCallback(() => {
+    // Navigate to the settings page with the SLA tab selected (index 3)
+    navigate('/settings', { state: { initialTab: 3 } });
+  }, [navigate]);
+  
   // Fetch ticket data when component mounts or ID changes
   useEffect(() => {
     if (id) {
@@ -280,14 +301,12 @@ const TicketDetailPage: React.FC = () => {
       
       setLoadingAgents(true);
       try {
-        console.log('Fetching agents list...');
         const agentsList = await getAgentsList();
-        console.log('Fetched agents:', agentsList?.length || 0);
         
         // Log each agent's ID to diagnose the issue
-        agentsList.forEach(agent => {
-          console.log(`Agent: ${agent.firstName} ${agent.lastName}, ID type: ${typeof agent.id}, ID value: ${agent.id}`);
-        });
+        if (agentsList && agentsList.length > 0) {
+          console.log('Example agent object structure:', agentsList[0]);
+        }
         
         // Force agent IDs to be numbers - this is crucial for the backend
         const processedAgents = agentsList.map(agent => ({
@@ -295,14 +314,8 @@ const TicketDetailPage: React.FC = () => {
           id: typeof agent.id === 'string' ? Number(agent.id.replace(/\D/g, '')) || 1001 : agent.id
         }));
         
-        console.log('Processed Agents:');
-        processedAgents.forEach(agent => {
-          console.log(`Agent: ${agent.firstName} ${agent.lastName}, ID type: ${typeof agent.id}, ID value: ${agent.id}`);
-        });
-        
         setAgents(processedAgents || []); // Save the processed agent list
       } catch (error) {
-        console.error('Failed to fetch agents:', error);
         // Set empty array on error to avoid UI issues
         setAgents([]);
         // Don't show error notification to user - handle silently
@@ -437,10 +450,55 @@ const TicketDetailPage: React.FC = () => {
     
     try {
       if (id) {
+        // Get current status and the new status details
+        const currentStatusName = currentTicket?.status?.name?.toLowerCase() || '';
+        const newStatus = statuses.find(s => s.id === newStatusId);
+        const newStatusName = newStatus?.name?.toLowerCase() || '';
+        
+        // Update the ticket status
         await updateTicket(id, { statusId: newStatusId });
-        addNotification('Ticket status has been updated successfully.', 'success', {
-          title: 'Status Updated'
-        });
+        
+        // Handle SLA pause/resume based on status change
+        let slaUpdateSuccess = false;
+        try {
+          // If new status is "pending", pause the SLA
+          if (newStatusName === 'pending') {
+            console.log('Status changed to pending, pausing SLA...');
+            const pauseResult = await slaService.pauseSLA(id);
+            slaUpdateSuccess = pauseResult;
+            console.log('SLA pause result:', pauseResult);
+          } 
+          // If status is changing from "pending" to something else, resume the SLA
+          else if (currentStatusName === 'pending' && newStatusName !== 'pending') {
+            console.log('Status changed from pending, resuming SLA...');
+            const resumeResult = await slaService.resumeSLA(id);
+            slaUpdateSuccess = resumeResult;
+            console.log('SLA resume result:', resumeResult);
+          }
+        } catch (slaError) {
+          console.error('Failed to update SLA pause/resume status:', slaError);
+          // Don't show SLA errors to user as the main status update was successful
+        }
+        
+        // Show appropriate notification
+        if (slaUpdateSuccess) {
+          if (newStatusName === 'pending') {
+            addNotification('Ticket status updated and SLA timer paused.', 'success', {
+              title: 'Status Updated'
+            });
+          } else if (currentStatusName === 'pending') {
+            addNotification('Ticket status updated and SLA timer resumed.', 'success', {
+              title: 'Status Updated'
+            });
+          }
+        } else {
+          addNotification('Ticket status has been updated successfully.', 'success', {
+            title: 'Status Updated'
+          });
+        }
+        
+        // Refresh the ticket to get updated SLA information
+        await fetchTicketById(id);
       }
     } catch (error: any) {
       console.error('Failed to update status:', error);
@@ -457,10 +515,66 @@ const TicketDetailPage: React.FC = () => {
     
     try {
       if (id) {
+        // Update the ticket priority
         await updateTicket(id, { priorityId: newPriorityId });
-        addNotification('Ticket priority has been updated successfully.', 'success', {
-          title: 'Priority Updated'
-        });
+        
+        // Attempt to update the SLA policy based on the new priority
+        let slaUpdateSuccess = false;
+        let slaUpdateError = null;
+        
+        try {
+          // First try the auto-assign SLA endpoint
+          console.log('Updating SLA policy based on new priority...');
+          const response = await apiClient.post(`/sla/auto-assign/${id}`);
+          
+          if (response && response.data) {
+            console.log('New SLA policy assigned based on priority change:', response.data);
+            slaUpdateSuccess = true;
+          }
+        } catch (slaError: any) {
+          slaUpdateError = slaError;
+          console.warn('Failed to auto-assign SLA policy after priority change, will try update-sla endpoint:', slaError);
+          
+          // If auto-assign fails, try our dedicated update-sla endpoint as a fallback
+          try {
+            const slaResponse = await apiClient.post(`/tickets/${id}/update-sla`);
+            if (slaResponse && slaResponse.data) {
+              console.log('SLA updated using fallback endpoint:', slaResponse.data);
+              slaUpdateSuccess = true;
+              slaUpdateError = null;
+            }
+          } catch (fallbackError: any) {
+            console.error('Failed to update SLA using fallback endpoint:', fallbackError);
+            slaUpdateError = fallbackError;
+            // Still don't show this error to the user, as the priority update was successful
+          }
+        }
+        
+        // Get the new priority name for the notification
+        const priority = priorities.find(p => p.id === newPriorityId);
+        const priorityName = priority ? priority.name : 'new priority';
+        
+        // Show appropriate notification based on SLA update status
+        if (slaUpdateSuccess) {
+          addNotification(`Ticket priority changed to ${priorityName} and SLA policy has been updated.`, 'success', {
+            title: 'Priority and SLA Updated'
+          });
+        } else {
+          addNotification(`Ticket priority has been updated to ${priorityName}.`, 'success', {
+            title: 'Priority Updated'
+          });
+          
+          // Log SLA update failure for debugging
+          if (slaUpdateError) {
+            console.error('SLA update failed with error:', slaUpdateError);
+          }
+        }
+        
+        // Increment the refreshCounter to trigger SLA component refresh
+        setRefreshCounter(prev => prev + 1);
+        
+        // Refresh the ticket to get updated SLA information
+        await fetchTicketById(id);
       }
     } catch (error: any) {
       console.error('Failed to update priority:', error);
@@ -468,6 +582,49 @@ const TicketDetailPage: React.FC = () => {
     } finally {
       setPriorityUpdateLoading(false);
       setPriorityMenuAnchor(null);
+    }
+  };
+
+  // Add a function to fetch departments
+  const fetchDepartments = useCallback(async () => {
+    if (!isAgentOrAdmin) return;
+    
+    setLoadingDepartments(true);
+    try {
+      // Use the correct endpoint for departments
+      const response = await apiClient.get('/tickets/departments');
+      setDepartments(response.departments || []);
+    } catch (error) {
+      console.error('Failed to fetch departments:', error);
+      setDepartments([]);
+    } finally {
+      setLoadingDepartments(false);
+    }
+  }, [isAgentOrAdmin]);
+
+  // Add a function to handle department change
+  const handleDepartmentChange = async (departmentId: string | number) => {
+    setDepartmentUpdateLoading(true);
+    setActionError(null);
+    
+    try {
+      if (id) {
+        // Update the ticket department
+        await updateTicket(id, { departmentId });
+        
+        addNotification('Department has been updated successfully.', 'success', {
+          title: 'Department Updated'
+        });
+        
+        // Refresh ticket data
+        await fetchTicketById(id);
+      }
+    } catch (error: any) {
+      console.error('Failed to update department:', error);
+      setActionError(error.message || 'Failed to update department. Please try again.');
+    } finally {
+      setDepartmentUpdateLoading(false);
+      setDepartmentMenuAnchor(null);
     }
   };
 
@@ -480,12 +637,6 @@ const TicketDetailPage: React.FC = () => {
         // Ensure we're sending a number to the backend
         let numericAgentId: number;
         
-        // IMPORTANT: We'll ALWAYS use hardcoded agent IDs based on the schema
-        // The schema shows IDs starting from 1001, so we'll use numbers in that range
-        // This is a workaround for the UUID vs BIGINT issue
-        
-        console.log('Original agent ID:', agentId);
-        
         if (typeof agentId === 'number') {
           numericAgentId = agentId;
         } else {
@@ -494,14 +645,91 @@ const TicketDetailPage: React.FC = () => {
           numericAgentId = numericPart ? parseInt(numericPart, 10) : 1001;
         }
         
-        console.log('Using agent ID for assignment (strictly numeric):', numericAgentId);
+        // Find the assigned agent from our local list
+        const assignedAgent = agents.find(a => a.id === agentId || a.id === numericAgentId);
+        console.log('Selected agent:', assignedAgent);
         
-        // Only update the assigneeId field with numeric ID
-        const updatedTicket = await updateTicket(id, { assigneeId: numericAgentId });
+        // Find the "Open" status ID
+        const openStatus = statuses.find(status => status.name.toLowerCase() === 'open');
+        const openStatusId = openStatus ? openStatus.id : null;
+        
+        // Initialize the update data with the assignee ID
+        const updateData: any = { assigneeId: numericAgentId };
+        
+        // Add status update if the current status is "new"
+        if (openStatusId && currentTicket?.status?.name.toLowerCase() === 'new') {
+          updateData.statusId = openStatusId;
+        }
+        
+        // Try to find the department ID from various sources
+        let departmentId = null;
+        
+        // First, try direct API call to get user details including department
+        try {
+          const userResponse = await apiClient.get(`/users/${numericAgentId}`);
+          console.log('User response:', userResponse);
+          
+          // Check if agent has a department
+          if (userResponse) {
+            // Log all possible department-related fields to help with debugging
+            console.log('Department fields in user response:',
+              userResponse.department,
+              userResponse.departmentId,
+              userResponse.department_id
+            );
+            
+            if (userResponse.department && userResponse.department.id) {
+              departmentId = userResponse.department.id;
+              console.log('Found department.id in user response:', departmentId);
+            } else if (userResponse.departmentId) {
+              departmentId = userResponse.departmentId;
+              console.log('Found departmentId in user response:', departmentId);
+            } else if (userResponse.department_id) {
+              departmentId = userResponse.department_id;
+              console.log('Found department_id in user response:', departmentId);
+            }
+          }
+        } catch (error) {
+          console.error('Error fetching user details:', error);
+        }
+        
+        // If we still don't have a department ID, try from our agent object
+        if (!departmentId && assignedAgent) {
+          console.log('Checking department from agent object:', 
+            assignedAgent.department,
+            assignedAgent.departmentId,
+            assignedAgent.department_id
+          );
+          
+          if (assignedAgent.department && assignedAgent.department.id) {
+            departmentId = assignedAgent.department.id;
+            console.log('Found department.id in agent object:', departmentId);
+          } else if (assignedAgent.departmentId) {
+            departmentId = assignedAgent.departmentId;
+            console.log('Found departmentId in agent object:', departmentId);
+          } else if (assignedAgent.department_id) {
+            departmentId = assignedAgent.department_id;
+            console.log('Found department_id in agent object:', departmentId);
+          }
+        }
+        
+        // If we found a department ID, include it in the update data
+        if (departmentId) {
+          updateData.departmentId = departmentId;
+          console.log('Setting ticket department ID to:', departmentId);
+        } else {
+          console.warn('Could not find department ID for agent:', numericAgentId);
+        }
+        
+        console.log('Updating ticket with data:', updateData);
+        
+        // Update the ticket with the data
+        const updatedTicket = await updateTicket(id, updateData);
         
         // Show success notification with agent name if available
-        const assignedAgent = agents.find(a => a.id === agentId || a.id === numericAgentId);
-        const agentName = assignedAgent ? `${assignedAgent.firstName} ${assignedAgent.lastName}` : 'selected agent';
+        const agentName = assignedAgent 
+          ? `${assignedAgent.firstName} ${assignedAgent.lastName}` 
+          : 'selected agent';
         
         addNotification(`Ticket has been assigned to ${agentName}.`, 'success', {
           title: 'Ticket Assigned'
@@ -529,23 +757,6 @@ const TicketDetailPage: React.FC = () => {
   const handleRetry = () => {
     if (id) {
       fetchTicketById(id);
-    }
-  };
-
-  const formatDate = (dateString: string | undefined | null): string => {
-    if (!dateString) return 'N/A';
-    
-    try {
-      // Format with user's timezone
-      return formatInTimeZone(
-        new Date(dateString),
-        userTimeZone,
-        'MMM d, yyyy h:mm a'
-      );
-    } catch (error) {
-      console.error('Date formatting error:', error);
-      // Fallback format
-      return new Date(dateString).toLocaleString();
     }
   };
 
@@ -675,6 +886,13 @@ const TicketDetailPage: React.FC = () => {
       addNotification('Failed to download attachment. Please try again.', 'error');
     }
   };
+
+  // Fetch departments when component mounts
+  useEffect(() => {
+    if (isAgentOrAdmin) {
+      fetchDepartments();
+    }
+  }, [fetchDepartments, isAgentOrAdmin]);
 
   if (isLoading) {
     return (
@@ -944,11 +1162,14 @@ const TicketDetailPage: React.FC = () => {
                       label={`Attachments (${currentTicket.attachments?.length ?? 0})`}
                       {...a11yProps(1)}
                     />
-                    <Tab
-                      icon={<HistoryIcon fontSize="small" />}
-                      label="Activity Log"
-                      {...a11yProps(2)}
-                    />
+                    {/* Only show Activity Log tab for agents and admins */}
+                    {isAgentOrAdmin && (
+                      <Tab
+                        icon={<HistoryIcon fontSize="small" />}
+                        label="Activity Log"
+                        {...a11yProps(2)}
+                      />
+                    )}
                   </Tabs>
                 </Box>
                 
@@ -1244,6 +1465,34 @@ const TicketDetailPage: React.FC = () => {
                 </Typography>
                 
                 <Stack spacing={2.5}>
+                  {/* Only show SLA information to agents and admins */}
+                  {isAgentOrAdmin && (
+                    <Box>
+                      <FieldLabel label="SLA Status" />
+                      <Box sx={{ mt: 1, display: 'flex', flexDirection: 'column' }}>
+                        <SLABadge 
+                          ticketId={Number(id)}
+                          refreshTrigger={refreshCounter}
+                          showDetails={true}
+                          ticketPriorityId={currentTicket?.priority?.id}
+                        />
+                        
+                        {/* Make the SLA management button visible only to admins */}
+                        {isAdmin && (
+                          <Button
+                            size="small"
+                            variant="outlined"
+                            sx={{ mt: 2, alignSelf: 'flex-start' }}
+                            onClick={navigateToSLASettings}
+                            startIcon={<SettingsIcon />}
+                          >
+                            Manage SLA
+                          </Button>
+                        )}
+                      </Box>
+                    </Box>
+                  )}
+                  
                   <Box>
                     <FieldLabel label="Requester" />
                     <UserAvatar
@@ -1298,16 +1547,35 @@ const TicketDetailPage: React.FC = () => {
                   
                   <Divider sx={{ my: 1 }} />
                   
-                  {currentTicket.department && (
+                  {currentTicket?.department && (
                     <Box>
                       <FieldLabel label="Department" />
-                      <Typography variant="body1">
-                        {currentTicket.department.name}
-                      </Typography>
+                      <Box display="flex" alignItems="center">
+                        <Typography variant="body1">
+                          {currentTicket.department.name}
+                        </Typography>
+                        {isAgentOrAdmin && (
+                          <>
+                            {departmentUpdateLoading ? (
+                              <CircularProgress size={18} sx={{ ml: 1 }} />
+                            ) : (
+                              <Tooltip title="Change Department">
+                                <IconButton 
+                                  size="small" 
+                                  sx={{ ml: 1 }}
+                                  onClick={(e) => setDepartmentMenuAnchor(e.currentTarget)}
+                                >
+                                  <EditIcon fontSize="small" />
+                                </IconButton>
+                              </Tooltip>
+                            )}
+                          </>
+                        )}
+                      </Box>
                     </Box>
                   )}
                   
-                  {currentTicket.type && (
+                  {currentTicket?.type && (
                     <Box>
                       <FieldLabel label="Type" />
                       <Typography variant="body1">
@@ -1316,7 +1584,7 @@ const TicketDetailPage: React.FC = () => {
                     </Box>
                   )}
                   
-                  {currentTicket.department || currentTicket.type ? <Divider sx={{ my: 1 }} /> : null}
+                  {(currentTicket?.department || currentTicket?.type) ? <Divider sx={{ my: 1 }} /> : null}
                   
                   <Box>
                     <FieldLabel label="Last Updated" />
@@ -1349,7 +1617,7 @@ const TicketDetailPage: React.FC = () => {
             <MenuItem
               key={status.id}
               onClick={() => handleStatusChange(status.id)}
-              selected={currentTicket.status.id === status.id}
+              selected={currentTicket?.status?.id === status.id}
             >
               <StatusBadge status={status} size="small" />
             </MenuItem>
@@ -1366,7 +1634,7 @@ const TicketDetailPage: React.FC = () => {
             <MenuItem
               key={priority.id}
               onClick={() => handlePriorityChange(priority.id)}
-              selected={currentTicket.priority.id === priority.id}
+              selected={currentTicket?.priority?.id === priority.id}
             >
               <PriorityBadge priority={priority} size="small" />
             </MenuItem>
@@ -1390,7 +1658,7 @@ const TicketDetailPage: React.FC = () => {
               <MenuItem
                 key={agent.id}
                 onClick={() => handleAssignTicket(typeof agent.id === 'string' ? agent.id : agent.id)}
-                selected={currentTicket.assignee?.id === agent.id}
+                selected={currentTicket?.assignee?.id === agent.id}
               >
                 <Box display="flex" alignItems="center" width="100%">
                   <Avatar 
@@ -1408,7 +1676,45 @@ const TicketDetailPage: React.FC = () => {
             ))
           )}
         </Menu>
+        
+        {/* Department change menu */}
+        <Menu
+          anchorEl={departmentMenuAnchor}
+          open={Boolean(departmentMenuAnchor)}
+          onClose={() => setDepartmentMenuAnchor(null)}
+        >
+          {loadingDepartments ? (
+            <MenuItem disabled>
+              <CircularProgress size={20} sx={{ mr: 1 }} /> Loading departments...
+            </MenuItem>
+          ) : departments.length === 0 ? (
+            <MenuItem disabled>No departments available</MenuItem>
+          ) : (
+            departments.map((department) => (
+              <MenuItem
+                key={department.id}
+                onClick={() => handleDepartmentChange(department.id)}
+                selected={currentTicket?.department?.id === department.id}
+              >
+                <Typography variant="body2">
+                  {department.name}
+                </Typography>
+              </MenuItem>
+            ))
+          )}
+        </Menu>
       </Box>
+
+      {/* Add the SLA assignment modal */}
+      <AssignSLAModal
+        open={slaModalOpen}
+        onClose={() => setSlaModalOpen(false)}
+        ticketId={Number(id)}
+        onAssign={() => {
+          // Refresh ticket data
+          fetchTicketById(id || '');
+        }}
+      />
     </Container>
   );
 };

@@ -26,10 +26,24 @@ export const initBucket = async () => {
   }
   
   try {
+    logger.info('Initializing Supabase storage buckets...');
+    
     // Check if buckets exist
-    const { data: buckets } = await supabase.storage.listBuckets();
-    const bucketExists = buckets?.some(bucket => bucket.name === bucketName);
-    const logBucketExists = buckets?.some(bucket => bucket.name === logBucketName);
+    const { data: buckets, error: listError } = await supabase.storage.listBuckets();
+    
+    if (listError) {
+      logger.error(`Error listing buckets: ${listError.message}`);
+      logger.error('This might be due to insufficient permissions. Check your Supabase API key and permissions.');
+      return;
+    }
+    
+    if (!buckets) {
+      logger.error('No buckets found and no error returned. Check your Supabase configuration.');
+      return;
+    }
+    
+    const bucketExists = buckets.some(bucket => bucket.name === bucketName);
+    const logBucketExists = buckets.some(bucket => bucket.name === logBucketName);
     
     if (!bucketExists) {
       // Create bucket with public access
@@ -43,6 +57,8 @@ export const initBucket = async () => {
       } else {
         logger.info(`Created Supabase storage bucket: ${bucketName}`);
       }
+    } else {
+      logger.info(`Supabase storage bucket exists: ${bucketName}`);
     }
     
     if (!logBucketExists) {
@@ -56,6 +72,36 @@ export const initBucket = async () => {
         logger.error(`Error creating log bucket: ${error.message}`);
       } else {
         logger.info(`Created Supabase storage log bucket: ${logBucketName}`);
+      }
+    } else {
+      logger.info(`Supabase log bucket exists: ${logBucketName}`);
+      
+      // Verify permissions by attempting to upload a test file
+      try {
+        const testFilePath = 'logs/test/permission-check.json';
+        const testContent = JSON.stringify({test: 'permission check', timestamp: new Date().toISOString()});
+        
+        // Try to upload test file
+        const { error: uploadError } = await supabase.storage
+          .from(logBucketName)
+          .upload(testFilePath, testContent, {
+            contentType: 'application/json',
+            upsert: true,
+          });
+          
+        if (uploadError) {
+          logger.error(`Bucket permission check failed: ${uploadError.message}`);
+          logger.error('Log upload will likely fail. Check your Supabase API key permissions.');
+        } else {
+          logger.info('Log bucket permission check passed successfully.');
+          
+          // Clean up test file
+          await supabase.storage
+            .from(logBucketName)
+            .remove([testFilePath]);
+        }
+      } catch (testError: any) {
+        logger.error(`Error during bucket permission check: ${testError.message}`);
       }
     }
   } catch (error: any) {

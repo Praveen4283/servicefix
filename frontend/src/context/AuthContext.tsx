@@ -2,6 +2,7 @@ import React, { createContext, useContext, useEffect, useState, ReactNode, useCa
 import apiClient from '../services/apiClient';
 import { useNavigate } from 'react-router-dom';
 import notificationService from '../services/notificationService';
+import { notificationManager } from '../services/notificationManager';
 
 // Define user interface
 export interface User {
@@ -23,7 +24,7 @@ export interface User {
   lastLogin?: string;
   createdAt?: string;
   updatedAt?: string;
-  notificationSettings?: Record<string, { email: boolean; push: boolean; in_app: boolean }>;
+  notificationSettings?: Record<string, { email: boolean; push: boolean; in_app: boolean } | boolean>;
 }
 
 // Interface for profile update data that can include a file
@@ -51,16 +52,23 @@ interface AuthState {
 }
 
 // Auth context interface
-interface AuthContextType extends AuthState {
+export type AuthContextType = {
+  isAuthenticated: boolean;
+  user: User | null;
+  isLoading: boolean;
+  error: string | null;
   login: (email: string, password: string) => Promise<boolean>;
   register: (userData: RegisterData) => Promise<boolean>;
   logout: () => void;
   resetPassword: (email: string) => Promise<void>;
   updateProfile: (userData: ProfileUpdateData) => Promise<void>;
   changePassword: (currentPassword: string, newPassword: string) => Promise<void>;
+  refreshUserData: () => Promise<void>;
   clearError: () => void;
   resetRegistrationSuccess: () => void;
-}
+  deleteAccount?: () => Promise<void>;
+  state: AuthState;
+};
 
 // Create auth context
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -90,11 +98,76 @@ export interface NotificationEventDetail {
   type: 'success' | 'error' | 'warning' | 'info';
   title?: string;
   duration?: number;
+  isPersistent?: boolean;
 }
 
 // Helper to dispatch notification events
 const dispatchNotificationEvent = (type: NotificationEventType, detail: NotificationEventDetail) => {
-  window.dispatchEvent(new CustomEvent<NotificationEventDetail>(type, { detail }));
+  if (!detail) return;
+
+  const { message, type: notificationType, title, duration } = detail;
+  
+  console.log(`[AuthContext] Showing notification: ${message}`);
+  
+  switch (notificationType) {
+    case 'success':
+      notificationManager.showSuccess(message, { title, duration });
+      break;
+    case 'error':
+      notificationManager.showError(message, { title, duration });
+      break;
+    case 'warning':
+      notificationManager.showWarning(message, { title, duration });
+      break;
+    default:
+      notificationManager.showInfo(message, { title, duration });
+  }
+  
+  // For login success notifications, also create a persistent notification
+  // that will be stored in the database and shown in the notification panel
+  if (type === NotificationEventType.AUTH_SUCCESS && message.includes('Welcome back')) {
+    // Format current date and time with the user's timezone
+    const now = new Date();
+    const formattedDate = now.toLocaleDateString();
+    const formattedTime = now.toLocaleTimeString();
+    
+    // Create a more detailed message with timestamp
+    const detailedMessage = `${message} You logged in at ${formattedDate}, ${formattedTime}`;
+    
+    // Store the notification in a variable for clarity
+    const notificationData = {
+      title: title || 'Login Notification',
+      message: detailedMessage,
+      type: 'success',
+      link: '/dashboard',
+      event_type: 'login_success'
+    };
+    
+    // Add a flag to localStorage to track that we've created this notification
+    // This prevents duplicates from multiple events or re-renders
+    const loginNotificationKey = `login_notification_${Date.now().toString().substring(0, 8)}`;
+    
+    // Only create if we haven't already created one recently
+    if (!localStorage.getItem(loginNotificationKey)) {
+      // Set the flag (expires in 10 seconds)
+      localStorage.setItem(loginNotificationKey, 'true');
+      setTimeout(() => localStorage.removeItem(loginNotificationKey), 10000);
+      
+      // Use notification service to create a persistent notification
+      notificationService.createBackendNotification(
+        notificationData.title, 
+        notificationData.message,
+        'success',
+        notificationData.link,
+        { event_type: notificationData.event_type }
+      ).catch(err => console.error('Failed to create persistent login notification:', err));
+    }
+  }
+  
+  // For backward compatibility, still dispatch the event
+  // This will be picked up by any legacy code still listening for these events
+  const event = new CustomEvent(type, { detail });
+  window.dispatchEvent(event);
 };
 
 export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
@@ -169,9 +242,6 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     });
     
     try {
-      // Always use the real API call, never mock data
-      const useLocalMockData = false;
-      
       // Actual API call
       const response = await apiClient.post<any>('/auth/login', { email, password });
       
@@ -203,25 +273,13 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       // Dispatch a custom event to notify components to refresh data (like notifications)
       window.dispatchEvent(new CustomEvent('user:login-success'));
 
-      // Restore Frontend-only notification dispatch for immediate toast feedback
+      // Use notification manager for immediate feedback (toast)
       dispatchNotificationEvent(NotificationEventType.AUTH_SUCCESS, {
         message: `Welcome back, ${finalUserData.firstName}!`, 
         type: 'success',
         duration: 5000,
         title: 'Login Successful'
       });
-
-      // Keep Backend approach for persistence
-      try {
-        await notificationService.createBackendNotification(
-          'Login Successful',
-          `Welcome back, ${finalUserData.firstName}! You logged in at ${new Date().toLocaleString()}`,
-          'success',
-          '/dashboard'
-        );
-      } catch (error) {
-        console.error('Failed to create backend welcome notification:', error);
-      }
       
       return true; // Indicate success
     } catch (error: any) {
@@ -235,6 +293,8 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         error: errorMessage,
         registrationSuccess: false
       });
+      // Dispatch error notification event for login failure
+      dispatchNotificationEvent(NotificationEventType.AUTH_ERROR, { message: errorMessage, type: 'error', duration: 5000, title: 'Login Failed' });
       return false; // Indicate failure
     }
   };
@@ -250,10 +310,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     });
     
     try {
-      // Always use the real API call, never mock data
-      const useLocalMockData = false;
-      
-      // Make the API call to register the user
+      // Actual API call
       const response = await apiClient.post('/auth/register', userData);
       
       // If registration is successful, set success state
@@ -315,7 +372,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   const resetPassword = async (email: string): Promise<void> => {
     setState({ ...state, isLoading: true, error: null });
     try {
-      // Placeholder: Call backend forgot password endpoint
+      // Actual API call
       await apiClient.post('/auth/forgot-password', { email }); 
       // Dispatch success notification event
       dispatchNotificationEvent(NotificationEventType.AUTH_SUCCESS, { message: 'Password reset email sent. Please check your inbox.', type: 'success', duration: 5000 });
@@ -332,106 +389,239 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
 
   // Update profile function
   const updateProfile = async (userData: ProfileUpdateData): Promise<void> => {
-    if (!state.user) return;
-    
-    // Ensure we have a valid user ID
-    if (!state.user.id) {
-      const errorMessage = "Cannot update profile: User ID is missing";
-      console.error(errorMessage);
-      setState({
-        ...state,
-        error: errorMessage,
-      });
-      dispatchNotificationEvent(NotificationEventType.AUTH_ERROR, { message: errorMessage, type: 'error', duration: 5000 });
-      throw new Error(errorMessage);
-    }
-    
+    if (!state.user) throw new Error('User not authenticated');
     setState({ ...state, isLoading: true, error: null });
     
     try {
-      // Use specialized updateUserProfile method that handles data transformation
-      const updatedUser = await apiClient.updateUserProfile(state.user.id, userData);
+      // Debug what's being sent to the API
+      console.log('[AuthContext updateProfile] Sending update data to API:', JSON.stringify(userData));
       
-      console.log('Profile updated successfully, new user data:', updatedUser);
+      // Actual API call
+      const updatedUserFromApi = await apiClient.updateUserProfile(state.user.id, userData);
       
-      // Update local storage with the new user data
-      localStorage.setItem('user', JSON.stringify(updatedUser));
+      // Debug the response from the API
+      console.log('[AuthContext updateProfile] Raw API response:', JSON.stringify(updatedUserFromApi));
       
-      // Update state with the NEW user data, not spreading the old state.user
+      // --- MODIFIED: Merge API response with existing state ---
+      // Create merged user data, but specifically preserve the timezone if it exists
+      const mergedUser = { 
+        ...state.user, 
+        ...updatedUserFromApi,
+        // Keep the existing timezone if it's set and not explicitly changed by the current update
+        timezone: userData.timezone || state.user?.timezone || updatedUserFromApi.timezone || 'UTC'
+      };
+      
+      // Store the updated user in state and localStorage
+      const oldUser = { ...state.user }; // Capture old user state before updating
       setState({
         ...state,
-        user: updatedUser,
-        isLoading: false,
+        user: mergedUser, // Use the merged user object
+        isLoading: false
       });
+      localStorage.setItem('user', JSON.stringify(mergedUser)); // Save the merged user object
+      console.log('Profile updated successfully, merged user data:', mergedUser);
+      
+      // --- Refactored Change Detection Logic ---
+      const actualChangedFieldNames: string[] = [];
+      const changedFieldsMetadata: Array<{field: string, oldValue: any, newValue: any}> = [];
 
-      // --- Generate Dynamic Notification Message START ---
-      const keyToReadableName: Record<string, string> = {
-        firstName: 'First name',
-        lastName: 'Last name',
-        phoneNumber: 'Phone number',
-        designation: 'Designation',
-        timezone: 'Timezone',
-        language: 'Language',
-        // Add other mappable fields here if necessary
+      // Define default channel structure for notification settings comparison
+      const defaultChannels = { email: true, inApp: true, push: false };
+      const allPossibleNotificationKeys = Object.keys(userData.notificationSettings || {});
+      
+      const normalizeAndSortObject = (obj: any): any => {
+        if (typeof obj !== 'object' || obj === null) return obj;
+        try {
+          const normalized = JSON.parse(JSON.stringify(obj)); // Deep clone
+          const sortObjectKeys = (object: any): any => {
+            if (object === null || typeof object !== 'object') return object;
+            if (Array.isArray(object)) return object.map(sortObjectKeys);
+            const sorted: any = {};
+            Object.keys(object).sort().forEach(key => { sorted[key] = sortObjectKeys(object[key]); });
+            return sorted;
+          };
+          return sortObjectKeys(normalized);
+        } catch (e) { 
+          console.error("Error normalizing object:", e);
+          return obj; // Return original on error
+        }
       };
 
-      const hasAvatarChange = !!userData.avatarFile;
-      // Identify changed fields EXCLUDING avatarFile
-      const changedFieldKeys = Object.keys(userData).filter(key => key !== 'avatarFile' && keyToReadableName[key]);
-      const readableNames = changedFieldKeys.map(key => keyToReadableName[key]);
+      const buildConsistentNotificationStructure = (settingsSource: any): any => {
+        const consistentStructure: any = {};
+        
+        // Debug logging for notification settings format
+        console.log('Building consistent structure from source:', JSON.stringify(settingsSource));
+        
+        // If source is undefined, return empty structure
+        if (!settingsSource) return {};
+        
+        // Identify if we're dealing with flat (old) or nested (new) structure
+        // We consider it flat if at least one key has a boolean value
+        const isFlat = Object.values(settingsSource).some(value => typeof value === 'boolean');
+        console.log('Source structure appears to be:', isFlat ? 'FLAT (old)' : 'NESTED (new)');
+        
+        allPossibleNotificationKeys.forEach(key => {
+          const value = settingsSource ? settingsSource[key] : undefined;
+          
+          // For flat structure (old format with direct booleans)
+          if (typeof value === 'boolean') {
+            consistentStructure[key] = value;
+          }
+          // For nested structure (new format with {enabled, channels})
+          else if (typeof value === 'object' && value !== null) {
+            if (value.hasOwnProperty('enabled')) {
+              // It's already in the new format - take the enabled property only for comparison
+              consistentStructure[key] = value.enabled;
+            } else if (value.hasOwnProperty('email') || value.hasOwnProperty('push') || value.hasOwnProperty('in_app')) {
+              // It's in a different channel-based structure
+              consistentStructure[key] = true; // Enabled if any channel exists
+            } else {
+              consistentStructure[key] = false; // Default to disabled if structure unknown
+            }
+          } else {
+            // For missing keys
+            consistentStructure[key] = false; // Default to disabled if missing
+          }
+        });
+        
+        console.log('Normalized to consistent structure:', JSON.stringify(consistentStructure));
+        return consistentStructure;
+      };
 
-      let dynamicMessage = 'Profile updated successfully'; // Default
+      // Iterate through the data submitted by the user
+      Object.keys(userData).forEach(key => {
+        if (key === 'avatarFile') return; // Skip avatar file
 
-      if (hasAvatarChange && readableNames.length === 0) {
-        dynamicMessage = 'Avatar updated successfully.';
-      } else if (!hasAvatarChange && readableNames.length === 1) {
-        dynamicMessage = `${readableNames[0]} updated successfully.`;
-      } else if (hasAvatarChange && readableNames.length === 1) {
-        dynamicMessage = `Avatar and ${readableNames[0]} updated successfully.`;
-      } else if (hasAvatarChange && readableNames.length > 1) {
-        dynamicMessage = 'Avatar and profile information updated successfully.';
-      } else if (!hasAvatarChange && readableNames.length > 1) {
-        dynamicMessage = 'Profile information updated successfully.';
+        const typedKey = key as keyof User;
+        const newValue = userData[typedKey];
+        const oldValue = oldUser?.[typedKey]; // Use the captured old user state
+        let hasChanged = false;
+
+        // Special handling for notification settings
+        if (key === 'notificationSettings') {
+          try {
+            // Check if notification settings were actually included in form submission
+            const notificationSettingsProvided = userData.hasOwnProperty('notificationSettings') && 
+                                                Object.keys(userData.notificationSettings || {}).length > 0;
+            
+            // Only do comparison if notification settings were explicitly provided
+            if (notificationSettingsProvided) {
+              console.log('Notification settings were explicitly provided in form data');
+              const consistentOld = buildConsistentNotificationStructure(oldValue || {});
+              const consistentNew = buildConsistentNotificationStructure(newValue || {});
+              
+              console.log('Comparing notification settings:');
+              console.log('Old (normalized):', JSON.stringify(consistentOld));
+              console.log('New (normalized):', JSON.stringify(consistentNew));
+              
+              if (JSON.stringify(consistentOld) !== JSON.stringify(consistentNew)) {
+                console.log('Notification settings changed - displaying notification');
+                hasChanged = true;
+              } else {
+                console.log('Notification settings unchanged - NOT displaying notification');
+              }
+            } else {
+              console.log('Notification settings were not included in form submission - ignoring');
+              hasChanged = false;
+            }
+          } catch (error) {
+            console.error('Error comparing notification settings:', error);
+            hasChanged = false; // Don't assume changed on error - safer to assume unchanged
+          }
+        } else {
+          // Simple comparison for other fields
+          if (JSON.stringify(newValue) !== JSON.stringify(oldValue)) {
+            hasChanged = true;
+          }
+        }
+
+        // If the field has actually changed, add its name and metadata
+        if (hasChanged) {
+          const formattedName = key.replace(/([A-Z])/g, ' $1').replace(/^./, str => str.toUpperCase());
+          actualChangedFieldNames.push(formattedName);
+          changedFieldsMetadata.push({ field: key, oldValue: oldValue, newValue: newValue });
+        }
+      });
+      // --- End Refactored Change Detection Logic ---
+      
+      // Create notification messages based on actual changes
+      let uiMessage = 'Profile information updated successfully.';
+      let backendMessage = 'Profile information updated successfully.'; // Default backend message
+      let metadataChanges = {};
+      
+      if (actualChangedFieldNames.length === 1) {
+        const change = changedFieldsMetadata[0];
+        const fieldName = actualChangedFieldNames[0];
+        const oldDisplayValue = change.oldValue === undefined || change.oldValue === null || change.oldValue === '' ? '(not set)' : JSON.stringify(change.oldValue);
+        const newDisplayValue = change.newValue === undefined || change.newValue === null || change.newValue === '' ? '(not set)' : JSON.stringify(change.newValue);
+        
+        // Special formatting for simple values
+        if (typeof change.oldValue !== 'object' && typeof change.newValue !== 'object') {
+             uiMessage = `${fieldName} updated.`; // Simplified message
+             backendMessage = `${fieldName} updated from "${change.oldValue || '(not set)'}" to "${change.newValue || '(not set)'}"`;
+        } else {
+             uiMessage = `${fieldName} updated.`;
+             backendMessage = `${fieldName} updated.`; // Keep backend message generic for complex types
+        }
+
+        metadataChanges = { field: change.field, oldValue: change.oldValue, newValue: change.newValue };
+
+      } else if (actualChangedFieldNames.length > 1) {
+        uiMessage = `Multiple profile fields updated: ${actualChangedFieldNames.join(', ')}`;
+        backendMessage = uiMessage; // Use the same summary for backend
+        metadataChanges = { fields: changedFieldsMetadata };
       }
-      // --- Generate Dynamic Notification Message END ---
-
-      // Restore frontend success notification for immediate toast feedback
+      
+      // Display toast notification 
       dispatchNotificationEvent(NotificationEventType.AUTH_SUCCESS, {
-        message: dynamicMessage, // Use dynamic message
+        message: uiMessage,
         type: 'success',
-        duration: 5000
+        title: 'Success', 
+        duration: 5000,
+        isPersistent: true // Keep persistent flag
       });
 
-      // Also save a persistent notification to the backend
-      try {
-        await notificationService.createBackendNotification(
-          'Profile Updated',
-          dynamicMessage, // Use dynamic message
-          'success',
-          '/profile' // Optional link to the profile page
-        );
-      } catch (error) {
-        console.error('Failed to create backend profile update notification:', error);
-        // Non-critical, don't fail the whole update if this fails
+      // Only create a backend notification if there were actual changes
+      if (actualChangedFieldNames.length > 0) {
+        // Use a slight delay to avoid interference with the UI notification
+        setTimeout(async () => {
+          try {
+            // Create a backend notification that persists for profile updates
+            const profileUpdateKey = `profile_update_${Date.now()}`;
+            
+            if (!localStorage.getItem(profileUpdateKey)) {
+              // Store a flag to prevent duplicate notifications
+              localStorage.setItem(profileUpdateKey, 'true');
+              // Auto-expire after 1 minute
+              setTimeout(() => localStorage.removeItem(profileUpdateKey), 60000);
+              
+              await notificationService.createBackendNotification(
+                'Profile Updated',
+                backendMessage,
+                'profile_update',
+                '/profile',
+                metadataChanges
+              );
+              window.dispatchEvent(new CustomEvent('user:profile-updated'));
+            }
+          } catch (error) {
+            console.error('Failed to create backend notification for profile update:', error);
+          }
+        }, 100);
       }
-      
     } catch (error: any) {
-      // Get error message
-      const errorMessage = error.message || 'Failed to update profile. Please try again.';
       console.error('Profile update error:', error);
-      
-      // Handle update profile error
       setState({
         ...state,
         isLoading: false,
-        error: errorMessage, // This might be overridden by the form hook
+        error: error.message || 'Failed to update profile'
       });
       
-      // Dispatch error notification event
-      dispatchNotificationEvent(NotificationEventType.AUTH_ERROR, { message: errorMessage, type: 'error', duration: 5000 });
-      
-      // Throw error for form handling
-      throw new Error(errorMessage);
+      dispatchNotificationEvent(NotificationEventType.AUTH_ERROR, {
+        message: error.message || 'Failed to update profile',
+        type: 'error'
+      });
     }
   };
 
@@ -440,15 +630,40 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
      if (!state.user) throw new Error('User not authenticated');
      setState({ ...state, isLoading: true, error: null });
      try {
-       // Send 'oldPassword' instead of 'currentPassword' to match backend
+       // Actual API call
        await apiClient.post('/auth/change-password', { oldPassword: currentPassword, newPassword }); 
        
        // Send success notification
        dispatchNotificationEvent(NotificationEventType.AUTH_SUCCESS, { 
          message: 'Password changed successfully', 
          type: 'success', 
+         title: 'Password Updated',
          duration: 5000 
        });
+       
+       // Create a persistent backend notification for the password change
+       const passwordChangeKey = `password_change_notification_${Date.now().toString().substring(0, 8)}`;
+       
+       // Only create if we haven't already created one recently
+       if (!localStorage.getItem(passwordChangeKey)) {
+         // Set the flag (expires in 10 seconds)
+         localStorage.setItem(passwordChangeKey, 'true');
+         setTimeout(() => localStorage.removeItem(passwordChangeKey), 10000);
+         
+         // Record timestamp for the security notification
+         const now = new Date();
+         const formattedDate = now.toLocaleDateString();
+         const formattedTime = now.toLocaleTimeString();
+         
+         // Store a security notification in the database
+         notificationService.createBackendNotification(
+           'Password Changed',
+           `Your password was changed successfully on ${formattedDate} at ${formattedTime}.`,
+           'success',
+           '/profile',
+           { event_type: 'security_update', action: 'password_change', timestamp: now.toISOString() }
+         ).catch(err => console.error('Failed to create password change notification:', err));
+       }
      } catch (error: any) {
        const errorMessage = error.message || 'Failed to change password.';
        setState({ ...state, isLoading: false, error: errorMessage });
@@ -493,17 +708,58 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     };
   }, [logout]); // Make sure logout is in dependency array
 
+  // Refresh user data function
+  const refreshUserData = async (): Promise<void> => {
+    if (!state.user) throw new Error('User not authenticated');
+    setState({ ...state, isLoading: true, error: null });
+    
+    try {
+      console.log('[AuthContext] Refreshing user data for user ID:', state.user.id);
+      // Actual API call
+      const updatedUserFromApi = await apiClient.getUser(state.user.id);
+      
+      console.log('[AuthContext] Refreshed user data from API:', JSON.stringify(updatedUserFromApi));
+      
+      // Update the state with the latest user data
+      setState({
+        ...state,
+        user: updatedUserFromApi,
+        isLoading: false
+      });
+      
+      // Also update localStorage
+      localStorage.setItem('user', JSON.stringify(updatedUserFromApi));
+      console.log('[AuthContext] User data refreshed and stored successfully');
+      
+      // Dispatch event to notify components about the user data refresh
+      window.dispatchEvent(new CustomEvent('user:profile-updated'));
+    } catch (error) {
+      console.error('[AuthContext] Error refreshing user data:', error);
+      setState({
+        ...state,
+        isLoading: false,
+        error: error instanceof Error ? error.message : 'Failed to refresh user data'
+      });
+      throw error;
+    }
+  };
+
   // Provide auth context
   const contextValue: AuthContextType = {
-    ...state,
+    isAuthenticated: !!state.user,
+    user: state.user,
+    isLoading: state.isLoading,
+    error: state.error,
     login,
     register,
     logout,
     resetPassword,
     updateProfile,
     changePassword,
+    refreshUserData,
     clearError,
-    resetRegistrationSuccess
+    resetRegistrationSuccess,
+    state
   };
 
   return <AuthContext.Provider value={contextValue}>{children}</AuthContext.Provider>;

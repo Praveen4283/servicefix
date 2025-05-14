@@ -39,6 +39,7 @@ import ArrowForwardIcon from '@mui/icons-material/ArrowForward';
 import VisibilityIcon from '@mui/icons-material/Visibility';
 import FilterListIcon from '@mui/icons-material/FilterList';
 import StatsWidget from '../components/dashboard/StatsWidget';
+import { showSuccess, showInfo } from '../utils/notificationUtils';
 
 import {
   pageContainer,
@@ -218,6 +219,7 @@ const KnowledgeBasePage: React.FC = () => {
   const [selectedArticle, setSelectedArticle] = useState<any | null>(null);
   const [articles, setArticles] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(false);
+  const [feedbackSubmitted, setFeedbackSubmitted] = useState(false);
   
   // Simulate data loading on mount
   useEffect(() => {
@@ -255,10 +257,16 @@ const KnowledgeBasePage: React.FC = () => {
     setSelectedArticle(article);
   };
   
-  // Handle article feedback
-  const handleFeedback = (isHelpful: boolean) => {
-    // In a real app, you would submit this to the API
-    alert(`Thank you for your feedback! You found this article ${isHelpful ? 'helpful' : 'not helpful'}.`);
+  // Handle feedback submission
+  const handleFeedbackSubmit = (isHelpful: boolean) => {
+    // Save feedback
+    setFeedbackSubmitted(true);
+    showSuccess(`Thank you for your feedback! You found this article ${isHelpful ? 'helpful' : 'not helpful'}.`);
+  };
+  
+  // Handle creating new article
+  const handleCreateNewArticle = () => {
+    showInfo('Create new article functionality would go here');
   };
 
   // Handle refresh
@@ -267,11 +275,6 @@ const KnowledgeBasePage: React.FC = () => {
     setTimeout(() => {
       setIsLoading(false);
     }, 1000);
-  };
-  
-  // Handle create new article
-  const handleCreateArticle = () => {
-    alert('Create new article functionality would go here');
   };
   
   return (
@@ -358,7 +361,7 @@ const KnowledgeBasePage: React.FC = () => {
                     <Button
                       variant="contained"
                       startIcon={<AddIcon />}
-                      onClick={handleCreateArticle}
+                      onClick={handleCreateNewArticle}
                       sx={buttonAnimation}
                     >
                       New Article
@@ -638,7 +641,7 @@ const KnowledgeBasePage: React.FC = () => {
                         variant="contained"
                         color="success"
                         startIcon={<ThumbUpIcon />} 
-                        onClick={() => handleFeedback(true)}
+                        onClick={() => handleFeedbackSubmit(true)}
                         sx={{ mr: 2, ...buttonAnimation }}
                       >
                         Yes
@@ -647,7 +650,7 @@ const KnowledgeBasePage: React.FC = () => {
                         variant="contained"
                         color="error"
                         startIcon={<ThumbDownIcon />} 
-                        onClick={() => handleFeedback(false)}
+                        onClick={() => handleFeedbackSubmit(false)}
                         sx={buttonAnimation}
                       >
                         No

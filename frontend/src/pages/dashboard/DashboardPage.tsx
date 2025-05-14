@@ -91,6 +91,8 @@ import {
 } from '../../styles/commonStyles';
 import { Ticket, PaginationState } from '../../context/TicketContext';
 import apiClient from '../../services/apiClient';
+import { format } from 'date-fns';
+import { formatInTimeZone } from 'date-fns-tz';
 
 // We'll use these colors for our charts
 const chartColors = [
@@ -314,33 +316,59 @@ const DistributionChart: React.FC<DistributionChartProps> = ({ data, title, tota
   </Card>
 );
 
-// Utility function to format date
-const formatDate = (dateString: string) => {
+// Utility function to format date using user's timezone
+const formatDate = (dateString: string | undefined | null, userTimeZone: string): string => {
+  if (!dateString) {
+    return 'N/A';
+  }
+  try {
   const date = new Date(dateString);
-  return date.toLocaleDateString('en-US', {
-    month: 'short',
-    day: 'numeric',
-    year: 'numeric',
-  });
+    if (isNaN(date.getTime())) {
+      throw new Error('Invalid date value');
+    }
+    const formattedDate = formatInTimeZone(date, userTimeZone, 'MMM dd, yyyy p'); 
+    return formattedDate;
+  } catch (error) {
+    console.error(`Error formatting date string "${dateString}" in timezone "${userTimeZone}":`, error);
+    return 'Invalid Date';
+  }
 };
 
-// Utility function to get relative time
-const getRelativeTime = (dateString: string) => {
-  const now = new Date();
+// Utility function to get relative time (fallback uses formatDate)
+const getRelativeTime = (dateString: string | undefined | null, userTimeZone: string): string => {
+  if (!dateString) {
+    return '-';
+  }
+  try {
   const date = new Date(dateString);
+    if (isNaN(date.getTime())) {
+      throw new Error('Invalid date value');
+    }
+    const now = new Date();
   const diffInMs = now.getTime() - date.getTime();
   const diffInMin = Math.floor(diffInMs / (1000 * 60));
   const diffInHours = Math.floor(diffInMs / (1000 * 60 * 60));
   const diffInDays = Math.floor(diffInMs / (1000 * 60 * 60 * 24));
 
-  if (diffInMin < 60) {
-    return `${diffInMin} min ago`;
+    let returnValue = '-';
+
+    if (diffInMin < 1) {
+      returnValue = 'Just now';
+    } else if (diffInMin < 60) {
+      returnValue = `${diffInMin} min ago`;
   } else if (diffInHours < 24) {
-    return `${diffInHours} hour${diffInHours > 1 ? 's' : ''} ago`;
+      returnValue = `${diffInHours} hour${diffInHours > 1 ? 's' : ''} ago`;
   } else if (diffInDays < 7) {
-    return `${diffInDays} day${diffInDays > 1 ? 's' : ''} ago`;
+      returnValue = `${diffInDays} day${diffInDays > 1 ? 's' : ''} ago`;
   } else {
-    return formatDate(dateString);
+      returnValue = formatDate(dateString, userTimeZone); 
+    }
+
+    return returnValue;
+    
+  } catch (error) {
+    console.error(`Error calculating relative time for "${dateString}":`, error);
+    return '-';
   }
 };
 
@@ -369,73 +397,7 @@ const formatNumber = (num: number): string => {
   return new Intl.NumberFormat('en-US').format(num);
 };
 
-// Add columns definition for the DataGrid
-const activityColumns: GridColDef[] = [
-  {
-    field: 'user',
-    headerName: 'User',
-    width: 200,
-    renderCell: (params) => (
-      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-        <UserAvatar 
-          user={{
-            id: params.row.user.id,
-            firstName: params.row.user.firstName,
-            lastName: params.row.user.lastName,
-            avatarUrl: params.row.user.avatar
-          }}
-          size="small"
-        />
-        <Typography variant="body2">
-          {params.row.user.firstName} {params.row.user.lastName}
-        </Typography>
-      </Box>
-    ),
-  },
-  {
-    field: 'message',
-    headerName: 'Activity',
-    flex: 1,
-    minWidth: 300,
-    renderCell: (params) => (
-      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-        {getActivityIcon(params.row.type)}
-        <Typography variant="body2">{params.row.message}</Typography>
-        <Chip 
-          label={params.row.ticketId}
-          size="small"
-          sx={{ 
-            height: 20, 
-            fontSize: '0.75rem',
-            '& .MuiChip-label': {
-              px: 1
-            }
-          }}
-        />
-      </Box>
-    ),
-  },
-  {
-    field: 'ticketSubject',
-    headerName: 'Ticket',
-    width: 250,
-    renderCell: (params) => (
-      <Typography variant="body2" color="text.secondary" noWrap>
-        {params.row.ticketSubject}
-      </Typography>
-    ),
-  },
-  {
-    field: 'timestamp',
-    headerName: 'Time',
-    width: 150,
-    renderCell: (params) => (
-      <Typography variant="body2" color="text.secondary">
-        {getRelativeTime(params.row.timestamp)}
-      </Typography>
-    ),
-  },
-];
+// Remove the global activityColumns definition from here
 
 // Remove framer-motion imports and define enhanced Material-UI components
 const EnhancedCard = (props: any) => {
@@ -494,7 +456,7 @@ const DashboardPage: React.FC = () => {
   const isTablet = useMediaQuery(theme.breakpoints.between('sm', 'md'));
   const navigate = useNavigate();
   const { user } = useAuth();
-  const { tickets, isLoading: ticketsLoading, fetchTickets } = useTickets();
+  const { tickets, isLoading: ticketsLoading, fetchTickets, refreshCounter, statuses, priorities } = useTickets();
   const [timeRange, setTimeRange] = useState<'day' | 'week' | 'month'>('week');
   const [stats, setStats] = useState<TicketStats>(mockTicketStats);
   const [recentActivities, setRecentActivities] = useState<TicketActivity[]>(mockActivities);
@@ -505,6 +467,7 @@ const DashboardPage: React.FC = () => {
   const [dashboardPagination, setDashboardPagination] = useState<PaginationState>({ page: 1, limit: 5, totalCount: 0, totalPages: 1 });
   const [dashboardLoading, setDashboardLoading] = useState(false);
   const [dashboardError, setDashboardError] = useState<string | null>(null);
+  const [refreshFlag, setRefreshFlag] = useState(0);
   const [customerStats, setCustomerStats] = useState<{
     total: number;
     open: number;
@@ -517,8 +480,76 @@ const DashboardPage: React.FC = () => {
     resolved: 0
   });
   
+  // Determine user timezone with fallback
+  const userTimeZone = user?.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
+  
   // Memoize the activity columns
-  const memoizedActivityColumns = React.useMemo(() => activityColumns, []);
+  const memoizedActivityColumns = React.useMemo(() => [
+    {
+      field: 'user',
+      headerName: 'User',
+      width: 200,
+      renderCell: (params) => (
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+          <UserAvatar 
+            user={{
+              id: params.row.user.id,
+              firstName: params.row.user.firstName,
+              lastName: params.row.user.lastName,
+              avatarUrl: params.row.user.avatar
+            }}
+            size="small"
+          />
+          <Typography variant="body2">
+            {params.row.user.firstName} {params.row.user.lastName}
+          </Typography>
+        </Box>
+      ),
+    },
+    {
+      field: 'message',
+      headerName: 'Activity',
+      flex: 1,
+      minWidth: 300,
+      renderCell: (params) => (
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+          {getActivityIcon(params.row.type)}
+          <Typography variant="body2">{params.row.message}</Typography>
+          <Chip 
+            label={params.row.ticketId}
+            size="small"
+            sx={{ 
+              height: 20, 
+              fontSize: '0.75rem',
+              '& .MuiChip-label': {
+                px: 1
+              }
+            }}
+          />
+        </Box>
+      ),
+    },
+    {
+      field: 'ticketSubject',
+      headerName: 'Ticket',
+      width: 250,
+      renderCell: (params) => (
+        <Typography variant="body2" color="text.secondary" noWrap>
+          {params.row.ticketSubject}
+        </Typography>
+      ),
+    },
+    {
+      field: 'timestamp',
+      headerName: 'Time',
+      width: 150,
+      renderCell: (params) => (
+        <Typography variant="body2" color="text.secondary">
+          {getRelativeTime(params.row.timestamp, userTimeZone)}
+        </Typography>
+      ),
+    },
+  ], [userTimeZone]);
   
   // Define ticket columns for the dashboard view
   const dashboardTicketColumns: GridColDef[] = React.useMemo(() => [
@@ -547,27 +578,67 @@ const DashboardPage: React.FC = () => {
       field: 'status',
       headerName: 'Status',
       width: 120,
-      renderCell: (params) => (
-        <StatusBadge status={params.row.status} size="small" />
-      ),
+      renderCell: (params) => {
+        // Don't render until statuses are loaded
+        if (!statuses || statuses.length === 0) {
+          return <Skeleton variant="text" width={80} height={24} animation="wave" />;
+        }
+        
+        // Ensure the status object has all required properties
+        const status = params.row.status || {};
+        if (!status.color && statuses.length > 0) {
+          // Try to find matching status from statuses array if color is missing
+          const matchedStatus = statuses.find(s => 
+            s.id === status.id || s.name === status.name || 
+            (typeof status === 'string' && (s.id === status || s.name === status))
+          );
+          if (matchedStatus) {
+            return <StatusBadge status={matchedStatus} size="small" />;
+          }
+        }
+        return <StatusBadge status={status} size="small" />;
+      },
     },
     {
       field: 'priority',
       headerName: 'Priority',
       width: 120,
-      renderCell: (params) => (
-        <PriorityBadge priority={params.row.priority} size="small" />
-      ),
+      renderCell: (params) => {
+        // Don't render until priorities are loaded
+        if (!priorities || priorities.length === 0) {
+          return <Skeleton variant="text" width={80} height={24} animation="wave" />;
+        }
+        
+        // Ensure the priority object has all required properties
+        const priority = params.row.priority || {};
+        if (!priority.color && priorities.length > 0) {
+          // Try to find matching priority from priorities array if color is missing
+          const matchedPriority = priorities.find(p => 
+            p.id === priority.id || p.name === priority.name || 
+            (typeof priority === 'string' && (p.id === priority || p.name === priority))
+          );
+          if (matchedPriority) {
+            return <PriorityBadge priority={matchedPriority} size="small" />;
+          }
+        }
+        return <PriorityBadge priority={priority} size="small" />;
+      },
     },
     {
       field: 'createdAt',
       headerName: 'Created',
-      width: 150,
+      width: 180,
       renderCell: (params) => (
-        <Typography variant="body2" color="text.secondary">
-          {formatDate(params.row.createdAt)}
-        </Typography>
+        <Box>
+          <Typography variant="body2">
+            {formatDate(params.row.createdAt, userTimeZone)}
+          </Typography>
+          <Typography variant="caption" color="text.secondary">
+            {getRelativeTime(params.row.createdAt, userTimeZone)}
+          </Typography>
+        </Box>
       ),
+      valueGetter: (params) => params.row.createdAt || '',
     },
     {
       field: 'actions',
@@ -592,7 +663,7 @@ const DashboardPage: React.FC = () => {
         </Tooltip>
       ),
     },
-  ], [navigate, theme]);
+  ], [navigate, theme, statuses, priorities, userTimeZone]);
   
   // Fetch data on component mount
   useEffect(() => {
@@ -613,8 +684,9 @@ const DashboardPage: React.FC = () => {
     }, 1500);
   }, [timeRange]);
   
-  // Calculate customer stats from tickets data
-  useEffect(() => {
+  // Calculate customer stats from tickets data - replace with memoized version
+  // First, add a new useCallback function
+  const calculateCustomerStats = useCallback(() => {
     if (tickets && tickets.length > 0) {
       const total = tickets.length;
       
@@ -643,15 +715,15 @@ const DashboardPage: React.FC = () => {
       ).length;
       
       // Debug logging
-      console.log('Total tickets:', total);
-      console.log('Open count:', open);
-      console.log('Pending count:', pending);
-      console.log('Resolved count:', resolved);
-      console.log('Ticket statuses:', tickets.map(t => 
-        typeof t.status === 'object' && t.status !== null && 'name' in t.status 
-          ? t.status.name 
-          : 'unknown'
-      ));
+      // console.log('Total tickets:', total); // Removed
+      // console.log('Open count:', open); // Removed
+      // console.log('Pending count:', pending); // Removed
+      // console.log('Resolved count:', resolved); // Removed
+      // console.log('Ticket statuses:', tickets.map(t =>  // Removed this block start
+      //   typeof t.status === 'object' && t.status !== null && 'name' in t.status 
+      //     ? t.status.name 
+      //     : 'unknown'
+      // )); // Removed this block end
       
       setCustomerStats({
         total,
@@ -661,6 +733,11 @@ const DashboardPage: React.FC = () => {
       });
     }
   }, [tickets]);
+
+  // Then replace the existing useEffect
+  useEffect(() => {
+    calculateCustomerStats();
+  }, [calculateCustomerStats]);
 
   // Create the stats data for the overview cards
   const getStatCards = () => {
@@ -717,6 +794,10 @@ const DashboardPage: React.FC = () => {
 
   // Refresh data
   const handleRefreshData = async () => {
+    // Increment refresh flag to trigger the useEffect without causing infinite loops
+    setRefreshFlag(prev => prev + 1);
+    
+    // Keep the existing code
     setIsStatsLoading(true);
     setIsActivitiesLoading(true);
     
@@ -741,16 +822,51 @@ const DashboardPage: React.FC = () => {
     setDashboardError(null);
     try {
       // Add log here to see what fetchTickets returns *for the dashboard*
-      console.log(`[Dashboard Fetch] Calling fetchTickets with page: ${page}, limit: ${limit}, filters: { isOpen: true }`);
+      // console.log(`[Dashboard Fetch] Calling fetchTickets with page: ${page}, limit: ${limit}, filters: { isOpen: true }`); // Removed
       const result = await fetchTickets(page, limit, { isOpen: true });
       // Add log here to inspect the result
-      console.log(`[Dashboard Fetch] Result from fetchTickets:`, result);
+      // console.log(`[Dashboard Fetch] Result from fetchTickets:`, result); // Removed
       
       if (result) {
-        setDashboardTickets(result.tickets);
+        // Normalize ticket data to ensure status and priority objects are complete
+        const normalizedTickets = result.tickets.map((ticket: any) => {
+          // For status: ensure it's a complete object with color
+          let statusObject = ticket.status;
+          if (typeof statusObject === 'string') {
+            statusObject = statuses.find(s => s.name === statusObject || s.id === statusObject) || 
+              { id: statusObject, name: statusObject, color: '#808080' };
+          } else if (!statusObject?.color && statuses.length > 0) {
+            // Try to get color from statuses array
+            const matchedStatus = statuses.find(s => s.id === statusObject?.id || s.name === statusObject?.name);
+            if (matchedStatus) {
+              statusObject = { ...statusObject, color: matchedStatus.color };
+            }
+          }
+          
+          // For priority: ensure it's a complete object with color
+          let priorityObject = ticket.priority;
+          if (typeof priorityObject === 'string') {
+            priorityObject = priorities.find(p => p.name === priorityObject || p.id === priorityObject) || 
+              { id: priorityObject, name: priorityObject, color: '#808080' };
+          } else if (!priorityObject?.color && priorities.length > 0) {
+            // Try to get color from priorities array
+            const matchedPriority = priorities.find(p => p.id === priorityObject?.id || p.name === priorityObject?.name);
+            if (matchedPriority) {
+              priorityObject = { ...priorityObject, color: matchedPriority.color };
+            }
+          }
+          
+          return {
+            ...ticket,
+            status: statusObject || { id: 'unknown', name: 'Unknown', color: '#808080' },
+            priority: priorityObject || { id: 'unknown', name: 'Unknown', color: '#808080' }
+          };
+        });
+        
+        setDashboardTickets(normalizedTickets);
         setDashboardPagination(result.pagination);
       } else {
-        console.log(`[Dashboard Fetch] fetchTickets returned undefined. Setting empty tickets.`);
+        // console.log(`[Dashboard Fetch] fetchTickets returned undefined. Setting empty tickets.`); // Removed
         setDashboardTickets([]); // Ensure state is cleared if fetch fails
         setDashboardError('Failed to load dashboard tickets.');
       }
@@ -761,7 +877,7 @@ const DashboardPage: React.FC = () => {
     } finally {
       setDashboardLoading(false);
     }
-  }, [fetchTickets]);
+  }, [fetchTickets, refreshCounter, statuses, priorities]);
 
   // Add missing pagination handler
   const handleDashboardPaginationChange = (model: { page: number; pageSize: number }) => {
@@ -772,19 +888,52 @@ const DashboardPage: React.FC = () => {
   const fetchAllTicketsForStats = useCallback(async () => {
     setIsStatsLoading(true);
     try {
-      console.log('[Stats Fetch] Fetching all tickets for stats (no isOpen filter)');
+      // console.log('[Stats Fetch] Fetching all tickets for stats (no isOpen filter)'); // Removed
       
       // Use a direct API call with apiClient instead of fetchTickets to ensure independence
       const response = await apiClient.get('/tickets', { page: 1, limit: 100 });
       
       if (response && response.tickets) {
-        console.log(`[Stats Fetch] Fetched ${response.tickets.length} tickets for stats`);
+        // console.log(`[Stats Fetch] Fetched ${response.tickets.length} tickets for stats`); // Removed
         
-        // Calculate customer stats from all tickets
-        const total = response.tickets.length;
+        // This is where we need to properly normalize the tickets before analysis
+        const normalizedTickets = response.tickets.map((ticket: any) => {
+          // Find the matching status from the statuses array
+          let statusObject;
+          if (typeof ticket.status === 'string') {
+            statusObject = statuses.find(s => s.name === ticket.status || s.id === ticket.status);
+          } else if (typeof ticket.status === 'object' && ticket.status !== null) {
+            statusObject = ticket.status; // It's already an object
+          }
+          
+          // Find the matching priority from the priorities array
+          let priorityObject;
+          if (typeof ticket.priority === 'string') {
+            priorityObject = priorities.find(p => p.name === ticket.priority || p.id === ticket.priority);
+          } else if (typeof ticket.priority === 'object' && ticket.priority !== null) {
+            priorityObject = ticket.priority; // It's already an object
+          }
+          
+          return {
+            ...ticket,
+            status: statusObject || { 
+              id: (typeof ticket.status === 'string' ? ticket.status : (ticket.status as any)?.id) || 'unknown', 
+              name: (typeof ticket.status === 'string' ? ticket.status : (ticket.status as any)?.name) || 'Unknown', 
+              color: '#808080' 
+            },
+            priority: priorityObject || { 
+              id: (typeof ticket.priority === 'string' ? ticket.priority : (ticket.priority as any)?.id) || 'unknown', 
+              name: (typeof ticket.priority === 'string' ? ticket.priority : (ticket.priority as any)?.name) || 'Unknown', 
+              color: '#808080' 
+            }
+          };
+        });
+        
+        // Calculate customer stats from normalized tickets
+        const total = normalizedTickets.length;
         
         // Open stats: count tickets with status new, open, in progress, or pending
-        const open = response.tickets.filter(ticket => 
+        const open = normalizedTickets.filter(ticket => 
           typeof ticket.status === 'object' && 
           ticket.status !== null && 
           'name' in ticket.status && 
@@ -792,7 +941,7 @@ const DashboardPage: React.FC = () => {
         ).length;
         
         // Pending stats: count tickets with status in progress or pending
-        const pending = response.tickets.filter(ticket => 
+        const pending = normalizedTickets.filter(ticket => 
           typeof ticket.status === 'object' && 
           ticket.status !== null && 
           'name' in ticket.status && 
@@ -800,7 +949,7 @@ const DashboardPage: React.FC = () => {
         ).length;
         
         // Resolved stats: count tickets with status resolved or closed
-        const resolved = response.tickets.filter(ticket => 
+        const resolved = normalizedTickets.filter(ticket => 
           typeof ticket.status === 'object' && 
           ticket.status !== null && 
           'name' in ticket.status && 
@@ -808,12 +957,12 @@ const DashboardPage: React.FC = () => {
         ).length;
         
         // Debug logging
-        console.log('[Stats Fetch] Calculated stats:', { total, open, pending, resolved });
-        console.log('[Stats Fetch] Status values:', response.tickets.map(t => 
-          typeof t.status === 'object' && t.status !== null && 'name' in t.status 
-            ? t.status.name.toLowerCase() 
-            : 'unknown'
-        ));
+        // console.log('[Stats Fetch] Calculated stats:', { total, open, pending, resolved }); // Removed
+        // console.log('[Stats Fetch] Status values:', normalizedTickets.map(t =>  // Removed this block start
+        //   typeof t.status === 'object' && t.status !== null && 'name' in t.status 
+        //     ? t.status.name.toLowerCase() 
+        //     : 'unknown'
+        // )); // Removed this block end
         
         setCustomerStats({
           total,
@@ -827,7 +976,7 @@ const DashboardPage: React.FC = () => {
     } finally {
       setIsStatsLoading(false);
     }
-  }, []);
+  }, [statuses, priorities]);
 
   // Initial fetch for dashboard
   useEffect(() => {
@@ -843,7 +992,63 @@ const DashboardPage: React.FC = () => {
       
       return () => clearTimeout(timer);
     }
-  }, [user, fetchDashboardData, fetchAllTicketsForStats]);
+  }, [user, refreshFlag, refreshCounter]);
+
+  // Add a separate useEffect to update dashboard tickets when statuses or priorities load
+  useEffect(() => {
+    // Only proceed if we have both dashboard tickets and statuses/priorities
+    if (dashboardTickets.length > 0 && statuses.length > 0 && priorities.length > 0) {
+      // console.log('[Dashboard] Statuses or priorities changed, updating ticket badge data'); // Removed
+      
+      // Re-process tickets to ensure they have the latest status/priority info
+      const updatedTickets = dashboardTickets.map(ticket => {
+        let updatedTicket = {...ticket};
+        
+        // Update status with data from statuses array
+        if (typeof ticket.status === 'object' && ticket.status !== null) {
+          const matchedStatus = statuses.find(s => 
+            s.id === ticket.status.id || s.name === ticket.status.name
+          );
+          if (matchedStatus) {
+            updatedTicket.status = matchedStatus;
+          }
+        } else if (typeof ticket.status === 'string') {
+          const statusString = ticket.status as string;
+          const matchedStatus = statuses.find(s => 
+            String(s.id) === statusString || s.name.toLowerCase() === statusString.toLowerCase()
+          );
+          if (matchedStatus) {
+            updatedTicket.status = matchedStatus;
+          }
+        }
+        
+        // Update priority with data from priorities array
+        if (typeof ticket.priority === 'object' && ticket.priority !== null) {
+          const matchedPriority = priorities.find(p => 
+            p.id === ticket.priority.id || p.name === ticket.priority.name
+          );
+          if (matchedPriority) {
+            updatedTicket.priority = matchedPriority;
+          }
+        } else if (typeof ticket.priority === 'string') {
+          const priorityString = ticket.priority as string;
+          const matchedPriority = priorities.find(p => 
+            String(p.id) === priorityString || p.name.toLowerCase() === priorityString.toLowerCase()
+          );
+          if (matchedPriority) {
+            updatedTicket.priority = matchedPriority;
+          }
+        }
+        
+        return updatedTicket;
+      });
+      
+      // Only update state if something actually changed
+      if (JSON.stringify(updatedTickets) !== JSON.stringify(dashboardTickets)) {
+        setDashboardTickets(updatedTickets);
+      }
+    }
+  }, [statuses, priorities, dashboardTickets]);
 
   // Render dashboard based on user role
   const renderRoleDashboard = () => {
@@ -1077,7 +1282,7 @@ const DashboardPage: React.FC = () => {
                 <DataGrid
                   rows={dashboardTickets} 
                   columns={dashboardTicketColumns} 
-                  rowCount={dashboardPagination.totalCount} 
+                  rowCount={dashboardPagination.totalCount || 0}
                   loading={dashboardLoading} 
                   pageSizeOptions={[5, 10]}
                   paginationModel={{ 

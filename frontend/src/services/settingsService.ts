@@ -42,6 +42,51 @@ const updateTicketSettings = async (ticketSettings: TicketSettings): Promise<Tic
   return apiClient.put('/settings/ticket', ticketSettings);
 };
 
+// Get SLA settings
+const getSLASettings = async (): Promise<any> => {
+  try {
+    const response = await apiClient.get('/settings/sla');
+    console.log('Raw SLA settings response:', response);
+    
+    // Normalize the response format for consistency
+    if (response && typeof response === 'object') {
+      // If the response is already in the expected format with policies array
+      if (Array.isArray(response.policies)) {
+        return response;
+      }
+      
+      // If policies are inside a data property
+      if (response.data && Array.isArray(response.data.policies)) {
+        return response.data;
+      }
+      
+      // If response is just an array of policies directly
+      if (Array.isArray(response)) {
+        return { policies: response, organizationId: 1001 };
+      }
+    }
+    
+    // Default return with empty policies
+    return { policies: [], organizationId: 1001 };
+  } catch (error) {
+    console.error('Error fetching SLA settings:', error);
+    throw error;
+  }
+};
+
+// Update SLA settings
+const updateSLASettings = async (slaSettings: any): Promise<any> => {
+  try {
+    console.log('Sending SLA settings to server:', slaSettings);
+    const response = await apiClient.put('/settings/sla', slaSettings);
+    console.log('SLA settings update response:', response);
+    return response;
+  } catch (error) {
+    console.error('Error updating SLA settings:', error);
+    throw error;
+  }
+};
+
 // Get integration settings
 const getIntegrationSettings = async (): Promise<IntegrationSettings> => {
   return apiClient.get('/settings/integration');
@@ -79,7 +124,9 @@ const settingsService = {
   updateIntegrationSettings,
   testIntegrationConnection,
   getAdvancedSettings,
-  updateAdvancedSettings
+  updateAdvancedSettings,
+  getSLASettings,
+  updateSLASettings
 };
 
 export default settingsService; 

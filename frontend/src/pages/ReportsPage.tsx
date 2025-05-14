@@ -52,6 +52,7 @@ import {
 } from '@mui/icons-material';
 import StatsWidget from '../components/dashboard/StatsWidget';
 import TicketChart from '../components/dashboard/TicketChart';
+import { showSuccess, showInfo } from '../utils/notificationUtils';
 
 import {
   pageContainer,
@@ -284,13 +285,13 @@ const ReportsPage: React.FC = () => {
     setIsLoading(true);
     setTimeout(() => {
       setIsLoading(false);
-      alert('Report generated successfully!');
+      showSuccess('Report generated successfully!');
     }, 1500);
   };
   
   // Handle report download
   const handleDownloadReport = (reportId: string) => {
-    alert(`Downloading report ${reportId}`);
+    showInfo(`Downloading report ${reportId}`);
   };
   
   // Handle report view

@@ -5,6 +5,8 @@ import { TicketStatus } from './TicketStatus';
 import { TicketPriority } from './TicketPriority';
 import { TicketType } from './TicketType';
 import { Department } from './Department';
+import { SLAPolicy } from './SLAPolicy';
+import { BusinessHours } from './BusinessHours';
 
 @Entity('organizations')
 export class Organization {
@@ -37,6 +39,12 @@ export class Organization {
 
   @OneToMany(() => Department, department => department.organization)
   departments: Department[];
+
+  @OneToMany(() => SLAPolicy, slaPolicy => slaPolicy.organization)
+  slaPolicies: SLAPolicy[];
+
+  @OneToMany(() => BusinessHours, businessHours => businessHours.organization)
+  businessHours: BusinessHours[];
 
   @CreateDateColumn({ name: 'created_at' })
   createdAt: Date;

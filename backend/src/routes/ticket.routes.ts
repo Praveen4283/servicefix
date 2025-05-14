@@ -17,7 +17,8 @@ import {
   uploadTicketAttachments,
   downloadTicketAttachment,
   getTicketHistory,
-  addTicketComment
+  addTicketComment,
+  updateTicketSLA
 } from '../controllers/ticket.controller';
 import { validateRequest } from '../middleware/validate-request.middleware';
 import { authenticate } from '../middleware/auth.middleware';
@@ -192,6 +193,16 @@ router.post(
     validateRequest,
   ],
   addComment
+);
+
+// Add route for updating SLA after ticket priority changes
+router.post(
+  '/:id/update-sla',
+  [
+    param('id').isInt({ min: 1 }).withMessage('Invalid ticket ID format'),
+    validateRequest,
+  ],
+  updateTicketSLA
 );
 
 // Delete a ticket

@@ -1,11 +1,15 @@
 import { io, Socket } from 'socket.io-client';
-import { useNotification, useSystemNotification } from '../context/NotificationContext';
 import apiClient from './apiClient';
+import { notificationManager } from './notificationManager';
 
 // State to track if connection is active
 let socket: Socket | null = null;
 let isConnecting = false;
 let connectionPromise: Promise<void> | null = null;
+
+// Track event listeners for custom events
+const connectListeners: Array<() => void> = [];
+const disconnectListeners: Array<() => void> = [];
 
 // Enhanced reconnection configuration
 const MAX_RECONNECT_ATTEMPTS = 10;
@@ -60,6 +64,16 @@ const socketService = {
             clearTimeout(reconnectTimer);
             reconnectTimer = null;
           }
+          
+          // Notify custom connect listeners
+          connectListeners.forEach(listener => {
+            try {
+              listener();
+            } catch (err) {
+              console.error("Error in connect listener:", err);
+            }
+          });
+          
           // Remove listeners after resolving/rejecting
           removeListeners(); 
           resolve();
@@ -77,6 +91,16 @@ const socketService = {
 
         const onDisconnect = (reason: Socket.DisconnectReason) => {
           isConnecting = false; // Ensure flag is unset on disconnect
+          
+          // Notify custom disconnect listeners
+          disconnectListeners.forEach(listener => {
+            try {
+              listener();
+            } catch (err) {
+              console.error("Error in disconnect listener:", err);
+            }
+          });
+          
           // Attempt to reconnect if it was not an intentional disconnect
           if (reason !== 'io client disconnect') {
             handleReconnect(token);
@@ -176,6 +200,66 @@ const socketService = {
    */
   isConnected: (): boolean => {
     return socket?.connected || false;
+  },
+  
+  /**
+   * Add a listener for socket connect events
+   * @param listener Function to call when socket connects
+   * @returns Function to remove the listener
+   */
+  onConnect: (listener: () => void): (() => void) => {
+    connectListeners.push(listener);
+    
+    // If already connected, call the listener immediately
+    if (socket?.connected) {
+      setTimeout(() => listener(), 0);
+    }
+    
+    // Return unsubscribe function
+    return () => {
+      const index = connectListeners.indexOf(listener);
+      if (index !== -1) {
+        connectListeners.splice(index, 1);
+      }
+    };
+  },
+  
+  /**
+   * Add a listener for socket disconnect events
+   * @param listener Function to call when socket disconnects
+   * @returns Function to remove the listener
+   */
+  onDisconnect: (listener: () => void): (() => void) => {
+    disconnectListeners.push(listener);
+    
+    // Return unsubscribe function
+    return () => {
+      const index = disconnectListeners.indexOf(listener);
+      if (index !== -1) {
+        disconnectListeners.splice(index, 1);
+      }
+    };
+  },
+  
+  /**
+   * Emit an event to the server
+   * @param event Event name
+   * @param data Event data
+   * @returns True if event was emitted, false otherwise
+   */
+  emit: (event: string, data: any): boolean => {
+    if (!socket?.connected) {
+      console.warn(`[Socket] Cannot emit ${event} - socket not connected`);
+      return false;
+    }
+    
+    try {
+      socket.emit(event, data);
+      return true;
+    } catch (error) {
+      console.error(`[Socket] Error emitting ${event}:`, error);
+      return false;
+    }
   }
 };
 
@@ -213,20 +297,15 @@ export function useSocket() {
 }
 
 /**
- * Register real-time notification handlers
- * @param notificationHandlers Object containing notification handlers
+ * Setup notification listeners for real-time notifications
+ * This automatically uses the centralized notification manager
  */
-export function setupNotificationHandlers(notificationHandlers: {
-  showSuccess?: (message: string, options?: any) => void;
-  showError?: (message: string, options?: any) => void;
-  showWarning?: (message: string, options?: any) => void;
-  showInfo?: (message: string, options?: any) => void;
-}) {
+export function setupNotificationListeners() {
   if (!socket) {
     return;
   }
 
-  // Handle notifications from the server
+  // Use notification manager for centralized notification handling
   socket.on('notification', (notification) => {
     if (!notification) return;
 
@@ -241,16 +320,28 @@ export function setupNotificationHandlers(notificationHandlers: {
       // Select the appropriate notification function based on type
       switch (notification.type) {
         case 'success':
-          notificationHandlers.showSuccess?.(notification.message, { title: notification.title });
+          notificationManager.showSuccess(notification.message, { 
+            title: notification.title,
+            isPersistent: notification.isPersistent
+          });
           break;
         case 'error':
-          notificationHandlers.showError?.(notification.message, { title: notification.title });
+          notificationManager.showError(notification.message, { 
+            title: notification.title,
+            isPersistent: notification.isPersistent
+          });
           break;
         case 'warning':
-          notificationHandlers.showWarning?.(notification.message, { title: notification.title });
+          notificationManager.showWarning(notification.message, { 
+            title: notification.title,
+            isPersistent: notification.isPersistent
+          });
           break;
         default:
-          notificationHandlers.showInfo?.(notification.message, { title: notification.title });
+          notificationManager.showInfo(notification.message, { 
+            title: notification.title,
+            isPersistent: notification.isPersistent
+          });
           break;
       }
     }

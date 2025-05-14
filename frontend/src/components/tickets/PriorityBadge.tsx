@@ -6,13 +6,17 @@ import {
   HorizontalRule, 
   KeyboardArrowDown 
 } from '@mui/icons-material';
+import { useTickets } from '../../context/TicketContext'; // Import useTickets
+
+// Define the expected structure for a priority object
+interface PriorityObject {
+  id: string;
+  name: string;
+  color: string;
+}
 
 interface PriorityBadgeProps {
-  priority: {
-    id: string;
-    name: string;
-    color: string;
-  };
+  priority?: PriorityObject | string | { id: string }; // Accept full object, ID string, or object with just ID
   size?: 'small' | 'medium';
   variant?: 'filled' | 'outlined' | 'minimal';
   showTooltip?: boolean;
@@ -22,11 +26,28 @@ interface PriorityBadgeProps {
  * A component for displaying ticket priority with appropriate styling and icons
  */
 const PriorityBadge: React.FC<PriorityBadgeProps> = ({
-  priority,
+  priority: priorityInput, // Input can be object or string ID
   size = 'medium',
   variant = 'filled',
   showTooltip = false,
 }) => {
+  const { priorities: allPriorities } = useTickets(); // Get all priorities from context
+
+  let priority: PriorityObject | undefined = undefined;
+
+  if (typeof priorityInput === 'object' && priorityInput !== null) {
+    if ('name' in priorityInput && 'color' in priorityInput) {
+      // It's a full PriorityObject
+      priority = priorityInput as PriorityObject;
+    } else if ('id' in priorityInput && allPriorities) {
+      // It's an object with at least an id, try to find the full object
+      priority = allPriorities.find(p => p.id === priorityInput.id);
+    }
+  } else if (typeof priorityInput === 'string' && allPriorities) {
+    // It's a string ID
+    priority = allPriorities.find(p => p.id === priorityInput);
+  }
+
   // Choose appropriate icon based on priority name or id
   const getPriorityIcon = () => {
     if (!priority || !priority.name) {
@@ -72,7 +93,7 @@ const PriorityBadge: React.FC<PriorityBadgeProps> = ({
   };
   
   if (!priority) {
-    // Render a placeholder or default badge if priority is undefined
+    // Render a placeholder or default badge if priority is undefined or not found
     return (
       <Chip
         label="Unknown"

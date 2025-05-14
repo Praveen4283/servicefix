@@ -452,6 +452,11 @@ const UsersPage = () => {
     if (mode === 'edit' && user) {
       console.log("[handleOpenModal] User data passed in:", user); // Log user data passed to modal
       console.log("[handleOpenModal] User avatar_url:", user.avatar_url); // Log avatar URL specifically
+      console.log("[handleOpenModal] Logged-in User ID:", loggedInUser?.id);
+      console.log("[handleOpenModal] Editing User ID:", user.id);
+      console.log("[handleOpenModal] Editing User Role:", user.role);
+      console.log("[handleOpenModal] ID Match:", loggedInUser?.id === user.id);
+      console.log("[handleOpenModal] Role Match:", user.role === 'admin');
       setCurrentUser({
         id: user.id,
         first_name: user.first_name,
@@ -1088,7 +1093,7 @@ const UsersPage = () => {
                            checked={currentUser?.is_active ?? true}
                            onChange={handleFormChange}
                            name="is_active"
-                           disabled={isSubmitting}
+                           disabled={isSubmitting || (modalMode === 'edit' && String(currentUser?.id) === String(loggedInUser?.id) && currentUser?.role === 'admin')}
                          />
                        }
                        label="User is Active"

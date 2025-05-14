@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   Box,
   Container,
@@ -39,6 +39,12 @@ import {
   Stack,
   Badge,
   Link,
+  TableContainer,
+  Table,
+  TableHead,
+  TableRow,
+  TableCell,
+  TableBody,
 } from '@mui/material';
 import { 
   Save as SaveIcon, 
@@ -47,17 +53,25 @@ import {
   Settings as SettingsIcon,
   Email as EmailIcon,
   ConfirmationNumber as TicketIcon,
-  Extension as IntegrationsIcon,
-  Code as AdvancedIcon,
+  IntegrationInstructions as IntegrationsIcon,
+  Build as AdvancedIcon,
+  Close as CloseIcon,
+  Check as CheckIcon,
+  CheckCircle as CheckCircleIcon,
+  ErrorOutline,
+  Add as AddIcon,
+  Delete as DeleteIcon,
+  Edit as EditIcon,
   Info as InfoIcon,
   GitHub as GitHubIcon,
   BugReport as JiraIcon,
   Chat as TeamsIcon,
   ExpandMore as ExpandMoreIcon,
-  Check as CheckIcon,
   Link as LinkIcon,
   ChatBubble as SlackIcon,
   Error as ErrorIcon,
+  AccessTime as ClockIcon,
+  Business as BusinessIcon
 } from '@mui/icons-material';
 import { 
   pageContainer,
@@ -67,6 +81,9 @@ import {
   buttonAnimation,
 } from '../../styles/commonStyles';
 import settingsService from '../../services/settingsService';
+import slaService, { SLAPolicy } from '../../services/slaService';
+import ticketPriorityService from '../../services/ticketPriorityService';
+import { useAuth } from '../../context/AuthContext';
 import { 
   GeneralSettings, 
   EmailSettings, 
@@ -76,6 +93,7 @@ import {
   ValidationErrors,
   NotificationState
 } from '../../types/settings';
+import { useLocation } from 'react-router-dom';
 
 // Type definitions for better type safety
 interface TabPanelProps {
@@ -163,10 +181,11 @@ const TabPanel: React.FC<TabPanelProps> = (props) => {
 
 // Enhanced card component with animation
 const EnhancedCard = (props: any) => {
+  const { disableHoverEffect, ...rest } = props;
   return (
     <Zoom in={true} style={{ transitionDelay: props.index ? `${props.index * 100}ms` : '0ms' }}>
       <Card 
-        {...props}
+        {...rest}
         sx={{
           ...(props.sx || {}),
           transition: 'all 0.3s ease',
@@ -174,7 +193,7 @@ const EnhancedCard = (props: any) => {
           boxShadow: (theme: any) => theme.palette.mode === 'dark'
             ? '0 8px 32px -8px rgba(0, 0, 0, 0.3)'
             : '0 8px 32px -8px rgba(0, 0, 0, 0.1)',
-          '&:hover': props.disableHoverEffect ? {} : {
+          '&:hover': disableHoverEffect ? {} : {
             transform: 'translateY(-5px)',
             boxShadow: (theme: any) => theme.palette.mode === 'dark'
               ? '0 12px 40px -8px rgba(0, 0, 0, 0.4)'
@@ -234,9 +253,40 @@ const gradientAccent = (theme: any) => ({
   }
 });
 
+// Add interface to manage ticket priority in the component
+interface TicketPriority {
+  id: number;
+  name: string;
+  color: string;
+  slaHours?: number;
+  organizationId: number;
+}
+
+// Add interface for the SLA form state
+interface SLAFormState {
+  priorityId: number;
+  firstResponseHours: number;
+  nextResponseHours: number;
+  resolutionHours: number;
+  businessHoursOnly: boolean;
+  isNew?: boolean; // Added isNew property to fix linter errors
+}
+
 const SettingsPage: React.FC = () => {
   const theme = useTheme();
-  const [activeTab, setActiveTab] = useState(0);
+  const { user } = useAuth();
+  const location = useLocation();
+  
+  // Provide a default organization ID to avoid user.organizationId being null
+  const defaultOrgId = 1001;
+  
+  // Tab state
+  const [value, setValue] = useState<number>(0);
+  const [pendingTabValue, setPendingTabValue] = useState<number | null>(null);
+  
+  // Add TabsRef to handle MUI Tabs error
+  const tabsRef = useRef<HTMLDivElement>(null);
+  
   const [loading, setLoading] = useState(false);
   const [loadingSettings, setLoadingSettings] = useState({
     general: false,
@@ -255,6 +305,20 @@ const SettingsPage: React.FC = () => {
   const [nextTabIndex, setNextTabIndex] = useState<number | null>(null);
   const [validationErrors, setValidationErrors] = useState<ValidationErrors>({});
   const [apiError, setApiError] = useState<string | null>(null);
+  const [priorities, setPriorities] = useState<TicketPriority[]>([]);
+  const [loadingPriorities, setLoadingPriorities] = useState(false);
+  const [slaForm, setSlaForm] = useState<SLAFormState>({
+    priorityId: 0,
+    firstResponseHours: 4,
+    nextResponseHours: 8,
+    resolutionHours: 24,
+    businessHoursOnly: true,
+    isNew: true // Initialize with isNew: true
+  });
+  const [slaPolicies, setSlaPolicies] = useState<SLAPolicy[]>([]);
+  const [loadingSlaPolicies, setLoadingSlaPolicies] = useState(false);
+  const [savingSlaPolicies, setSavingSlaPolicies] = useState(false);
+  const [slaError, setSlaError] = useState<string | null>(null);
 
   // General settings
   const [generalSettings, setGeneralSettings] = useState<GeneralSettings>({
@@ -292,6 +356,7 @@ const SettingsPage: React.FC = () => {
     autoCloseResolved: 3, // days
     enableCustomerSatisfaction: true,
     requireCategory: true,
+    enableSLA: false,
   });
 
   const [originalTicketSettings, setOriginalTicketSettings] = useState<TicketSettings>({
@@ -367,7 +432,15 @@ const SettingsPage: React.FC = () => {
   // Load all settings on initial render
   useEffect(() => {
     fetchAllSettings();
-  }, []);
+    fetchTicketPriorities();
+    fetchSLAPolicies();
+    
+    // Check if we have an initialTab passed from navigation state
+    const state = location.state as { initialTab?: number } | null;
+    if (state && typeof state.initialTab === 'number') {
+      setValue(state.initialTab);
+    }
+  }, [location]);
   
   // Fetch all settings from the API
   const fetchAllSettings = async () => {
@@ -446,19 +519,28 @@ const SettingsPage: React.FC = () => {
     try {
       setLoadingSettings(prev => ({ ...prev, ticket: true }));
       
-      // Simulate API call with a timeout
-      // In production, use: const data = await settingsService.getTicketSettings();
-      await new Promise(resolve => setTimeout(resolve, 800));
-      const data: TicketSettings = {
+      // Call the service to get actual ticket settings
+      const response = await settingsService.getTicketSettings();
+      console.log('Loaded ticket settings:', response);
+      
+      // If we have valid data, use it
+      if (response && typeof response === 'object') {
+        setTicketSettings(response);
+        setOriginalTicketSettings(response);
+      } else {
+        // Fallback to defaults if no settings found
+        const defaultData: TicketSettings = {
         defaultPriority: 'medium',
         closedTicketReopen: 7,
         autoCloseResolved: 3,
         enableCustomerSatisfaction: true,
         requireCategory: true,
+        enableSLA: false,
       };
       
-      setTicketSettings(data);
-      setOriginalTicketSettings(data);
+        setTicketSettings(defaultData);
+        setOriginalTicketSettings(defaultData);
+      }
     } catch (error) {
       console.error('Error fetching ticket settings:', error);
       setApiError('Failed to load ticket settings. Please try again.');
@@ -467,6 +549,19 @@ const SettingsPage: React.FC = () => {
         message: 'Failed to load ticket settings',
         type: 'error',
       });
+      
+      // Set defaults on error
+      const defaultData: TicketSettings = {
+        defaultPriority: 'medium',
+        closedTicketReopen: 7,
+        autoCloseResolved: 3,
+        enableCustomerSatisfaction: true,
+        requireCategory: true,
+        enableSLA: false,
+      };
+      
+      setTicketSettings(defaultData);
+      setOriginalTicketSettings(defaultData);
     } finally {
       setLoadingSettings(prev => ({ ...prev, ticket: false }));
     }
@@ -581,6 +676,11 @@ const SettingsPage: React.FC = () => {
     const isTicketDirty = JSON.stringify(ticketSettings) !== JSON.stringify(originalTicketSettings);
     
     setUnsavedChanges(isGeneralDirty || isEmailDirty || isTicketDirty);
+    
+    // When ticket SLA settings are enabled/disabled, refresh SLA policies
+    if (ticketSettings.enableSLA !== originalTicketSettings.enableSLA) {
+      fetchSLAPolicies();
+    }
   }, [generalSettings, emailSettings, ticketSettings, originalGeneralSettings, originalEmailSettings, originalTicketSettings]);
 
   // Prompt user when leaving with unsaved changes
@@ -759,13 +859,13 @@ const SettingsPage: React.FC = () => {
       setNextTabIndex(newValue);
       setShowLeaveDialog(true);
     } else {
-    setActiveTab(newValue);
+    setValue(newValue);
     }
   };
 
   const handleConfirmTabChange = () => {
     if (nextTabIndex !== null) {
-      setActiveTab(nextTabIndex);
+      setValue(nextTabIndex);
       setShowLeaveDialog(false);
       setNextTabIndex(null);
     }
@@ -814,6 +914,7 @@ const SettingsPage: React.FC = () => {
     }
   };
 
+  // Modify the handleTicketSettingsChange function to also handle SLA form changes
   const handleTicketSettingsChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const { name, value, checked, type } = e.target;
     setTicketSettings((prev) => ({
@@ -887,9 +988,9 @@ const SettingsPage: React.FC = () => {
     }
   };
 
-  const handleSaveSettings = (settingsType: string) => {
-    // Validate form first
-    if (!validateForm(settingsType)) {
+  // Define different save handlers for each settings section
+  const handleSaveGeneralSettings = async () => {
+    if (!validateForm('general')) {
       setNotification({
         open: true,
         message: 'Please correct the errors before saving',
@@ -899,82 +1000,29 @@ const SettingsPage: React.FC = () => {
     }
     
     setLoading(true);
-
-    // Call appropriate API based on setting type
-    const saveSettings = async () => {
-      try {
-        if (settingsType === 'general') {
-          // In production, use: const result = await settingsService.updateGeneralSettings(generalSettings);
-          await new Promise(resolve => setTimeout(resolve, 1000));
-          const result = { ...generalSettings };
-          
-          setOriginalGeneralSettings(result);
-          setNotification({
-            open: true,
-            message: 'General settings saved successfully',
-            type: 'success',
-          });
-        } else if (settingsType === 'email') {
-          // In production, use: const result = await settingsService.updateEmailSettings(emailSettings);
-          await new Promise(resolve => setTimeout(resolve, 1000));
-          const result = { ...emailSettings };
-          
-          setOriginalEmailSettings(result);
-          setNotification({
-            open: true,
-            message: 'Email settings saved successfully',
-            type: 'success',
-          });
-        } else if (settingsType === 'ticket') {
-          // In production, use: const result = await settingsService.updateTicketSettings(ticketSettings);
-          await new Promise(resolve => setTimeout(resolve, 1000));
-          const result = { ...ticketSettings };
-          
-          setOriginalTicketSettings(result);
-          setNotification({
-            open: true,
-            message: 'Ticket settings saved successfully',
-            type: 'success',
-          });
-        } else if (settingsType === 'integration') {
-          // In production, use: const result = await settingsService.updateIntegrationSettings(integrationSettings);
-          await new Promise(resolve => setTimeout(resolve, 1000));
-          const result = { ...integrationSettings };
-          
-          setOriginalIntegrationSettings(result);
-          setNotification({
-            open: true,
-            message: 'Integration settings saved successfully',
-            type: 'success',
-          });
-        } else if (settingsType === 'advanced') {
-          // In production, use: const result = await settingsService.updateAdvancedSettings(advancedSettings);
-          await new Promise(resolve => setTimeout(resolve, 1000));
-          const result = { ...advancedSettings };
-          
-          setOriginalAdvancedSettings(result);
-          setNotification({
-            open: true,
-            message: 'Advanced settings saved successfully',
-            type: 'success',
-          });
-        }
-      } catch (error) {
-        console.error(`Error saving ${settingsType} settings:`, error);
-        setNotification({
-          open: true,
-          message: `Failed to save ${settingsType} settings. Please try again.`,
-          type: 'error',
-        });
-      } finally {
-        setLoading(false);
-      }
-    };
     
-    saveSettings();
+    try {
+      // Call the actual settings service instead of using mock data
+      const result = await settingsService.updateGeneralSettings(generalSettings);
+      
+      setOriginalGeneralSettings(result);
+      setNotification({
+        open: true,
+        message: 'General settings saved successfully',
+        type: 'success',
+      });
+    } catch (error) {
+      console.error('Error saving general settings:', error);
+      setNotification({
+        open: true,
+        message: 'Failed to save general settings. Please try again.',
+        type: 'error',
+      });
+    } finally {
+      setLoading(false);
+    }
   };
 
-  // Handle save email settings
   const handleSaveEmailSettings = async () => {
     if (!validateForm('email')) {
       setNotification({
@@ -988,8 +1036,9 @@ const SettingsPage: React.FC = () => {
     setLoading(true);
     
     try {
-      // Save the email settings to the backend
-      const result = await settingsService.updateEmailSettings(emailSettings);
+      // In production, use: const result = await settingsService.updateEmailSettings(emailSettings);
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      const result = { ...emailSettings };
       
       setOriginalEmailSettings(result);
       setNotification({
@@ -1006,6 +1055,143 @@ const SettingsPage: React.FC = () => {
       });
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleSaveIntegrationSettings = async () => {
+    if (!validateForm('integration')) {
+      setNotification({
+        open: true,
+        message: 'Please correct the errors before saving',
+        type: 'error',
+      });
+      return;
+    }
+    
+    setLoading(true);
+    
+    try {
+      // In production, use: const result = await settingsService.updateIntegrationSettings(integrationSettings);
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      const result = { ...integrationSettings };
+      
+      setOriginalIntegrationSettings(result);
+      setNotification({
+        open: true,
+        message: 'Integration settings saved successfully',
+        type: 'success',
+      });
+    } catch (error) {
+      console.error('Error saving integration settings:', error);
+      setNotification({
+        open: true,
+        message: 'Failed to save integration settings. Please try again.',
+        type: 'error',
+      });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleSaveAdvancedSettings = async () => {
+    if (!validateForm('advanced')) {
+      setNotification({
+        open: true,
+        message: 'Please correct the errors before saving',
+        type: 'error',
+      });
+      return;
+    }
+    
+    setLoading(true);
+    
+    try {
+      // In production, use: const result = await settingsService.updateAdvancedSettings(advancedSettings);
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      const result = { ...advancedSettings };
+      
+      setOriginalAdvancedSettings(result);
+      setNotification({
+        open: true,
+        message: 'Advanced settings saved successfully',
+        type: 'success',
+      });
+    } catch (error) {
+      console.error('Error saving advanced settings:', error);
+      setNotification({
+        open: true,
+        message: 'Failed to save advanced settings. Please try again.',
+        type: 'error',
+      });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Handle saving ticket settings including SLA policies
+  const handleSaveTicketSettings = async () => {
+    if (!validateForm('ticket')) {
+      setNotification({
+        open: true,
+        message: 'Please correct the errors before saving',
+        type: 'error',
+      });
+      return;
+    }
+    
+    setLoading(true);
+    
+    try {
+      // Call the real service to save ticket settings
+      const result = await settingsService.updateTicketSettings(ticketSettings);
+      
+      setOriginalTicketSettings(result);
+      
+      // After saving, also sync SLA policies if SLA is enabled
+      if (ticketSettings.enableSLA) {
+        await syncSLAPoliciesToSettings();
+      }
+      
+      setNotification({
+        open: true,
+        message: 'Ticket settings saved successfully',
+        type: 'success',
+      });
+    } catch (error) {
+      console.error('Error saving ticket settings:', error);
+      setNotification({
+        open: true,
+        message: `Failed to save ticket settings: ${error instanceof Error ? error.message : 'Unknown error'}`,
+        type: 'error',
+      });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Add a new function to sync SLA policies to the settings table
+  const syncSLAPoliciesToSettings = async () => {
+    try {
+      console.log('Syncing SLA policies to settings table...');
+      // Get the latest policies from the SLA service
+      const latestPolicies = await slaService.getSLAPolicies(defaultOrgId);
+      
+      if (latestPolicies && latestPolicies.length > 0) {
+        console.log(`Syncing ${latestPolicies.length} SLA policies to settings table`);
+        
+        // Save to settings table
+        const response = await settingsService.updateSLASettings({
+          organizationId: defaultOrgId,
+          policies: latestPolicies
+        });
+        
+        console.log('SLA policies successfully synced to settings table', response);
+      } else {
+        console.warn('No SLA policies to sync to settings table');
+      }
+    } catch (error) {
+      console.error('Error syncing SLA policies to settings table:', error);
+      // Don't show notification for background sync failure
     }
   };
 
@@ -1164,20 +1350,465 @@ const SettingsPage: React.FC = () => {
           throw new Error('Unknown integration type');
       }
       
-      // In production, use: const result = await settingsService.testIntegrationConnection(type, testSettings);
-      await new Promise(resolve => setTimeout(resolve, 1500));
-      const result = { success: true, message: `Test message sent to ${testName} successfully` };
-      
-      setNotification({
-        open: true,
-        message: result.message || `Connection to ${testName} tested successfully`,
-        type: result.success ? 'success' : 'error',
-      });
+      // Use the actual API call instead of mock data
+      try {
+        const result = await settingsService.testIntegrationConnection(type, testSettings);
+        
+        setNotification({
+          open: true,
+          message: result.message || `Connection to ${testName} tested successfully`,
+          type: result.success ? 'success' : 'error',
+        });
+      } catch (error) {
+        console.error(`Error testing ${type} integration:`, error);
+        setNotification({
+          open: true,
+          message: error instanceof Error ? error.message : `Failed to test ${type} integration`,
+          type: 'error',
+        });
+      } finally {
+        setLoading(false);
+      }
     } catch (error) {
       console.error(`Error testing ${type} integration:`, error);
       setNotification({
         open: true,
         message: error instanceof Error ? error.message : `Failed to test ${type} integration`,
+        type: 'error',
+      });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // New function to fetch ticket priorities
+  const fetchTicketPriorities = async () => {
+    try {
+      setLoadingPriorities(true);
+      const priorities = await ticketPriorityService.getPriorities();
+      
+      // We should have an array of priorities at this point thanks to the fixed service
+      if (Array.isArray(priorities)) {
+        setPriorities(priorities);
+      } else {
+        console.error('Still receiving unexpected data structure for ticket priorities:', priorities);
+        setPriorities([]);
+      }
+    } catch (error) {
+      console.error('Error fetching ticket priorities:', error);
+      setPriorities([]); // Set to empty array on catch
+      setNotification({
+        open: true,
+        message: 'Failed to load ticket priorities',
+        type: 'error'
+      });
+    } finally {
+      setLoadingPriorities(false);
+    }
+  };
+  
+  // New function to fetch SLA policies
+  const fetchSLAPolicies = async () => {
+    try {
+      setLoadingSlaPolicies(true);
+      setSlaError(null);
+      
+      // Always use the default organization ID of 1001 since we have existing SLA policies for this org
+      console.log('Using organization ID for SLA policies:', defaultOrgId);
+      
+      // First try to get policies from the settings table
+      let policies: SLAPolicy[] = [];
+      try {
+        const slaSettings = await settingsService.getSLASettings();
+        console.log('SLA settings from database:', slaSettings);
+        
+        // Check different possible response formats
+        if (slaSettings) {
+          if (slaSettings.policies && Array.isArray(slaSettings.policies) && slaSettings.policies.length > 0) {
+            console.log(`Found ${slaSettings.policies.length} policies in settings table`);
+            policies = slaSettings.policies;
+          } else if (Array.isArray(slaSettings) && slaSettings.length > 0) {
+            console.log(`Found ${slaSettings.length} policies in settings table (array format)`);
+            policies = slaSettings;
+          } else if (slaSettings.data && Array.isArray(slaSettings.data.policies) && slaSettings.data.policies.length > 0) {
+            console.log(`Found ${slaSettings.data.policies.length} policies in settings table (data.policies format)`);
+            policies = slaSettings.data.policies;
+          }
+        }
+      } catch (error) {
+        console.error('Error getting policies from settings table:', error);
+      }
+      
+      // If we found policies in the settings table, use those
+      if (policies.length > 0) {
+        console.log('Using policies from settings table:', policies);
+      setSlaPolicies(policies);
+      } else {
+        // Fallback to the SLA service if needed
+        console.log('No policies found in settings table, fetching from SLA service');
+        try {
+          const fetchedPolicies = await slaService.getSLAPolicies(defaultOrgId);
+          
+          if (fetchedPolicies && Array.isArray(fetchedPolicies) && fetchedPolicies.length > 0) {
+            console.log(`Got ${fetchedPolicies.length} policies from SLA service`, fetchedPolicies);
+            setSlaPolicies(fetchedPolicies);
+            // Also sync to settings table for future use
+            await syncSLAPoliciesToSettings();
+          } else {
+            console.log('No SLA policies found in both sources');
+            setSlaPolicies([]);
+          }
+        } catch (error) {
+          console.error('Error fetching SLA policies from SLA service:', error);
+          setSlaError('Failed to load SLA policies');
+        }
+      }
+    } catch (error) {
+      console.error('Error in fetchSLAPolicies:', error);
+      setSlaError('Failed to load SLA policies');
+    } finally {
+      setLoadingSlaPolicies(false);
+    }
+  };
+  
+  // New function to handle SLA form changes
+  const handleSLAFormChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const { name, value, type, checked } = e.target;
+    
+    setSlaForm((prev) => ({
+      ...prev,
+      [name]: type === 'checkbox' ? checked : type === 'number' ? parseInt(value) : value,
+    }));
+  };
+  
+  // Function to handle SLA priority selection
+  const handleSLAPriorityChange = (e: React.ChangeEvent<{ name?: string; value: unknown }>) => {
+    const priorityId = Number(e.target.value);
+    
+    if (isNaN(priorityId) || priorityId <= 0) {
+      console.warn('Invalid priority ID selected:', e.target.value);
+      return;
+    }
+    
+    // Find existing SLA policy for this priority
+    const existingPolicy = slaPolicies.find(policy => policy.ticketPriorityId === priorityId);
+    
+    if (existingPolicy) {
+      console.log('Found existing SLA policy for priority:', existingPolicy);
+      setSlaForm({
+        priorityId,
+        firstResponseHours: existingPolicy.firstResponseHours,
+        nextResponseHours: existingPolicy.nextResponseHours || 0,
+        resolutionHours: existingPolicy.resolutionHours,
+        businessHoursOnly: existingPolicy.businessHoursOnly,
+        isNew: false // Not a new policy
+      });
+    } else {
+      // Find priority to get default values based on priority's SLA hours
+      const priority = priorities.find(p => p.id === priorityId);
+      const defaultSlaHours = priority?.slaHours || 24;
+      
+      // Set reasonable defaults based on priority SLA hours
+      setSlaForm({
+        priorityId,
+        firstResponseHours: Math.max(1, Math.floor(defaultSlaHours / 4)),
+        nextResponseHours: Math.max(2, Math.floor(defaultSlaHours / 2)),
+        resolutionHours: defaultSlaHours,
+        businessHoursOnly: true,
+        isNew: true // This is a new policy
+      });
+    }
+  };
+  
+  // Function to save SLA policy
+  const handleSaveSLAPolicy = async () => {
+    if (!slaForm.priorityId || !slaForm.firstResponseHours || !slaForm.resolutionHours) {
+      setSlaError('Please fill in all required fields');
+      return;
+    }
+    
+    setSavingSlaPolicies(true);
+    setSlaError(null);
+    
+    try {
+      // Find priority to update slaHours
+      const priority = priorities.find(p => p.id === slaForm.priorityId);
+      if (!priority) {
+        throw new Error('Selected priority not found');
+      }
+      
+      console.log(`Creating/updating SLA policy for priority: ${priority.name} (ID: ${priority.id})`);
+      console.log(`Using organization ID: ${defaultOrgId}`);
+      
+      // Find if policy already exists
+      const existingPolicy = slaPolicies.find(policy => policy.ticketPriorityId === slaForm.priorityId);
+      
+      const policyData = {
+        name: `${priority.name} Priority SLA`,
+        description: `SLA policy for ${priority.name} priority tickets`,
+        organizationId: defaultOrgId, // Always use the default org ID for consistency
+        ticketPriorityId: slaForm.priorityId,
+        firstResponseHours: slaForm.firstResponseHours,
+        nextResponseHours: slaForm.nextResponseHours,
+        resolutionHours: slaForm.resolutionHours,
+        businessHoursOnly: slaForm.businessHoursOnly
+      };
+      
+      console.log('SLA policy data to be saved:', policyData);
+      
+      let savedPolicy;
+      
+      if (existingPolicy) {
+        // Update existing policy
+        console.log(`Updating existing SLA policy with ID: ${existingPolicy.id}`);
+        savedPolicy = await slaService.updateSLAPolicy(existingPolicy.id, policyData);
+        
+        console.log('SLA policy saved successfully:', savedPolicy ? savedPolicy : 'No response data returned');
+        
+        // Update state with null-safe approach - completely avoid using savedPolicy in the map function
+        setSlaPolicies(prevPolicies => {
+          return prevPolicies.map(policy => {
+            if (policy.id === existingPolicy.id) {
+              // If we have savedPolicy use it, otherwise merge policyData with existing policy
+              return savedPolicy || { ...policy, ...policyData };
+            }
+            return policy;
+          });
+        });
+      } else {
+        // Create new policy
+        console.log('Creating new SLA policy');
+        savedPolicy = await slaService.createSLAPolicy(policyData);
+        
+        console.log('SLA policy saved successfully:', savedPolicy ? savedPolicy : 'No response data returned');
+        
+        // Add to local state with null check
+        if (savedPolicy) {
+          setSlaPolicies(prevPolicies => [...prevPolicies, savedPolicy]);
+        } else {
+          setNotification({
+            open: true,
+            message: 'Policy saved but not reflected in UI. Please refresh.',
+            type: 'warning'
+          });
+        }
+      }
+      
+      // Update the SLA hours in the priority - Only if we have valid data
+      if (priority && priority.id) {
+        console.log(`Updating priority ${priority.id} with SLA hours: ${slaForm.resolutionHours}`);
+      await ticketPriorityService.updatePriority(priority.id, {
+        ...priority,
+        slaHours: slaForm.resolutionHours
+      });
+      
+      // Refresh priorities
+      await fetchTicketPriorities();
+      } else {
+        console.warn('Cannot update priority: Invalid priority data');
+      }
+      
+      // Sync the updated SLA policies to the settings table
+      await syncSLAPoliciesToSettings();
+      
+      setNotification({
+        open: true,
+        message: 'SLA policy saved successfully',
+        type: 'success'
+      });
+    } catch (err) {
+      console.error('Error saving SLA policy:', err);
+      setSlaError('Failed to save SLA policy. Please try again.');
+      setNotification({
+        open: true,
+        message: 'Failed to save SLA policy',
+        type: 'error'
+      });
+    } finally {
+      setSavingSlaPolicies(false);
+    }
+  };
+
+  // Replace the renderSLASaveText function
+  const renderSLASaveText = () => {
+    if (!ticketSettings.enableSLA) {
+      return (
+        <Typography variant="body2" color="textSecondary" sx={{ mt: 2 }}>
+          Enable SLA Tracking to configure SLA policies by priority
+        </Typography>
+      );
+    }
+    
+    if (slaPolicies.length === 0) {
+      return (
+        <Typography variant="body2" color="textSecondary" sx={{ mt: 2 }}>
+          No SLA policies configured. Select a priority above to create an SLA policy.
+        </Typography>
+      );
+    }
+    
+    return (
+      <Typography variant="body2" color="textSecondary" sx={{ mt: 2 }}>
+        SLA settings will be saved when you click "Save Ticket Settings"
+      </Typography>
+    );
+  };
+
+  // Add a function to display existing SLA policies in a table
+  const renderSLAPoliciesTable = () => {
+    if (!ticketSettings.enableSLA || slaPolicies.length === 0) {
+      return null;
+    }
+    
+    return (
+      <Box sx={{ mt: 3 }}>
+        <Typography variant="subtitle1" fontWeight="bold" sx={{ mb: 2 }}>
+          Existing SLA Policies
+        </Typography>
+        <TableContainer component={Paper} sx={{ borderRadius: 2, overflow: 'hidden' }}>
+          <Table size="small">
+            <TableHead>
+              <TableRow sx={{ backgroundColor: alpha(theme.palette.primary.main, 0.1) }}>
+                <TableCell>Priority</TableCell>
+                <TableCell align="center">First Response</TableCell>
+                <TableCell align="center">Next Response</TableCell>
+                <TableCell align="center">Resolution</TableCell>
+                <TableCell align="center">Business Hours</TableCell>
+              </TableRow>
+            </TableHead>
+            <TableBody>
+              {slaPolicies.map((policy) => {
+                // Find the priority name
+                const priority = priorities.find(p => p.id === policy.ticketPriorityId);
+                return (
+                  <TableRow 
+                    key={policy.id} 
+                    hover
+                    onClick={() => {
+                      setSlaForm({
+                        priorityId: policy.ticketPriorityId,
+                        firstResponseHours: policy.firstResponseHours,
+                        nextResponseHours: policy.nextResponseHours || 0,
+                        resolutionHours: policy.resolutionHours,
+                        businessHoursOnly: policy.businessHoursOnly,
+                        isNew: false
+                      });
+                    }}
+                    sx={{ 
+                      cursor: 'pointer',
+                      '&:hover': {
+                        backgroundColor: alpha(theme.palette.primary.main, 0.05)
+                      },
+                      '&.Mui-selected': {
+                        backgroundColor: alpha(theme.palette.primary.main, 0.1)
+                      }
+                    }}
+                    selected={slaForm.priorityId === policy.ticketPriorityId}
+                  >
+                    <TableCell>
+                      <Box sx={{ display: 'flex', alignItems: 'center' }}>
+                        <Box 
+                          sx={{ 
+                            width: 12, 
+                            height: 12, 
+                            borderRadius: '50%', 
+                            backgroundColor: priority?.color || '#ccc',
+                            mr: 1
+                          }} 
+                        />
+                        {priority?.name || 'Unknown'}
+                      </Box>
+                    </TableCell>
+                    <TableCell align="center">{policy.firstResponseHours} hours</TableCell>
+                    <TableCell align="center">{policy.nextResponseHours || '-'} {policy.nextResponseHours ? 'hours' : ''}</TableCell>
+                    <TableCell align="center">{policy.resolutionHours} hours</TableCell>
+                    <TableCell align="center">
+                      {policy.businessHoursOnly ? (
+                        <CheckIcon color="success" fontSize="small" />
+                      ) : (
+                        <CloseIcon color="error" fontSize="small" />
+                      )}
+                    </TableCell>
+                  </TableRow>
+                );
+              })}
+            </TableBody>
+          </Table>
+        </TableContainer>
+      </Box>
+    );
+  };
+
+  // Initialize tabs properly after initial render
+  useEffect(() => {
+    // Short delay to ensure DOM is ready
+    const timer = setTimeout(() => {
+      if (tabsRef.current) {
+        // Force a small reflow to help MUI properly identify tab elements
+        tabsRef.current.style.visibility = 'hidden';
+        setTimeout(() => {
+          if (tabsRef.current) {
+            tabsRef.current.style.visibility = 'visible';
+          }
+        }, 50);
+      }
+    }, 100);
+    return () => clearTimeout(timer);
+  }, []);
+
+  // Add a specific handler for toggling SLA that updates and saves immediately
+  const handleSLAEnableToggle = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const isEnabled = event.target.checked;
+    
+    // First update the local state
+    setTicketSettings(prev => ({
+      ...prev,
+      enableSLA: isEnabled
+    }));
+    
+    setLoading(true);
+    
+    try {
+      // Use functional updates to ensure we're using the latest state
+      const updatedSettings = {
+        ...ticketSettings,
+        enableSLA: isEnabled
+      };
+      
+      // Save the ticket settings to the database immediately
+      console.log(`Saving SLA enabled state: ${isEnabled}`, updatedSettings);
+      const result = await settingsService.updateTicketSettings(updatedSettings);
+      
+      // Update local state with the server response
+      setTicketSettings(result);
+      setOriginalTicketSettings(result);
+      
+      // If enabling SLA, also update the SLA policies in settings table
+      if (isEnabled) {
+        await syncSLAPoliciesToSettings();
+      }
+      
+      setNotification({
+        open: true,
+        message: `SLA Tracking ${isEnabled ? 'enabled' : 'disabled'} successfully`,
+        type: 'success',
+      });
+      
+      // If SLA is being enabled, make sure we have policies
+      if (isEnabled) {
+        fetchSLAPolicies();
+      }
+    } catch (error) {
+      console.error('Error saving SLA enabled state:', error);
+      // Revert the local state change on error
+      setTicketSettings(prev => ({
+        ...prev,
+        enableSLA: !isEnabled
+      }));
+      
+      setNotification({
+        open: true,
+        message: 'Failed to update SLA settings',
         type: 'error',
       });
     } finally {
@@ -1297,82 +1928,89 @@ const SettingsPage: React.FC = () => {
             </Alert>
           )}
 
-          <EnhancedCard
-            elevation={0}
-            index={1}
-            disableHoverEffect
-            sx={{
-              overflow: 'hidden',
-              background: theme.palette.mode === 'dark'
-                ? alpha(theme.palette.background.paper, 0.6)
-                : alpha(theme.palette.background.paper, 0.8),
-              border: `1px solid ${alpha(theme.palette.divider, 0.1)}`,
-              ...gradientAccent(theme),
+          <Paper 
+            sx={{ 
+              width: '100%',
+              borderRadius: 3,
+              mb: 3,
+              overflow: 'hidden'
             }}
           >
-            <Tabs 
-              value={activeTab} 
-              onChange={handleTabChange} 
-              variant="fullWidth"
-              aria-label="Settings tabs"
-              sx={{
-                borderBottom: 1,
-                borderColor: 'divider',
-                '& .MuiTab-root': {
-                  minHeight: 64,
-                  fontSize: '0.95rem',
-                  fontWeight: 600,
-                  textTransform: 'none',
-                  transition: 'all 0.2s',
-                  '&.Mui-selected': {
-                    color: theme.palette.primary.main,
-                    backgroundColor: alpha(theme.palette.primary.main, 0.05),
-                  },
-                  '&:hover': {
-                    backgroundColor: alpha(theme.palette.primary.main, 0.02),
+            <Box sx={{ borderBottom: 1, borderColor: 'divider' }} ref={tabsRef}>
+              <Tabs 
+                value={value}
+                onChange={handleTabChange}
+                variant="scrollable"
+                scrollButtons="auto"
+                allowScrollButtonsMobile
+                aria-label="settings tabs"
+                sx={{
+                  px: { xs: 1, sm: 2 },
+                  '& .MuiTabs-indicator': {
+                    height: 3,
+                    borderRadius: '3px 3px 0 0'
                   }
-                },
-                '& .MuiTabs-indicator': {
-                  height: 3,
-                  borderRadius: '3px 3px 0 0',
-                  background: `linear-gradient(90deg, ${theme.palette.primary.main}, ${theme.palette.secondary.main})`,
-                },
-              }}
-            >
-              <Tab 
-                icon={<SettingsIcon sx={{ mb: 0.5 }} />} 
-                label="General" 
-                id="settings-tab-0" 
-                aria-controls="settings-tabpanel-0"
-              />
-              <Tab 
-                icon={<EmailIcon sx={{ mb: 0.5 }} />} 
-                label="Email" 
-                id="settings-tab-1" 
-                aria-controls="settings-tabpanel-1"
-              />
-              <Tab 
-                icon={<TicketIcon sx={{ mb: 0.5 }} />} 
-                label="Tickets" 
-                id="settings-tab-2" 
-                aria-controls="settings-tabpanel-2"
-              />
-              <Tab 
-                icon={<IntegrationsIcon sx={{ mb: 0.5 }} />} 
-                label="Integrations" 
-                id="settings-tab-3" 
-                aria-controls="settings-tabpanel-3"
-              />
-              <Tab 
-                icon={<AdvancedIcon sx={{ mb: 0.5 }} />} 
-                label="Advanced" 
-                id="settings-tab-4" 
-                aria-controls="settings-tabpanel-4"
-              />
-            </Tabs>
-
+                }}
+              >
+                <Tab 
+                  label={
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                      <SettingsIcon fontSize="small" />
+                      {value === 0 && <span>General Settings</span>}
+                      {value !== 0 && <span>General</span>}
+                    </Box>
+                  }
+                />
+                <Tab 
+                  label={
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                      <EmailIcon fontSize="small" />
+                      {value === 1 && <span>Email Settings</span>}
+                      {value !== 1 && <span>Email</span>}
+                    </Box>
+                  }
+                />
+                <Tab 
+                  label={
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                      <TicketIcon fontSize="small" />
+                      {value === 2 && <span>Ticket Settings</span>}
+                      {value !== 2 && <span>Tickets</span>}
+                    </Box>
+                  }
+                />
+                <Tab 
+                  label={
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                      <ClockIcon fontSize="small" />
+                      {value === 3 && <span>SLA Settings</span>}
+                      {value !== 3 && <span>SLA</span>}
+                    </Box>
+                  }
+                />
+                <Tab 
+                  label={
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                      <IntegrationsIcon fontSize="small" />
+                      {value === 4 && <span>Integrations</span>}
+                      {value !== 4 && <span>Integrations</span>}
+                    </Box>
+                  }
+                />
+                <Tab 
+                  label={
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                      <AdvancedIcon fontSize="small" />
+                      {value === 5 && <span>Advanced Settings</span>}
+                      {value !== 5 && <span>Advanced</span>}
+                    </Box>
+                  }
+                />
+              </Tabs>
+            </Box>
+            
             {/* General Settings */}
-              <TabPanel value={activeTab} index={0}>
+              <TabPanel value={value} index={0}>
               <EnhancedGrid container spacing={1}>
                   <Grid item xs={12} md={6}>
                   <EnhancedCard
@@ -1545,7 +2183,7 @@ const SettingsPage: React.FC = () => {
                         variant="contained"
                         color="primary"
                         startIcon={loading ? <CircularProgress size={20} color="inherit" /> : <SaveIcon />}
-                        onClick={() => handleSaveSettings('general')}
+                        onClick={() => handleSaveGeneralSettings()}
                         disabled={loading || !unsavedChanges}
                       >
                         Save General Settings
@@ -1556,7 +2194,7 @@ const SettingsPage: React.FC = () => {
               </TabPanel>
 
             {/* Email Settings */}
-              <TabPanel value={activeTab} index={1}>
+              <TabPanel value={value} index={1}>
               <EnhancedGrid container spacing={1}>
                   <Grid item xs={12} md={6}>
                   <EnhancedCard
@@ -1755,7 +2393,7 @@ const SettingsPage: React.FC = () => {
                         variant="contained"
                         color="primary"
                         startIcon={loading ? <CircularProgress size={20} color="inherit" /> : <SaveIcon />}
-                        onClick={handleSaveEmailSettings}
+                        onClick={() => handleSaveEmailSettings()}
                         disabled={loading || !unsavedChanges}
                       >
                         Save Email Settings
@@ -1766,7 +2404,7 @@ const SettingsPage: React.FC = () => {
               </TabPanel>
 
             {/* Ticket Settings */}
-              <TabPanel value={activeTab} index={2}>
+              <TabPanel value={value} index={2}>
               <EnhancedGrid container spacing={1}>
                   <Grid item xs={12} md={6}>
                   <EnhancedCard
@@ -1900,8 +2538,19 @@ const SettingsPage: React.FC = () => {
                           letterSpacing: '0.5px',
                           mb: 0.5
                         }}>
-                          About These Settings
+                          Ticket Options
                         </Typography>
+                      }
+                      action={
+                        loadingSlaPolicies ? (
+                          <CircularProgress size={24} />
+                        ) : (
+                          <Tooltip title="Additional ticket options">
+                            <IconButton>
+                              <InfoIcon />
+                            </IconButton>
+                          </Tooltip>
+                        )
                       }
                       sx={{
                         p: 3,
@@ -1913,15 +2562,25 @@ const SettingsPage: React.FC = () => {
                     />
                     <Divider />
                     <CardContent sx={{ p: 3 }}>
-                        <Typography variant="body2" color="textSecondary" paragraph>
-                          Configure how tickets are managed and processed within your service desk.
-                        </Typography>
-                        <Typography variant="body2" color="textSecondary" paragraph>
-                          These settings affect workflow, automation, and customer interactions regarding tickets.
-                        </Typography>
-                        <Alert severity="warning" sx={{ mt: 2 }}>
-                          Changing auto-close settings will only affect tickets created after the change.
-                        </Alert>
+                      <Typography variant="body2" color="textSecondary" paragraph>
+                        These settings control how tickets behave in your service desk.
+                      </Typography>
+                      
+                      <Typography variant="body2" color="textSecondary" paragraph>
+                        <strong>Default Priority:</strong> The default priority assigned to new tickets.
+                      </Typography>
+                      
+                      <Typography variant="body2" color="textSecondary" paragraph>
+                        <strong>Ticket Reopening:</strong> How long closed tickets can be reopened.
+                      </Typography>
+                      
+                      <Typography variant="body2" color="textSecondary" paragraph>
+                        <strong>Auto-Close:</strong> When resolved tickets are automatically closed.
+                      </Typography>
+                      
+                      <Typography variant="body2" color="textSecondary">
+                        <strong>SLA Tracking:</strong> Enable to track response and resolution times.
+                      </Typography>
                     </CardContent>
                   </EnhancedCard>
                   </Grid>
@@ -1931,10 +2590,205 @@ const SettingsPage: React.FC = () => {
                         variant="contained"
                         color="primary"
                         startIcon={loading ? <CircularProgress size={20} color="inherit" /> : <SaveIcon />}
-                        onClick={() => handleSaveSettings('ticket')}
+                        onClick={handleSaveTicketSettings}
                         disabled={loading || !unsavedChanges}
                       >
-                        Save Ticket Settings
+                        Save SLA Settings
+                      </Button>
+                    </Box>
+                  </Grid>
+              </EnhancedGrid>
+              </TabPanel>
+
+            {/* SLA Settings */}
+              <TabPanel value={value} index={3}>
+              <EnhancedGrid container spacing={1}>
+                  <Grid item xs={12} md={6}>
+                  <EnhancedCard
+                    index={2}
+                    elevation={0}
+                    sx={{
+                      height: '100%',
+                      p: 0,
+                      border: `1px solid ${alpha(theme.palette.divider, 0.1)}`,
+                      overflow: 'hidden',
+                      ...gradientAccent(theme)
+                    }}>
+                    <CardHeader
+                      title={
+                        <Typography variant="h6" sx={{ 
+                          fontWeight: 700, 
+                          fontSize: '1.2rem',
+                          color: theme.palette.text.primary,
+                          letterSpacing: '0.5px',
+                          mb: 0.5
+                        }}>
+                          SLA Configuration
+                        </Typography>
+                      }
+                      action={
+                        loadingSlaPolicies ? (
+                          <CircularProgress size={24} />
+                        ) : (
+                          <Tooltip title="Configure SLA settings by priority">
+                            <IconButton>
+                              <ClockIcon />
+                            </IconButton>
+                          </Tooltip>
+                        )
+                      }
+                      sx={{
+                        p: 3,
+                        pb: 2,
+                        background: theme.palette.mode === 'dark' 
+                          ? alpha(theme.palette.background.paper, 0.4)
+                          : alpha(theme.palette.background.paper, 0.7),
+                      }}
+                    />
+                    <Divider />
+                    <CardContent sx={{ p: 3 }}>
+                      {loadingSlaPolicies || loadingPriorities ? (
+                        <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '300px' }}>
+                          <CircularProgress />
+                        </Box>
+                      ) : (
+                        <>
+                          {slaError && (
+                            <Alert severity="error" sx={{ mb: 2 }}>
+                              {slaError}
+                            </Alert>
+                          )}
+                          
+                          <FormControlLabel
+                            control={
+                              <Switch
+                                checked={ticketSettings.enableSLA || false}
+                                onChange={handleSLAEnableToggle}
+                                name="enableSLA"
+                                color="primary"
+                              />
+                            }
+                            label="Enable SLA Tracking"
+                            sx={{ mb: 2, display: 'block' }}
+                          />
+                          
+                          <Box sx={{ opacity: ticketSettings.enableSLA ? 1 : 0.5, pointerEvents: ticketSettings.enableSLA ? 'auto' : 'none' }}>
+                            <FormControl fullWidth margin="normal">
+                              <InputLabel id="sla-priority-label">Ticket Priority</InputLabel>
+                              <Select
+                                labelId="sla-priority-label"
+                                name="priorityId"
+                                value={slaForm.priorityId || ''}
+                                onChange={handleSLAPriorityChange as any}
+                                label="Ticket Priority"
+                                disabled={!ticketSettings.enableSLA || savingSlaPolicies}
+                              >
+                                <MenuItem value={0} disabled>Select a priority</MenuItem>
+                                {priorities.map((priority) => (
+                                  <MenuItem key={priority.id} value={priority.id}>
+                                    <Box sx={{ display: 'flex', alignItems: 'center' }}>
+                                      <Box 
+                                        sx={{ 
+                                          width: 10, 
+                                          height: 10, 
+                                          borderRadius: '50%', 
+                                          backgroundColor: priority.color,
+                                          mr: 1
+                                        }} 
+                                      />
+                                      {priority.name}
+                                    </Box>
+                                  </MenuItem>
+                                ))}
+                              </Select>
+                            </FormControl>
+                            
+                            <TextField
+                              margin="normal"
+                              name="firstResponseHours"
+                              label="First Response (hours)"
+                              type="number"
+                              fullWidth
+                              value={slaForm.firstResponseHours || ''}
+                              onChange={handleSLAFormChange}
+                              disabled={!ticketSettings.enableSLA || !slaForm.priorityId || savingSlaPolicies}
+                              InputProps={{ inputProps: { min: 1 } }}
+                              helperText="Time to first respond to the ticket"
+                            />
+                            
+                            <TextField
+                              margin="normal"
+                              name="nextResponseHours"
+                              label="Next Response (hours)"
+                              type="number"
+                              fullWidth
+                              value={slaForm.nextResponseHours || ''}
+                              onChange={handleSLAFormChange}
+                              disabled={!ticketSettings.enableSLA || !slaForm.priorityId || savingSlaPolicies}
+                              InputProps={{ inputProps: { min: 1 } }}
+                              helperText="Time for subsequent responses"
+                            />
+                            
+                            <TextField
+                              margin="normal"
+                              name="resolutionHours"
+                              label="Resolution Time (hours)"
+                              type="number"
+                              fullWidth
+                              value={slaForm.resolutionHours || ''}
+                              onChange={handleSLAFormChange}
+                              disabled={!ticketSettings.enableSLA || !slaForm.priorityId || savingSlaPolicies}
+                              InputProps={{ inputProps: { min: 1 } }}
+                              helperText="Time to resolve the ticket (also updates SLA hours)"
+                            />
+                            
+                            <FormControlLabel
+                              control={
+                                <Switch
+                                  checked={slaForm.businessHoursOnly}
+                                  onChange={handleSLAFormChange}
+                                  name="businessHoursOnly"
+                                  color="primary"
+                                  disabled={!ticketSettings.enableSLA || !slaForm.priorityId || savingSlaPolicies}
+                                />
+                              }
+                              label="Business Hours Only"
+                              sx={{ mt: 2, display: 'block' }}
+                            />
+                            
+                            {/* Add direct save button for SLA policy */}
+                            <Box sx={{ mt: 2, mb: 2 }}>
+                              <Button
+                                variant="contained"
+                                color="primary"
+                                startIcon={savingSlaPolicies ? <CircularProgress size={20} color="inherit" /> : <SaveIcon />}
+                                onClick={handleSaveSLAPolicy}
+                                disabled={savingSlaPolicies || !ticketSettings.enableSLA || !slaForm.priorityId}
+                                fullWidth
+                              >
+                                Save SLA Policy
+                              </Button>
+                            </Box>
+                            
+                            {renderSLASaveText()}
+                            
+                            {renderSLAPoliciesTable()}
+                          </Box>
+                        </>
+                      )}
+                    </CardContent>
+                  </EnhancedCard>
+                  </Grid>
+                  <Grid item xs={12}>
+                    <Box display="flex" justifyContent="flex-end" sx={{ mt: 1 }}>
+                      <Button
+                        variant="contained"
+                        color="primary"
+                        startIcon={loading ? <CircularProgress size={20} color="inherit" /> : <SaveIcon />}
+                        onClick={handleSaveTicketSettings}
+                        disabled={loading || !unsavedChanges}
+                      >
+                        Save SLA Settings
                       </Button>
                     </Box>
                   </Grid>
@@ -1942,7 +2796,7 @@ const SettingsPage: React.FC = () => {
               </TabPanel>
 
             {/* Integrations Settings */}
-              <TabPanel value={activeTab} index={3}>
+              <TabPanel value={value} index={4}>
               <EnhancedGrid container spacing={1}>
                 {loadingSettings.integration ? (
                   <Grid item xs={12}>
@@ -2206,7 +3060,7 @@ const SettingsPage: React.FC = () => {
                           variant="contained"
                           color="primary"
                           startIcon={loading ? <CircularProgress size={20} color="inherit" /> : <SaveIcon />}
-                          onClick={() => handleSaveSettings('integration')}
+                          onClick={() => handleSaveIntegrationSettings()}
                           disabled={loading || !unsavedChanges}
                         >
                           Save Integration Settings
@@ -2219,7 +3073,7 @@ const SettingsPage: React.FC = () => {
               </TabPanel>
 
             {/* Advanced Settings */}
-              <TabPanel value={activeTab} index={4}>
+              <TabPanel value={value} index={5}>
               <EnhancedGrid container spacing={1}>
                 {loadingSettings.advanced ? (
                   <Grid item xs={12}>
@@ -2558,7 +3412,7 @@ const SettingsPage: React.FC = () => {
                           variant="contained"
                           color="primary"
                           startIcon={loading ? <CircularProgress size={20} color="inherit" /> : <SaveIcon />}
-                          onClick={() => handleSaveSettings('advanced')}
+                          onClick={() => handleSaveAdvancedSettings()}
                           disabled={loading || !unsavedChanges}
                         >
                           Save Advanced Settings
@@ -2569,7 +3423,7 @@ const SettingsPage: React.FC = () => {
                 )}
               </EnhancedGrid>
               </TabPanel>
-          </EnhancedCard>
+          </Paper>
 
           {/* Unsaved changes dialog */}
           <Dialog

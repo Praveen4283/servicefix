@@ -87,6 +87,7 @@ import TicketChart from '../../components/dashboard/TicketChart';
 import UserAvatar from '../../components/common/UserAvatar';
 import StatusBadge from '../../components/tickets/StatusBadge';
 import PriorityBadge from '../../components/tickets/PriorityBadge';
+import SLABadge from '../../components/tickets/SLABadge';
 import {
   pageContainer,
   pageHeaderSection,
@@ -99,7 +100,7 @@ import {
   buttonAnimation
 } from '../../styles/commonStyles';
 import { Ticket, TicketDetail, TicketStatus, TicketPriority, Department, TicketType, User, PaginationState } from '../../context/TicketContext';
-import { format } from 'date-fns';
+import { formatDate, getRelativeTime } from '../../utils/dateUtils';
 import { formatInTimeZone } from 'date-fns-tz';
 
 // We'll use these colors for our charts
@@ -360,62 +361,6 @@ const DistributionChart: React.FC<DistributionChartProps> = ({ data, title, tota
   </Card>
 );
 
-// Utility function to format date using user's timezone
-const formatDate = (dateString: string | undefined | null, userTimeZone: string): string => {
-  if (!dateString) {
-    return 'N/A';
-  }
-  try {
-    const date = new Date(dateString);
-    if (isNaN(date.getTime())) {
-      throw new Error('Invalid date value');
-    }
-    const formattedDate = formatInTimeZone(date, userTimeZone, 'MMM dd, yyyy p'); 
-    return formattedDate;
-  } catch (error) {
-    console.error(`Error formatting date string "${dateString}" in timezone "${userTimeZone}":`, error);
-    return 'Invalid Date';
-  }
-};
-
-// Utility function to get relative time (fallback uses formatDate)
-const getRelativeTime = (dateString: string | undefined | null, userTimeZone: string): string => {
-  if (!dateString) {
-    return '-';
-  }
-  try {
-    const date = new Date(dateString);
-    if (isNaN(date.getTime())) {
-      throw new Error('Invalid date value');
-    }
-    const now = new Date();
-    const diffInMs = now.getTime() - date.getTime();
-    const diffInMin = Math.floor(diffInMs / (1000 * 60));
-    const diffInHours = Math.floor(diffInMs / (1000 * 60 * 60));
-    const diffInDays = Math.floor(diffInMs / (1000 * 60 * 60 * 24));
-
-    let returnValue = '-';
-
-    if (diffInMin < 1) {
-      returnValue = 'Just now';
-    } else if (diffInMin < 60) {
-      returnValue = `${diffInMin} min ago`;
-    } else if (diffInHours < 24) {
-      returnValue = `${diffInHours} hour${diffInHours > 1 ? 's' : ''} ago`;
-    } else if (diffInDays < 7) {
-      returnValue = `${diffInDays} day${diffInDays > 1 ? 's' : ''} ago`;
-    } else {
-      returnValue = formatDate(dateString, userTimeZone); 
-    }
-
-    return returnValue;
-    
-  } catch (error) {
-    console.error(`Error calculating relative time for "${dateString}":`, error);
-    return '-';
-  }
-};
-
 // Activity icon mapping
 const getActivityIcon = (type: TicketActivity['type']) => {
   switch (type) {
@@ -540,8 +485,19 @@ const TicketListPage: React.FC = () => {
     try {
       const result = await fetchTickets(page, limit, {});
       if (result) {
+        console.log('Dashboard API response:', result);
         setDashboardTickets(result.tickets);
-        setDashboardPagination(result.pagination);
+        
+        // Extract pagination data separately to avoid type errors
+        const apiPagination = result.pagination;
+        const totalCount = (result.pagination as any).total || 0; // Extract total separately
+        
+        setDashboardPagination({
+          page: apiPagination.page,
+          limit: apiPagination.limit,
+          totalCount: totalCount, // Use the extracted value
+          totalPages: apiPagination.totalPages || 1
+        });
       } else {
         console.error('[Dashboard Fetch] API Call returned undefined (error or not authenticated).');
         setDashboardError('Failed to load dashboard tickets.');
@@ -572,11 +528,11 @@ const TicketListPage: React.FC = () => {
     if (user && user.role) {
       // For agents, only fetch tickets assigned to them
       if (user.role.toLowerCase() === 'agent') {
-        console.log('Agent role detected, fetching tickets assigned to:', user.id);
         fetchTickets(listPaginationModel.page + 1, listPaginationModel.pageSize, { assigneeId: user.id })
           .then(result => {
             if (result) {
-              console.log(`Fetched ${result.tickets.length} tickets assigned to agent`);
+              // Log response to debug pagination
+              console.log('List view API response:', result);
             }
           })
           .catch(err => {
@@ -584,7 +540,16 @@ const TicketListPage: React.FC = () => {
           });
       } else {
         // For admin and customers, use standard fetching
-        fetchTickets(listPaginationModel.page + 1, listPaginationModel.pageSize); 
+        fetchTickets(listPaginationModel.page + 1, listPaginationModel.pageSize)
+          .then(result => {
+            if (result) {
+              // Log response to debug pagination
+              console.log('List view API response:', result);
+            }
+          })
+          .catch(err => {
+            console.error('Error fetching tickets:', err);
+          });
       }
     }
   }, [user, listPaginationModel, fetchTickets]);
@@ -787,17 +752,29 @@ const TicketListPage: React.FC = () => {
       field: 'status',
       headerName: 'Status',
       width: 150,
-      renderCell: (params) => (
-        <StatusBadge status={params.row.status} size="small" />
-      ),
+      renderCell: (params) => {
+        // Safely handle status by verifying it has the required properties
+        if (params.row.status && typeof params.row.status === 'object' && 
+            'name' in params.row.status && 'color' in params.row.status) {
+          return <StatusBadge status={params.row.status} size="small" />;
+        }
+        return <Typography variant="body2">Unknown</Typography>;
+      },
+      valueGetter: (params) => params.row.status?.name || 'Unknown',
     },
     {
       field: 'priority',
       headerName: 'Priority',
       width: 130,
-      renderCell: (params) => (
-        <PriorityBadge priority={params.row.priority} size="small" />
-      ),
+      renderCell: (params) => {
+        // Safely handle priority by verifying it has the required properties
+        if (params.row.priority && typeof params.row.priority === 'object' && 
+            'name' in params.row.priority && 'color' in params.row.priority) {
+          return <PriorityBadge priority={params.row.priority} size="small" />;
+        }
+        return <Typography variant="body2">Unknown</Typography>;
+      },
+      valueGetter: (params) => params.row.priority?.name || 'Unknown',
     },
     {
       field: 'createdAt',
@@ -813,6 +790,23 @@ const TicketListPage: React.FC = () => {
           </Typography>
         </Box>
       ),
+    },
+    {
+      field: 'sla',
+      headerName: 'SLA',
+      width: 120,
+      renderCell: (params) => {
+        // Safely handle the ticket ID for SLABadge
+        const ticketId = params.row.id;
+            
+        // Pass the ID directly to SLABadge - the component will handle parsing
+        if (ticketId) {
+          return <SLABadge ticketId={ticketId} />;
+          }
+        
+        return <Chip label="N/A" size="small" color="default" />;
+      },
+      disableClickEventBubbling: true
     },
     {
       field: 'actions',
@@ -907,14 +901,14 @@ const TicketListPage: React.FC = () => {
     {
       field: 'createdAt',
       headerName: 'Created',
-      width: 170,
+      width: 180,
       renderCell: (params) => (
         <Box>
           <Typography variant="body2">
-            {typeof params.row.createdAt === 'string' ? formatDate(params.row.createdAt, userTimeZone) : 'Unknown'}
+            {formatDate(params.row.createdAt, userTimeZone)}
           </Typography>
           <Typography variant="caption" color="text.secondary">
-            {typeof params.row.createdAt === 'string' ? getRelativeTime(params.row.createdAt, userTimeZone) : ''}
+            {getRelativeTime(params.row.createdAt, userTimeZone)}
           </Typography>
         </Box>
       ),
@@ -1477,7 +1471,7 @@ const TicketListPage: React.FC = () => {
             rows={filteredTickets}
             columns={ticketColumns}
             autoHeight={true}
-            rowCount={contextPagination.totalCount} 
+            rowCount={(contextPagination as any)?.total || contextPagination?.totalCount || filteredTickets.length}
             pageSizeOptions={[5, 10, 25]}
             paginationModel={listPaginationModel}
             paginationMode="server" 
@@ -1692,15 +1686,14 @@ const renderAdminDashboard = () => {
           rows={filteredTickets}
           columns={ticketColumns}
           autoHeight={true}
-          initialState={{
-            pagination: {
-              paginationModel: { page: 0, pageSize: 5 },
-            },
-          }}
+          rowCount={(contextPagination as any)?.total || contextPagination?.totalCount || filteredTickets.length}
           pageSizeOptions={[5, 10, 25]}
-          disableRowSelectionOnClick
-          onRowClick={(params) => navigate(`/tickets/${params.row.id}`)}
+          paginationModel={listPaginationModel}
+          paginationMode="server" 
+          onPaginationModelChange={setListPaginationModel} 
           loading={contextLoading}
+          disableRowSelectionOnClick
+          onRowClick={(params) => navigate(`/tickets/${params.row.id}`)} 
           sx={{ 
             border: 'none',
             '& .MuiDataGrid-columnHeaders': {

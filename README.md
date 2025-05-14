@@ -1,6 +1,8 @@
 # ServiceFix - Service Desk & Support Ticket System
 
-A comprehensive service desk and ticket management system built with React, Node.js, and MongoDB.
+*Last Updated: May 28, 2024*
+
+A comprehensive service desk and ticket management system built with React, Node.js, and PostgreSQL.
 
 ## Features
 
@@ -24,25 +26,59 @@ ServiceFix uses a modern architecture with a clear separation between frontend a
 
 - **Frontend**: Single-page application (SPA) built with React and TypeScript
 - **Backend**: RESTful API service built with Node.js, Express, and TypeScript
-- **Database**: MongoDB for data storage with Mongoose as the ODM
+- **Database**: PostgreSQL for data storage with TypeORM as the ORM
 - **Authentication**: JWT-based authentication with refresh token rotation
-- **Real-time**: WebSocket integration for live updates using Socket.io
-- **File Storage**: Local file system for development, AWS S3 for production
-- **Caching**: Redis for API response caching and session management
+- **Real-time**: WebSocket integration via Socket.io for live updates and notifications
+- **File Storage**: Supabase Storage for file handling and media uploads
+- **Caching**: Local caching with React Query for API data
 
 ### Architectural Patterns
 
 - **Clean Architecture**: Separation of concerns with layers (controllers, services, repositories)
-- **Repository Pattern**: Data access abstraction through repository interfaces
+- **Repository Pattern**: Data access abstraction through TypeORM repositories
 - **MVC Pattern**: Model-View-Controller pattern for API endpoints
-- **State Management**: React Context API and React Query for frontend state
+- **Context API**: React Context API for global state management
 - **Middleware Pattern**: Express middleware for cross-cutting concerns
+
+### Logging & Monitoring
+
+- **Centralized Logging**: Winston logger with log rotation and formatted output
+- **Supabase Integration**: Remote log storage and buffering using Supabase
+- **Graceful Shutdown**: Proper log flushing during application shutdown
+- **Error Tracking**: Comprehensive error capture and structured logging
+- **Database Diagnostics**: Automatic database connection testing and diagnostics
+
+### Scheduled Jobs & Automation
+
+The system includes several automated background processes:
+
+- **SLA Monitoring**: Regular checks (every 5 minutes) for SLA compliance
+- **Breach Detection**: Automatic detection and notification of SLA breaches
+- **Auto-close**: Automatic closing of resolved tickets after a configured period
+- **Response Reset**: Reset of SLA timers when customers respond to tickets
+- **Graceful Shutdown**: Proper cleanup of scheduled jobs during application termination
+
+### Real-time Communication
+
+- **WebSocket Integration**: Socket.io for bidirectional real-time communication
+- **Notification Delivery**: Instant notification delivery to connected clients
+- **Connection Management**: Proper authentication and connection lifecycle handling
+- **Room-based Messaging**: Targeted messaging to specific users and groups
+- **Connection Resilience**: Automatic reconnection and error handling
+
+### Error Handling
+
+- **Global Error Handler**: Centralized error handling middleware
+- **Structured Response Format**: Consistent error response structure
+- **Error Boundary**: React error boundaries for frontend error containment
+- **Process-level Handling**: Capture of unhandled rejections and exceptions
+- **Graceful Degradation**: Fallback behavior for critical system components
 
 ## Installation & Setup
 
 ### Prerequisites
-- Node.js (v14 or higher)
-- MongoDB (v4.4 or higher)
+- Node.js (v20 or higher)
+- PostgreSQL (v12 or higher)
 - npm
 
 ### Installation Steps
@@ -82,12 +118,172 @@ ServiceFix uses a modern architecture with a clear separation between frontend a
    - Frontend: http://localhost:3000
    - Backend API: http://localhost:5000
 
+## Backend Architecture
+
+The backend follows a modular, TypeScript-based architecture:
+
+### Entry Point
+
+`src/index.ts` is the main application file that initializes the Express server, middleware, database connections, and all routes.
+
+### Key Directories
+
+- `src/config/` - Configuration files for the database, etc.
+- `src/controllers/` - Request handlers for each route
+- `src/middleware/` - Express middleware functions
+- `src/models/` - Database entity definitions
+- `src/routes/` - API route definitions
+- `src/services/` - Business logic and data access
+- `src/utils/` - Utility functions and helpers
+
+### Development
+
+To run the backend in development mode:
+
+```bash
+cd backend
+npm run dev
+```
+
+This will start the server with hot reloading using nodemon and ts-node.
+
+### Production
+
+To build and run the backend for production:
+
+```bash
+cd backend
+npm run build
+npm start
+```
+
+The build process will compile TypeScript to JavaScript in the `dist/` directory.
+
+### Database
+
+The application uses TypeORM with PostgreSQL. Run migrations with:
+
+```bash
+npm run migration:run
+```
+
+### Environment Variables for Backend
+
+Create a `.env` file in the backend directory with the following variables:
+
+```
+# Server
+PORT=5000
+NODE_ENV=development
+
+# Database
+DB_HOST=localhost
+DB_PORT=5432
+DB_USERNAME=postgres
+DB_PASSWORD=yourpassword
+DB_DATABASE=servicefix
+
+# JWT
+JWT_SECRET=your-secret-key
+JWT_EXPIRES_IN=1d
+REFRESH_TOKEN_EXPIRES_IN=7d
+
+# Cors
+FRONTEND_URL=http://localhost:3000
+```
+
+## API Documentation
+
+The ServiceFix backend provides a comprehensive RESTful API. Here's an overview of the main API endpoints:
+
+### Authentication Endpoints
+
+- **POST /api/auth/login** - User login
+- **POST /api/auth/register** - Register new user
+- **POST /api/auth/forgot-password** - Request password reset
+- **POST /api/auth/reset-password** - Reset password with token
+- **POST /api/auth/refresh-token** - Refresh access token
+
+### Ticket Endpoints
+
+- **GET /api/tickets** - List tickets with pagination and filtering
+- **POST /api/tickets** - Create new ticket
+- **GET /api/tickets/:id** - Get ticket details
+- **PUT /api/tickets/:id** - Update ticket
+- **DELETE /api/tickets/:id** - Delete ticket
+- **GET /api/tickets/:id/comments** - Get ticket comments
+- **POST /api/tickets/:id/comments** - Add comment to ticket
+- **POST /api/tickets/:id/assign** - Assign ticket to agent
+
+### User Endpoints
+
+- **GET /api/users** - List users
+- **GET /api/users/:id** - Get user details
+- **PUT /api/users/:id** - Update user
+- **DELETE /api/users/:id** - Delete user
+- **GET /api/users/me** - Get current user profile
+- **PUT /api/users/me** - Update current user profile
+
+### Knowledge Base Endpoints
+
+- **GET /api/knowledge** - List knowledge base articles
+- **POST /api/knowledge** - Create new article
+- **GET /api/knowledge/:id** - Get article details
+- **PUT /api/knowledge/:id** - Update article
+- **DELETE /api/knowledge/:id** - Delete article
+- **GET /api/knowledge/categories** - List article categories
+
+### Notification Endpoints
+
+- **GET /api/notifications** - Get user notifications with pagination and filtering
+- **GET /api/notifications/unread** - Get count of unread notifications
+- **PUT /api/notifications/:id/read** - Mark specific notification as read
+- **PUT /api/notifications/read-all** - Mark all notifications as read
+- **DELETE /api/notifications/:id** - Delete a specific notification
+- **DELETE /api/notifications/all** - Delete all notifications for the current user
+- **GET /api/notifications/preferences** - Get notification preferences for current user
+- **PUT /api/notifications/preferences** - Update notification preferences
+- **POST /api/notifications/test** - Send a test notification (admin only)
+
+### SLA Endpoints
+
+- **GET /api/sla** - Get SLA policies
+- **POST /api/sla** - Create new SLA policy
+- **GET /api/sla/:id** - Get SLA policy details
+- **PUT /api/sla/:id** - Update SLA policy
+- **DELETE /api/sla/:id** - Delete SLA policy
+
+### Business Hours Endpoints
+
+- **GET /api/business-hours** - Get business hours configurations
+- **POST /api/business-hours** - Create business hours configuration
+- **GET /api/business-hours/:id** - Get specific business hours configuration
+- **PUT /api/business-hours/:id** - Update business hours configuration
+- **DELETE /api/business-hours/:id** - Delete business hours configuration
+
+### Settings Endpoints
+
+- **GET /api/settings** - Get all settings
+- **GET /api/settings/:category** - Get settings by category (email, general, ticket, sla)
+- **PUT /api/settings/:category** - Update settings for category
+- **GET /api/settings/email** - Get email configuration settings
+- **PUT /api/settings/email** - Update email configuration settings
+- **POST /api/settings/email/test** - Test email configuration by sending a test email
+- **GET /api/settings/general** - Get general application settings
+- **PUT /api/settings/general** - Update general application settings
+- **GET /api/settings/ticket** - Get ticket-related settings
+- **PUT /api/settings/ticket** - Update ticket-related settings
+- **GET /api/settings/sla** - Get SLA configuration settings
+- **PUT /api/settings/sla** - Update SLA configuration settings
+
+For detailed API documentation including request/response formats and example usage, refer to the [API Documentation](https://example.com/api-docs) when running the application with the `ENABLE_DOCS=true` environment variable.
+
 ## Quick Installation Guide
 
 Follow these steps to get the application up and running:
 
 ### Prerequisites
-- Node.js (v14 or higher)
+- Node.js (v20 or higher)
 - PostgreSQL (v12 or higher)
 - npm
 
@@ -296,143 +492,282 @@ The database uses PostgreSQL with the following schema structure:
 ### Core Tables
 
 1. **users**
-   - id (UUID, PK)
-   - email (VARCHAR, UNIQUE)
-   - password_hash (VARCHAR)
-   - name (VARCHAR)
-   - role (ENUM: 'admin', 'agent', 'team_lead', 'customer')
-   - organization_id (FK -> organizations.id)
-   - department_id (FK -> departments.id, NULL for customers)
-   - is_active (BOOLEAN)
-   - created_at (TIMESTAMP)
-   - updated_at (TIMESTAMP)
+   - id BIGINT PRIMARY KEY GENERATED BY DEFAULT AS IDENTITY
+   - email VARCHAR(255) NOT NULL UNIQUE
+   - password VARCHAR(255) NOT NULL
+   - first_name VARCHAR(100) NOT NULL
+   - last_name VARCHAR(100) NOT NULL
+   - organization_id BIGINT (FK -> organizations.id)
+   - role VARCHAR(50) DEFAULT 'customer'
+   - avatar_url TEXT
+   - phone VARCHAR(50)
+   - is_active BOOLEAN DEFAULT TRUE
+   - created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+   - updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 
 2. **organizations**
-   - id (UUID, PK)
-   - name (VARCHAR)
-   - domain (VARCHAR)
-   - created_at (TIMESTAMP)
-   - updated_at (TIMESTAMP)
+   - id BIGINT PRIMARY KEY GENERATED BY DEFAULT AS IDENTITY
+   - name VARCHAR(255) NOT NULL
+   - domain VARCHAR(255) NOT NULL
+   - logo_url VARCHAR(255)
+   - created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+   - updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 
 3. **departments**
-   - id (UUID, PK)
-   - name (VARCHAR)
-   - organization_id (FK -> organizations.id)
-   - created_at (TIMESTAMP)
-   - updated_at (TIMESTAMP)
+   - id BIGINT PRIMARY KEY GENERATED BY DEFAULT AS IDENTITY
+   - name VARCHAR(255) NOT NULL
+   - description TEXT
+   - organization_id BIGINT (FK -> organizations.id)
+   - created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+   - updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 
 4. **tickets**
-   - id (UUID, PK)
-   - subject (VARCHAR)
-   - description (TEXT)
-   - status_id (FK -> ticket_statuses.id)
-   - priority_id (FK -> ticket_priorities.id)
-   - type_id (FK -> ticket_types.id)
-   - created_by (FK -> users.id)
-   - assigned_to (FK -> users.id, NULL)
-   - department_id (FK -> departments.id)
-   - created_at (TIMESTAMP)
-   - updated_at (TIMESTAMP)
-   - due_at (TIMESTAMP, NULL)
-   - resolved_at (TIMESTAMP, NULL)
+   - id BIGINT PRIMARY KEY GENERATED BY DEFAULT AS IDENTITY
+   - subject VARCHAR(255) NOT NULL
+   - description TEXT NOT NULL
+   - requester_id BIGINT (FK -> users.id)
+   - assignee_id BIGINT (FK -> users.id)
+   - department_id BIGINT (FK -> departments.id)
+   - priority_id BIGINT (FK -> ticket_priorities.id)
+   - status_id BIGINT (FK -> ticket_statuses.id)
+   - type_id BIGINT (FK -> ticket_types.id)
+   - organization_id BIGINT (FK -> organizations.id)
+   - source VARCHAR(50) DEFAULT 'web'
+   - due_date TIMESTAMP WITH TIME ZONE
+   - sentiment_score DECIMAL(3,2)
+   - ai_summary TEXT
+   - sla_status VARCHAR(50)
+   - first_response_sla_breached BOOLEAN DEFAULT FALSE
+   - resolution_sla_breached BOOLEAN DEFAULT FALSE
+   - created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+   - updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+   - resolved_at TIMESTAMP WITH TIME ZONE
+   - closed_at TIMESTAMP WITH TIME ZONE
 
 5. **ticket_comments**
-   - id (UUID, PK)
-   - ticket_id (FK -> tickets.id)
-   - user_id (FK -> users.id)
-   - content (TEXT)
-   - is_internal (BOOLEAN)
-   - created_at (TIMESTAMP)
-   - updated_at (TIMESTAMP)
+   - id BIGINT PRIMARY KEY GENERATED BY DEFAULT AS IDENTITY
+   - ticket_id BIGINT (FK -> tickets.id)
+   - user_id BIGINT (FK -> users.id)
+   - content TEXT NOT NULL
+   - is_internal BOOLEAN DEFAULT FALSE
+   - is_system BOOLEAN DEFAULT FALSE
+   - sentiment_score DECIMAL(3,2)
+   - parent_comment_id BIGINT (FK -> ticket_comments.id)
+   - created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+   - updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 
 ### Reference Tables
 
 6. **ticket_statuses**
-   - id (UUID, PK)
-   - name (VARCHAR, e.g., 'New', 'In Progress', 'Pending', 'Resolved', 'Closed')
-   - description (TEXT)
-   - color (VARCHAR)
-   - is_default (BOOLEAN)
-   - order (INTEGER)
+   - id BIGINT PRIMARY KEY GENERATED BY DEFAULT AS IDENTITY
+   - organization_id BIGINT (FK -> organizations.id)
+   - name VARCHAR(255) NOT NULL
+   - color VARCHAR(7) NOT NULL
+   - is_default BOOLEAN DEFAULT FALSE
+   - is_resolved BOOLEAN DEFAULT FALSE
+   - created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+   - updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 
 7. **ticket_priorities**
-   - id (UUID, PK)
-   - name (VARCHAR, e.g., 'Low', 'Medium', 'High', 'Critical')
-   - description (TEXT)
-   - color (VARCHAR)
-   - sla_hours (INTEGER)
-   - is_default (BOOLEAN)
-   - order (INTEGER)
+   - id BIGINT PRIMARY KEY GENERATED BY DEFAULT AS IDENTITY
+   - name VARCHAR(255) NOT NULL
+   - color VARCHAR(7) NOT NULL
+   - sla_hours INTEGER NOT NULL
+   - organization_id BIGINT (FK -> organizations.id)
+   - created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+   - updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 
 8. **ticket_types**
-   - id (UUID, PK)
-   - name (VARCHAR, e.g., 'Question', 'Problem', 'Feature Request', 'Bug')
-   - description (TEXT)
-   - icon (VARCHAR)
-   - is_default (BOOLEAN)
-   - order (INTEGER)
+   - id BIGINT PRIMARY KEY GENERATED BY DEFAULT AS IDENTITY
+   - name VARCHAR(255) NOT NULL
+   - description TEXT
+   - organization_id BIGINT (FK -> organizations.id)
+   - created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+   - updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+
+### SLA Tables
+
+9. **sla_policies**
+   - id BIGINT PRIMARY KEY GENERATED BY DEFAULT AS IDENTITY
+   - name VARCHAR(255) NOT NULL
+   - description TEXT
+   - organization_id BIGINT (FK -> organizations.id)
+   - ticket_priority_id BIGINT (FK -> ticket_priorities.id)
+   - first_response_hours INT
+   - next_response_hours INT
+   - resolution_hours INT
+   - business_hours_only BOOLEAN DEFAULT TRUE
+   - created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+   - updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+
+10. **sla_policy_tickets**
+    - id BIGINT PRIMARY KEY GENERATED BY DEFAULT AS IDENTITY
+    - ticket_id BIGINT (FK -> tickets.id)
+    - sla_policy_id BIGINT (FK -> sla_policies.id)
+    - first_response_due_at TIMESTAMP WITH TIME ZONE
+    - next_response_due_at TIMESTAMP WITH TIME ZONE
+    - resolution_due_at TIMESTAMP WITH TIME ZONE
+    - first_response_met BOOLEAN
+    - next_response_met BOOLEAN
+    - resolution_met BOOLEAN
+    - metadata JSONB
+    - created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+    - updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+
+11. **business_hours**
+    - id BIGINT PRIMARY KEY GENERATED BY DEFAULT AS IDENTITY
+    - name VARCHAR(255) NOT NULL
+    - description TEXT
+    - organization_id BIGINT (FK -> organizations.id)
+    - mondayStart VARCHAR(5)
+    - mondayEnd VARCHAR(5)
+    - tuesdayStart VARCHAR(5)
+    - tuesdayEnd VARCHAR(5)
+    - wednesdayStart VARCHAR(5)
+    - wednesdayEnd VARCHAR(5)
+    - thursdayStart VARCHAR(5)
+    - thursdayEnd VARCHAR(5)
+    - fridayStart VARCHAR(5)
+    - fridayEnd VARCHAR(5)
+    - saturdayStart VARCHAR(5)
+    - saturdayEnd VARCHAR(5)
+    - sundayStart VARCHAR(5)
+    - sundayEnd VARCHAR(5)
+    - isDefault BOOLEAN DEFAULT FALSE
+    - timezone VARCHAR(50) DEFAULT 'UTC'
+    - created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+    - updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+
+12. **holidays**
+    - id BIGINT PRIMARY KEY GENERATED BY DEFAULT AS IDENTITY
+    - name VARCHAR(255) NOT NULL
+    - date DATE NOT NULL
+    - recurring BOOLEAN DEFAULT FALSE
+    - business_hours_id BIGINT (FK -> business_hours.id)
+    - created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+    - updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 
 ### Knowledge Base Tables
 
-9. **kb_categories**
-   - id (UUID, PK)
-   - name (VARCHAR)
-   - description (TEXT)
-   - parent_id (FK -> kb_categories.id, NULL for top-level)
-   - order (INTEGER)
-   - created_at (TIMESTAMP)
-   - updated_at (TIMESTAMP)
+13. **kb_categories**
+    - id BIGINT PRIMARY KEY GENERATED BY DEFAULT AS IDENTITY
+    - name VARCHAR(255) NOT NULL
+    - description TEXT
+    - slug VARCHAR(255) NOT NULL
+    - parent_id BIGINT (FK -> kb_categories.id)
+    - icon VARCHAR(50)
+    - organization_id BIGINT (FK -> organizations.id)
+    - is_private BOOLEAN DEFAULT FALSE
+    - created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+    - updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 
-10. **kb_articles**
-    - id (UUID, PK)
-    - title (VARCHAR)
-    - content (TEXT)
-    - category_id (FK -> kb_categories.id)
-    - created_by (FK -> users.id)
-    - updated_by (FK -> users.id)
-    - is_published (BOOLEAN)
-    - view_count (INTEGER)
-    - helpful_count (INTEGER)
-    - unhelpful_count (INTEGER)
-    - created_at (TIMESTAMP)
-    - updated_at (TIMESTAMP)
+14. **kb_articles**
+    - id BIGINT PRIMARY KEY GENERATED BY DEFAULT AS IDENTITY
+    - title VARCHAR(255) NOT NULL
+    - slug VARCHAR(255) NOT NULL
+    - content TEXT NOT NULL
+    - category_id BIGINT (FK -> kb_categories.id)
+    - author_id BIGINT (FK -> users.id)
+    - status VARCHAR(20) DEFAULT 'draft'
+    - view_count INTEGER DEFAULT 0
+    - helpful_count INTEGER DEFAULT 0
+    - not_helpful_count INTEGER DEFAULT 0
+    - organization_id BIGINT (FK -> organizations.id)
+    - created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+    - updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 
-11. **kb_article_tags**
-    - article_id (FK -> kb_articles.id)
-    - tag (VARCHAR)
-    - PRIMARY KEY (article_id, tag)
+15. **kb_article_tags**
+    - id BIGINT PRIMARY KEY GENERATED BY DEFAULT AS IDENTITY
+    - article_id BIGINT (FK -> kb_articles.id)
+    - tag_id BIGINT (FK -> tags.id)
+    - created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 
 ### Additional Tables
 
-12. **attachments**
-    - id (UUID, PK)
-    - filename (VARCHAR)
-    - original_filename (VARCHAR)
-    - mime_type (VARCHAR)
-    - size (INTEGER)
-    - path (VARCHAR)
-    - entity_type (VARCHAR, e.g., 'ticket', 'comment', 'article')
-    - entity_id (UUID)
-    - created_by (FK -> users.id)
-    - created_at (TIMESTAMP)
+16. **notifications**
+    - id BIGINT PRIMARY KEY GENERATED BY DEFAULT AS IDENTITY
+    - user_id BIGINT (FK -> users.id)
+    - title VARCHAR(255) NOT NULL
+    - message TEXT NOT NULL
+    - type VARCHAR(50) DEFAULT 'general'
+    - link VARCHAR(255)
+    - is_read BOOLEAN DEFAULT FALSE
+    - metadata JSONB
+    - created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 
-13. **audit_logs**
-    - id (UUID, PK)
-    - user_id (FK -> users.id)
-    - action (VARCHAR)
-    - entity_type (VARCHAR)
-    - entity_id (UUID)
-    - old_values (JSONB)
-    - new_values (JSONB)
-    - ip_address (VARCHAR)
-    - created_at (TIMESTAMP)
+17. **notification_preferences**
+    - id BIGINT PRIMARY KEY GENERATED BY DEFAULT AS IDENTITY
+    - user_id BIGINT (FK -> users.id)
+    - email_enabled BOOLEAN DEFAULT TRUE
+    - push_enabled BOOLEAN DEFAULT TRUE
+    - in_app_enabled BOOLEAN DEFAULT TRUE
+    - ticket_updates BOOLEAN DEFAULT TRUE
+    - ticket_comments BOOLEAN DEFAULT TRUE
+    - ticket_assignments BOOLEAN DEFAULT TRUE
+    - system_updates BOOLEAN DEFAULT TRUE
+    - created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+    - updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 
-### Constraints and Indexes
+18. **settings**
+    - id BIGINT PRIMARY KEY GENERATED BY DEFAULT AS IDENTITY
+    - category VARCHAR(50) NOT NULL
+    - settings_data JSONB NOT NULL
+    - created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+    - updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 
-- Foreign key constraints on all relational fields
-- Unique constraints on email fields
-- B-tree indexes on frequently queried fields
-- Trigger functions for audit logging and updated_at timestamps
+### Database Setup Process
+
+The ServiceFix application uses a structured approach to database management:
+
+1. **Schema Definition**: Database structure is defined in `schema.sql` rather than using migrations
+2. **Initialization**: Database setup is handled by `initialize_database.js` in the backend/sql directory
+3. **Entity Mapping**: Database entities are mapped to TypeORM in `src/config/database.ts`
+4. **Schema Validation**: Comprehensive validation is performed at runtime via `src/utils/schemaValidator.ts`
+
+### Schema Validation
+
+During application startup, a validation process:
+- Verifies all required tables exist
+- Checks for critical functions, triggers, and indexes
+- Ensures settings table and default email configuration exist
+- Logs warnings if schema appears incomplete
+
+### Initializing or Resetting the Database
+
+To initialize or reset the database, run:
+
+```bash
+cd backend
+node sql/initialize_database.js
+```
+
+This will:
+1. Drop the existing database if it exists
+2. Create a fresh database
+3. Apply the schema
+4. Initialize minimal required data
+
+### Making Schema Changes
+
+When making schema changes:
+
+1. Update the appropriate entities in `src/models/`
+2. Update the `schema.sql` file with corresponding changes
+3. Consider updating the required schema elements in `src/utils/schemaValidator.ts`
+4. Test with a fresh database by running the initialization script
+
+### Database Connection Configuration
+
+Database connection parameters are configured through environment variables:
+
+- `DATABASE_URL` - Full connection string (if provided, other parameters are ignored)
+- `DB_HOST` - Database host (default: 'localhost')
+- `DB_PORT` - Database port (default: '5432')
+- `DB_USERNAME` - Database username (default: 'postgres')
+- `DB_PASSWORD` - Database password (default: 'postgres')
+- `DB_DATABASE` - Database name (default: 'servicedesk')
+- `DB_LOGGING` - Enable SQL query logging (default: 'false')
+- `DB_SSL` - Enable SSL for database connection (default: 'false')
 
 ## Key Components
 
@@ -470,6 +805,8 @@ The database uses PostgreSQL with the following schema structure:
 - **ReportController**: Generates reports and analytics data
 - **OrganizationController**: Manages organization settings
 - **SettingsController**: Handles system-wide configuration
+- **SLAController**: Manages SLA policies and compliance
+- **BusinessHoursController**: Configures business hours and holidays
 
 #### Services
 - **AuthService**: Business logic for authentication
@@ -481,607 +818,149 @@ The database uses PostgreSQL with the following schema structure:
 - **SearchService**: Provides full-text search functionality
 - **AuditService**: Tracks system changes for compliance
 - **CacheService**: Manages data caching for performance
+- **DatabaseService**: Manages PostgreSQL database interactions with TypeORM
+- **NotificationService**: Handles delivering notifications via multiple channels
 
-## Development Workflow
+## SLA System
 
-### Getting Started with Development
+The ServiceFix application includes an advanced Service Level Agreement (SLA) system with the following capabilities:
 
-1. **Clone the Repository**
-   ```bash
-   git clone https://github.com/yourusername/servicefix.git
-   cd servicefix
-   ```
+### SLA Pause/Resume
 
-2. **Install Dependencies**
-   ```bash
-   # Install backend dependencies
-   cd backend
-   npm install
+The SLA system automatically manages SLA timing based on ticket status:
+- **Pause Mechanism**: When a ticket status changes to a "pending customer" or similar waiting state, the SLA timer automatically pauses
+- **Resume Mechanism**: When the ticket returns to an active status, the SLA timer automatically resumes
+- **Pause Tracking**: The system stores pause periods in the `metadata` JSONB column of the `sla_policy_tickets` table
+- **Pause Period Format**: `{pausePeriods: [{startedAt: Date, endedAt: Date}, ...], totalPausedTime: number}`
 
-   # Install frontend dependencies
-   cd ../frontend
-   npm install
-   ```
+### Business Hours Calculation
 
-3. **Set Up Environment**
-   - Copy `.env.example` to `.env` in both frontend and backend directories
-   - Configure database connection and other settings
-   - Create a PostgreSQL database named 'servicedesk'
+The system includes robust business hours handling:
+- **Day-specific Hours**: Configurable business hours for each day of the week (mondayStart/mondayEnd, etc.)
+- **Holiday Management**: Support for fixed and recurring holidays that are excluded from SLA calculations
+- **Organization-specific Settings**: Each organization can define its own business hours schedule
+- **Timezone Support**: Business hours calculations respect organization-defined timezones
+- **24/7 Option**: When `business_hours_only` is set to false, calculations use regular calendar hours
 
-4. **Run Database Migrations**
-   ```bash
-   cd backend
-   npm run db:migrate
-   ```
+### SLA Calculation Process
 
-5. **Seed Data (Optional)**
-   ```bash
-   npm run db:seed
-   ```
+For tickets with SLA tracking:
+1. SLA policy is assigned based on ticket priority (automatic or manual)
+2. First response, next response, and resolution deadlines are calculated
+3. SLA deadlines are adjusted based on business hours and any pause periods
+4. SLA breach status is continuously monitored and updated
+5. Breached SLAs trigger notifications and potential escalation actions
 
-6. **Start Development Servers**
-   ```bash
-   # Terminal 1 - Start backend
-   cd backend
-   npm run dev
+### Escalation Levels
 
-   # Terminal 2 - Start frontend
-   cd frontend
-   npm start
-   ```
+The system supports multi-level escalation based on SLA breach status:
+- **Level 1 (75% of SLA time)**: Agent notification
+- **Level 2 (90% of SLA time)**: Agent and manager notification
+- **Level 3 (100% of SLA time - breach)**: Agent and manager notification with reassignment option
+- **Level 4 (120% of SLA time)**: Full escalation including priority increase
 
-7. **Access Development Environment**
-   - Frontend: http://localhost:3000
-   - Backend API: http://localhost:5000
-   - API Documentation: http://localhost:5000/api-docs
+## Notification System
 
-### Code Style and Linting
+### Notification Types
 
-The project enforces consistent code style using:
+The notification system supports four types of notifications:
 
-1. **ESLint**: JavaScript/TypeScript linting
-   ```bash
-   # Check linting issues
-   npm run lint
+1. **Success** - Green notifications for successful operations
+2. **Error** - Red notifications for errors and failures
+3. **Warning** - Orange/amber notifications for cautionary information
+4. **Info** - Blue notifications for general information
 
-   # Fix auto-fixable issues
-   npm run lint:fix
-   ```
+### Email Notification System
 
-2. **Prettier**: Code formatting
-   ```bash
-   # Format code
-   npm run format
-   ```
+The system includes a robust email notification service with:
 
-3. **TypeScript**: Static type checking
-   ```bash
-   # Type check
-   npm run type-check
-   ```
+- **Dynamic Configuration**: Email settings loaded from database with fallback to environment variables
+- **Configuration Reloading**: Email transporter automatically refreshes to use latest settings
+- **Error Handling**: Comprehensive error handling with graceful fallbacks for SMTP connection issues
+- **Template Support**: Predefined email templates for common notifications like ticket creation and updates
+- **Rich HTML Content**: Support for both plain text and HTML email formats
+- **Configurable From Address**: Customizable sender name and email address
+- **Disabling Option**: System-wide ability to enable/disable email notifications
 
-### Branch Strategy
+### In-App Notification System
 
-- **main**: Production-ready code
-- **develop**: Integration branch for features
-- **feature/[feature-name]**: Feature development
-- **bugfix/[bug-name]**: Bug fixes
-- **hotfix/[hotfix-name]**: Emergency fixes for production
+All notifications are tracked in the database with:
 
-### Commit Message Format
+- **User-specific Storage**: Each notification is associated with a specific user
+- **Metadata Support**: JSONB field for storing additional notification context
+- **Read/Unread Status**: Tracking of notification read status
+- **Notification Links**: Support for clickable links in notifications
+- **Categorization**: Notifications categorized by type (ticket, comment, system, etc.)
+- **Real-time Delivery**: Notifications delivered in real-time via WebSockets
+- **Bulk Operations**: Support for marking all notifications as read or deleting all notifications
 
-We follow the Conventional Commits specification:
+### Notification Preferences
 
-```
-<type>(<scope>): <description>
+Users can customize their notification experience with:
 
-[optional body]
+- **Channel-specific Preferences**: Separate toggles for email, push, and in-app notifications
+- **Event-specific Preferences**: Control notifications for ticket updates, comments, assignments, etc.
+- **Default Values**: Sensible defaults with all notifications enabled
+- **Immediate Application**: Preference changes apply immediately to all notification channels
+- **Per-Organization Settings**: Organization-level notification settings for system administrators
 
-[optional footer]
-```
+### Usage Guidelines
 
-Types:
-- feat: A new feature
-- fix: A bug fix
-- docs: Documentation changes
-- style: Code style changes (formatting, etc.)
-- refactor: Code changes that neither fix bugs nor add features
-- perf: Performance improvements
-- test: Adding or fixing tests
-- chore: Changes to the build process or tools
+#### Toast Notifications (Transient)
 
-Example:
-```
-feat(ticket): add file attachment support to tickets
+For temporary notifications that appear briefly and disappear automatically:
 
-Implements the ability to attach multiple files to tickets.
-Files are stored in the uploads directory and referenced in the database.
+```tsx
+import { showSuccess, showError, showWarning, showInfo } from '../utils/notificationUtils';
 
-Closes #123
+// Examples
+showSuccess('Operation completed successfully');
+showError('An error occurred while saving the form');
+showWarning('You are about to delete this item', { duration: 8000 });
+showInfo('New updates are available', { title: 'Updates' });
 ```
 
-## Testing Strategy
+#### Inline Alerts
 
-The project uses a comprehensive testing approach:
+For persistent alerts that remain in the UI:
 
-### Frontend Testing
+```tsx
+import { SystemAlert } from '../context/NotificationContext';
 
-- **Unit Tests**: Using Jest and React Testing Library for component testing
-   ```bash
-   cd frontend
-  npm test
-   ```
-
-- **Component Tests**: Using Storybook for visual component testing
-   ```bash
-  cd frontend
-  npm run storybook
-  ```
-
-- **End-to-End Tests**: Using Cypress for UI workflow testing
-  ```bash
-  cd frontend
-  npm run cypress:open
-  ```
-
-### Backend Testing
-
-- **Unit Tests**: Using Jest for service and utility testing
-  ```bash
-  cd backend
-  npm test
-  ```
-
-- **Integration Tests**: Using Supertest for API endpoint testing
-   ```bash
-  cd backend
-  npm run test:integration
-  ```
-
-- **Load Tests**: Using k6 for performance testing
-  ```bash
-  cd backend
-  npm run test:load
-  ```
-
-### Test Coverage
-
-Generate test coverage reports:
-
-```bash
-# Frontend coverage
-cd frontend
-npm run test:coverage
-
-# Backend coverage
-cd backend
-npm run test:coverage
+// Example
+<SystemAlert 
+  message="This action cannot be undone" 
+  type="warning"
+  title="Caution"
+  onClose={() => setShowWarning(false)}
+/>
 ```
 
-Coverage targets:
-- Unit tests: 80% minimum coverage
-- Integration tests: 70% minimum coverage
-- Critical paths: 95% minimum coverage
-
-## Available Scripts
-
-### Frontend
-- `npm start`: Runs the app in development mode
-- `npm test`: Launches the test runner
-- `npm run build`: Builds the app for production
-- `npm run lint`: Runs ESLint to check for code issues
-- `npm run format`: Formats code using Prettier
-- `npm run storybook`: Starts Storybook for component development
-- `npm run analyze`: Analyzes bundle size
-- `npm run cypress:open`: Opens Cypress for E2E testing
-- `npm run i18n:extract`: Extracts i18n strings for translation
-
-### Backend
-- `npm run dev`: Starts the development server with hot reload
-- `npm test`: Runs the test suite
-- `npm run build`: Compiles TypeScript to JavaScript
-- `npm start`: Starts the production server
-- `npm run lint`: Runs ESLint to check for code issues
-- `npm run format`: Formats code using Prettier
-- `npm run db:migrate`: Runs database migrations
-- `npm run db:rollback`: Rolls back the last migration
-- `npm run db:seed`: Seeds the database with sample data
-- `npm run docs:generate`: Generates API documentation
-
-## Deployment Guide
-
-### Production Readiness Checklist
-
-- [ ] Update all environment variables for production
-- [ ] Set NODE_ENV=production
-- [ ] Configure proper database connection pool size
-- [ ] Set up proper CORS settings for production domains
-- [ ] Configure rate limiting for API protection
-- [ ] Set up SSL certificates
-- [ ] Implement database backups
-- [ ] Configure proper logging and monitoring
-- [ ] Set up error tracking with Sentry or similar
-- [ ] Configure proper caching headers for static assets
-
-### Deployment Options
-
-#### Docker Deployment
-
-1. **Build Docker Images**
-   ```bash
-   # Build backend image
-   cd backend
-   docker build -t servicefix-backend .
-
-   # Build frontend image
-   cd ../frontend
-   docker build -t servicefix-frontend .
-   ```
-
-2. **Run with Docker Compose**
-   Create a `docker-compose.yml` file:
-   ```yaml
-   version: '3.8'
-   services:
-     frontend:
-       image: servicefix-frontend
-       ports:
-         - "80:80"
-       depends_on:
-         - backend
-       environment:
-         - REACT_APP_API_URL=http://api.example.com/api
-
-     backend:
-       image: servicefix-backend
-       ports:
-         - "5000:5000"
-       depends_on:
-         - postgres
-       environment:
-         - NODE_ENV=production
-         - DB_HOST=postgres
-         - DB_USER=postgres
-         - DB_PASSWORD=postgres
-         - DB_NAME=servicedesk
-         - JWT_SECRET=your_secure_jwt_secret
-         # Add other environment variables
-
-     postgres:
-       image: postgres:13
-       ports:
-         - "5432:5432"
-       environment:
-         - POSTGRES_USER=postgres
-         - POSTGRES_PASSWORD=postgres
-         - POSTGRES_DB=servicedesk
-       volumes:
-         - postgres_data:/var/lib/postgresql/data
-
-   volumes:
-     postgres_data:
-   ```
-
-3. **Start the Services**
-   ```bash
-   docker-compose up -d
-   ```
-
-#### Traditional Deployment
-
-1. **Prepare the Backend**
-   ```bash
-   cd backend
-   npm ci --production
-   npm run build
-   ```
-
-2. **Prepare the Frontend**
-   ```bash
-   cd frontend
-   npm ci --production
-   npm run build
-   ```
-
-3. **Deploy Backend**
-   - Copy the `dist` folder, `package.json`, and `package-lock.json` to the server
-   - Install production dependencies on the server
-   - Set up environment variables
-   - Use a process manager like PM2 to run the application
-
-4. **Deploy Frontend**
-   - Copy the `build` folder to a web server
-   - Configure the web server (Nginx, Apache) to serve the static files
-   - Set up caching headers, compression, and SSL
-
-#### Nginx Configuration Example
-
-```nginx
-# Frontend configuration
-server {
-    listen 80;
-    server_name app.example.com;
-    return 301 https://$host$request_uri;
-}
-
-server {
-    listen 443 ssl http2;
-    server_name app.example.com;
-
-    ssl_certificate /etc/letsencrypt/live/app.example.com/fullchain.pem;
-    ssl_certificate_key /etc/letsencrypt/live/app.example.com/privkey.pem;
-
-    root /var/www/servicefix/frontend/build;
-    index index.html;
-
-    location / {
-        try_files $uri $uri/ /index.html;
-    }
-
-    location ~* \.(js|css|png|jpg|jpeg|gif|ico|svg)$ {
-        expires 30d;
-        add_header Cache-Control "public, no-transform";
-    }
-
-    gzip on;
-    gzip_types text/plain text/css application/json application/javascript text/xml application/xml application/xml+rss text/javascript;
-}
-
-# Backend configuration
-server {
-    listen 80;
-    server_name api.example.com;
-    return 301 https://$host$request_uri;
-}
-
-server {
-    listen 443 ssl http2;
-    server_name api.example.com;
-
-    ssl_certificate /etc/letsencrypt/live/api.example.com/fullchain.pem;
-    ssl_certificate_key /etc/letsencrypt/live/api.example.com/privkey.pem;
-
-    location / {
-        proxy_pass http://localhost:5000;
-        proxy_http_version 1.1;
-        proxy_set_header Upgrade $http_upgrade;
-        proxy_set_header Connection 'upgrade';
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-        proxy_cache_bypass $http_upgrade;
-    }
-}
-```
-
-## User Interface
-
-### Dashboard
-The dashboard provides an overview of the system with:
-- Key metrics and statistics
-- Recent ticket activity
-- Performance indicators
-- Quick access to common actions
-
-### Ticket Management
-The ticket management interface allows:
-- Creating new tickets with AI assistance
-- Filtering and sorting tickets
-- Viewing ticket details and history
-- Adding comments and attachments
-- Changing status and priority
-
-### Knowledge Base
-The knowledge base provides:
-- Searchable articles organized by category
-- Rich text editing for article creation
-- Related article suggestions
-- User feedback collection
-
-### Reports & Analytics
-The reports page offers:
-- Customizable date ranges for data analysis
-- Visual charts and graphs for ticket metrics
-- Agent performance statistics
-- Ticket distribution analysis
-- Exportable reports in various formats
-
-## Third-Party Integrations
-
-ServiceFix integrates with various third-party services to enhance functionality:
-
-### Email Services
-- **Nodemailer**: Email sending infrastructure
-- **SendGrid/Mailgun**: Production email delivery (optional)
-- **Email Templates**: Customizable HTML email templates
-
-### File Storage
-- **Local Storage**: Default for development
-- **AWS S3**: Cloud storage for production
-- **Azure Blob Storage**: Alternative cloud storage option
-
-### Authentication Providers
-- **JWT**: Default authentication mechanism
-- **OAuth2**: Integration with Google, Microsoft, and GitHub (optional)
-- **SAML**: Enterprise SSO integration (optional)
-
-### AI Services
-- **OpenAI API**: Powers ticket classification and response suggestions
-- **HuggingFace**: Alternative AI provider for natural language processing
-- **TensorFlow.js**: Client-side AI for immediate user feedback
-
-### Analytics
-- **Google Analytics**: User behavior tracking
-- **Mixpanel**: User journey analytics
-- **Sentry**: Error tracking and performance monitoring
-
-### Payment Processors (Optional)
-- **Stripe**: Subscription and payment processing
-- **PayPal**: Alternative payment option
-
-## API Endpoints
-
-### Authentication
-- `POST /api/auth/register`: Register a new user
-- `POST /api/auth/login`: Log in with email and password
-- `POST /api/auth/refresh-token`: Refresh the authentication token
-- `POST /api/auth/forgot-password`: Request password reset
-- `POST /api/auth/reset-password`: Reset password with token
-
-### Users
-- `GET /api/users`: List users with pagination and filtering
-- `GET /api/users/:id`: Get a single user
-- `PUT /api/users/:id`: Update a user
-- `DELETE /api/users/:id`: Delete a user
-
-### Tickets
-- `GET /api/tickets`: List tickets with filtering and pagination
-- `GET /api/tickets/:id`: Get a single ticket with comments and history
-- `POST /api/tickets`: Create a new ticket
-- `PUT /api/tickets/:id`: Update a ticket
-- `POST /api/tickets/:id/comments`: Add a comment to a ticket
-- `DELETE /api/tickets/:id`: Delete a ticket
-
-### Knowledge Base
-- `GET /api/knowledge`: List knowledge base categories and articles
-- `GET /api/knowledge/categories`: Get all categories
-- `GET /api/knowledge/categories/:id`: Get a category with articles
-- `POST /api/knowledge/categories`: Create a new category
-- `PUT /api/knowledge/categories/:id`: Update a category
-- `DELETE /api/knowledge/categories/:id`: Delete a category
-- `GET /api/knowledge/articles/:id`: Get a single article
-- `POST /api/knowledge/articles`: Create a new article
-- `PUT /api/knowledge/articles/:id`: Update an article
-- `DELETE /api/knowledge/articles/:id`: Delete an article
-
-### Reports
-- `GET /api/reports/tickets`: Get ticket statistics
-- `GET /api/reports/performance`: Get agent performance metrics
-- `GET /api/reports/trends`: Get ticket trends over time
-- `GET /api/reports/satisfaction`: Get customer satisfaction metrics
-
-## Security Features
-
-### Authentication & Authorization
-
-- **JWT Authentication**: Secure token-based authentication
-- **Role-Based Access Control**: Granular permissions based on user roles
-- **API Rate Limiting**: Protection against brute force attacks
-- **Password Security**:
-  - Bcrypt password hashing
-  - Password complexity requirements
-  - Account lockout after failed attempts
-
-### Data Protection
-
-- **Input Validation**: Thorough validation of all user inputs
-- **SQL Injection Protection**: Parameterized queries and ORM
-- **XSS Prevention**: Content Security Policy and output encoding
-- **CSRF Protection**: Anti-CSRF tokens for sensitive operations
-- **Secure Headers**: HTTP security headers using Helmet.js
-
-### Compliance Features
-
-- **Audit Logging**: Comprehensive logging of all sensitive operations
-- **Data Retention Controls**: Configurable data retention policies
-- **Privacy Features**:
-  - PII data handling controls
-  - Data export/deletion capabilities for GDPR compliance
-  - Consent management
-
-### Network Security
-
-- **HTTPS Enforcement**: HTTP to HTTPS redirection
-- **CORS Configuration**: Strict cross-origin resource sharing policy
-- **Firewall Rules**: Recommended server firewall configuration
-- **Connection Security**: TLS 1.2+ only, strong ciphers
-
-## Recent Improvements
-
-### Cookie Consent and Privacy Controls
-- **Cookie Consent Management**: Added comprehensive cookie consent system with granular category control
-- **Privacy Policy Page**: Implemented detailed cookie policy page with management options
-- **GDPR Compliance**: Enhanced forms with proper consent checkboxes and privacy notices
-- **Preference Persistence**: Added cookie preferences that persist across sessions
-
-### Bug Fixes and Optimizations
-- **Fixed Cookie Persistence**: Resolved issues with cookie preferences not persisting after page refresh
-- **Fixed Cookie Banner Display**: Corrected conditional rendering logic for cookie consent banner
-- **WebSocket Connection Management**: Fixed memory leaks in WebSocket connections
-- **Search Pagination**: Fixed pagination in search results to respect search parameters
-- **Notification Deduplication**: Added logic to prevent duplicate notifications
-- **Fixed Profile Page Form**: Corrected initialization logic in the Profile Page form to prevent errors when user data is not immediately available on render
-- **Fixed Customer Dashboard Pagination**: Corrected server-side pagination for the "My Open Tickets" section on the customer dashboard, ensuring all open tickets are displayed correctly across pages
-- **Removed Test Notifications**: Fixed an issue where test notifications would appear when opening or refreshing login and register pages
-- **Improved Performance**: Optimized component rendering and reduced unnecessary re-renders
-- **Enhanced Error Handling**: Better error recovery and user feedback for failed operations
-- **Fixed Search Functionality**: Resolved issues with role-based user filtering (customer, agent, admin)
-- **Fixed Password Reset Flow**: Addressed critical issues with password reset functionality:
-  - Fixed email delivery problems caused by missing "settings" table in the database
-  - Created database migration utility to ensure settings table exists with default email configuration
-  - Modified notification service to handle cases where settings table is missing
-  - Updated initializeDatabase function to run settings migration on server start
-  - Improved password reset email content and templates
-- **Fixed Settings Page Errors**: Resolved "Cannot read properties of undefined" errors:
-  - Updated settingsService.ts to properly handle nested data structures
-  - Added proper null checking and fallback values in Settings components
-  - Implemented safe default values for email settings state
-  - Added robust error handling and UI feedback with retry options
-
-### Reports Page Implementation
-The system now includes a comprehensive Reports page with:
-- Interactive data visualization for ticket metrics
-- Agent performance tracking
-- Customizable date ranges and filters
-- Tabbed interface for different report types
-- Export capabilities for report data
-- Real-time data updates
-- New performance metrics dashboard
-
-### Authentication Enhancements
-- **Multi-Factor Authentication**: Added MFA support for higher security accounts
-- **Enhanced Register Flow**: Added privacy consent options during registration
-- **Improved Password Reset**: Enhanced security for password reset process
-- **Password Strength Meter**: Visual indication of password security during creation/change
-
-### Dashboard Improvements
-- **Interactive Dashboard**: Added collapsible sections for better organization
-- **Enhanced Statistics**: Improved visual representation of key metrics with trend indicators
-- **Real-time Activity Feed**: Added live updates to activity notifications
-- **Improved Charts**: Added better visualizations for ticket distribution
-- **Loading States**: Added skeleton loaders for better UX during data fetching
-
-### Knowledge Base Enhancements
-- Dynamic article categorization
-- Improved search functionality
-- Enhanced article editor
-- Better navigation between related articles
-- Added related article recommendations
+### Best Practices
+
+1. Keep notification messages concise and clear
+2. Use the appropriate notification type for the situation
+3. For critical errors, use persistent notifications (SystemAlert) rather than toasts
+4. Group related notifications to prevent overwhelming the user
+5. Provide actionable information when possible
 
 ## Performance Optimizations
 
 ### Frontend Optimizations
-
 - **Code Splitting**: Lazy loading of routes and components
 - **Bundle Size Optimization**: Tree-shaking and dead code elimination
 - **Image Optimization**: Responsive images and WebP format
-- **Caching Strategies**:
-  - Service worker for offline capability
-  - Browser caching headers for static assets
-  - React Query for API response caching
+- **Caching Strategies**: Service worker, browser caching, React Query for API caching
 - **Virtualization**: Virtual scrolling for large data lists
 
 ### Backend Optimizations
-
 - **Database Indexing**: Optimized indexes for common queries
 - **Query Optimization**: Efficient query patterns and eager loading
 - **Connection Pooling**: Database connection reuse
 - **Response Compression**: gzip/brotli compression
 - **Caching Layer**: Redis for frequent data access
 
-### Measured Performance Metrics
-
+### Performance Metrics
 - **First Contentful Paint**: < 1.2s
 - **Time to Interactive**: < 2.5s
 - **API Response Time**: < 200ms for 95% of requests
@@ -1089,96 +968,10 @@ The system now includes a comprehensive Reports page with:
 
 ## User Roles & Permissions
 
-### Administrator
-- Full system access
-- User management
-- Department configuration
-- Report generation
-- System settings
-
-### Agent
-- Ticket management
-- Knowledge base editing
-- Limited reporting access
-- Customer communication
-
-### Team Lead
-- Team performance monitoring
-- Ticket assignment
-- SLA management
-- Department-level reporting
-
-### Customer
-- Ticket creation and tracking
-- Knowledge base access
-- Profile management
-- Communication with support agents
-
-## Development Notes
-
-### Coding Standards
-
-- Follow TypeScript best practices
-- Use functional components with React hooks
-- Follow Material-UI design patterns
-- Add proper JSDoc comments for components and functions
-
-#### TypeScript Guidelines
-
-- Use explicit types over `any`
-- Use interfaces for object shapes
-- Use type unions for variables with multiple types
-- Use generics for reusable components and functions
-- Follow naming conventions:
-  - PascalCase for components, interfaces, and types
-  - camelCase for variables, functions, and properties
-  - UPPER_SNAKE_CASE for constants
-
-#### React Guidelines
-
-- Use functional components with hooks
-- Keep components focused on a single responsibility
-- Use memoization for expensive computations
-- Follow the container/presentational pattern
-- Handle errors gracefully with error boundaries
-
-#### CSS Guidelines
-
-- Use Material-UI's styling system (sx prop, styled components)
-- Follow consistent naming for custom classes
-- Use theme variables instead of hardcoded values
-- Ensure responsive design for all components
-
-### Pending Implementations
-
-The following components need further development:
-
-1. **ArticleDetailPage**: Currently uses a placeholder implementation that needs to be replaced with a full featured article detail view.
-
-### Contributing
-
-Please follow these steps when contributing:
-
-1. Create a new branch for your feature or fix
-2. Write tests for your changes
-3. Follow the coding standards
-4. Submit a PR with a clear description of the changes
-
-#### Pull Request Process
-
-1. Ensure your code adheres to the project's coding standards
-2. Update documentation to reflect any changes
-3. Add or update tests as necessary
-4. Get at least one code review before merging
-5. Squash commits before merging to maintain a clean history
-
-#### Code Review Guidelines
-
-- Verify that code meets project standards
-- Check for potential security issues
-- Ensure adequate test coverage
-- Review for performance considerations
-- Validate UI changes across different devices
+- **Administrator**: Full system access, user management, configuration, reporting
+- **Agent**: Ticket management, knowledge base editing, customer communication
+- **Team Lead**: Team monitoring, ticket assignment, SLA management, department reporting
+- **Customer**: Ticket creation/tracking, knowledge base access, profile management
 
 ## Troubleshooting
 
@@ -1204,10 +997,50 @@ Please follow these steps when contributing:
 - **Solution**: Check for unoptimized queries or component re-renders
 - **Check**: Use React DevTools and Chrome Performance tab to identify bottlenecks
 
-#### Build Failures
-- **Problem**: npm build command fails
-- **Solution**: Check for dependency issues or TypeScript errors
-- **Check**: Run `npm run lint` and `npm run type-check` to identify problems
+## Implementation Status
+
+The ServiceFix application is under active development with most core features implemented. However, some features are still in progress or planned for future releases:
+
+### Complete Features
+
+- ✅ User authentication and registration
+- ✅ Ticket management (creation, assignment, updating)
+- ✅ SLA monitoring and management
+- ✅ Business hours configuration
+- ✅ Email notification system (with SMTP integration and template support)
+- ✅ Real-time updates via WebSockets (connected to notification system)
+- ✅ User profile management
+- ✅ Database schema and entity models
+- ✅ Multi-channel notification delivery (email, in-app, real-time)
+
+### In-Progress Features
+
+- 🚧 Knowledge Base: The core structure is in place, but the article detail view is currently a placeholder (see `ArticleDetailPage` component in App.tsx)
+- 🚧 Workflow Automation: Basic workflow functionality is implemented with a complete UI and mock data, but integration with backend actions is still in progress
+- 🚧 Testing: No unit or integration tests have been implemented yet, despite Jest configuration being in place
+
+### Implementation Notes
+
+- 📌 **Mock Data**: Several components (especially in the Workflow Automation, Analytics, and Reports pages) currently use mock data instead of live API connections
+- 📌 **TypeScript Version**: The project uses TypeScript 5.5.2 for the backend and TypeScript 4.9.5 for the frontend
+- 📌 **Component Refactoring**: Large components like HeroSection (784 lines) and TestimonialsSection (547 lines) are scheduled for refactoring as mentioned in VERSION_HISTORY.md
+
+### Planned Features
+
+- 📅 Test Suite: Comprehensive test suite using Jest and React Testing Library
+- 📅 Advanced AI Features: Enhanced AI-powered automation beyond the current implementation
+- 📅 Mobile Applications: Native mobile apps for iOS and Android
+- 📅 Storybook Component Library: Visual documentation of all UI components
+
+### Known Placeholder Components
+
+The following components in the codebase are currently placeholders or use mock data:
+
+- `ArticleDetailPage`: Knowledge base article detail view (placeholder with minimal UI)
+- `PlaceholderComponent`: Generic placeholder used in several locations for upcoming features
+- `WorkflowAutomationPage`: Uses a complete UI with mock data but lacks backend integration
+- `AnalyticsDashboardPage`: Uses mock data for charts and metrics
+- `ReportsPage`: Uses mock data for reporting functionality
 
 ## License
 
@@ -1250,10 +1083,23 @@ Key frontend components and their latest significant changes:
 | KnowledgeBasePage | 2.8.0 | May 22, 2024 | frontend/src/pages/KnowledgeBasePage.tsx |
 | AnalyticsDashboardPage | 3.0.0 | May 22, 2024 | frontend/src/pages/AnalyticsDashboardPage.tsx |
 | CookiesPage | 1.0.0 | May 22, 2024 | frontend/src/pages/CookiesPage.tsx |
+| ProfilePage | 2.2.0 | May 26, 2024 | frontend/src/pages/ProfilePage.tsx |
 | TicketContext | 3.3.0 | May 22, 2024 | frontend/src/context/TicketContext.tsx |
-| AuthContext | 2.6.0 | May 22, 2024 | frontend/src/context/AuthContext.tsx |
+| AuthContext | 2.7.0 | May 26, 2024 | frontend/src/context/AuthContext.tsx |
+| NotificationContext | 2.2.0 | May 26, 2024 | frontend/src/context/NotificationContext.tsx |
+| NotificationPreferencesContext | 1.2.0 | May 26, 2024 | frontend/src/context/NotificationPreferencesContext.tsx |
 | ThemeContext | 1.5.0 | May 22, 2024 | frontend/src/context/ThemeContext.tsx |
 | CookieConsentContext | 1.1.0 | May 22, 2024 | frontend/src/context/CookieConsentContext.tsx |
+
+For a complete and detailed version history of all components, including changelogs and optimization plans, please refer to the [VERSION_HISTORY.md](./VERSION_HISTORY.md) file in the project root. This file contains:
+
+- Detailed changelogs for all major components
+- Component size metrics
+- Optimization plans and strategies
+- Recent fixes and updates
+- Known stable versions for rollback purposes
+
+The VERSION_HISTORY.md file is regularly updated with each release and serves as the definitive record of changes to the application.
 
 ### How to Restore Previous Versions
 

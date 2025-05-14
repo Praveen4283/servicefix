@@ -35,9 +35,18 @@ import chatbotRoutes from './routes/chatbot.routes';
 import notificationRoutes from './routes/notification.routes';
 import logRoutes from './routes/log.routes';
 import settingsRoutes from './routes/settings.routes';
+import slaRoutes from './routes/sla.routes';
+import ticketPriorityRoutes from './routes/ticketPriority.routes';
+import businessHoursRoutes from './routes/businessHours.routes';
 
 // Import the Supabase initialization function
 import { initBucket } from './utils/supabase';
+
+// Import the scheduler
+import { startScheduledJobs, stopScheduledJobs } from './utils/scheduler';
+
+// Import log flushing utilities
+import { flushAllLogs, stopLogBuffering } from './utils/logStorage';
 
 // Initialize express app
 const app = express();
@@ -90,6 +99,9 @@ app.use('/api/chat', chatbotRoutes);
 app.use('/api/notifications', notificationRoutes);
 app.use('/api/logs', logRoutes);
 app.use('/api/settings', settingsRoutes);
+app.use('/api/sla', slaRoutes);
+app.use('/api/ticket-priorities', ticketPriorityRoutes);
+app.use('/api/business-hours', businessHoursRoutes);
 
 // Error handling middleware
 app.use(errorHandler);
@@ -103,22 +115,8 @@ app.use((req: Request, res: Response) => {
   });
 });
 
-// Import workflow automation service for SLA processing
-import workflowService from './services/workflow.service';
-
-// Setup recurring SLA checks
-function setupRecurringTasks() {
-  // Process SLA escalations every 5 minutes
-  setInterval(async () => {
-    try {
-      logger.info('Running scheduled SLA check');
-      const escalatedCount = await workflowService.processEscalations();
-      logger.info(`SLA check completed: ${escalatedCount} tickets escalated`);
-    } catch (error) {
-      logger.error('Error in SLA check:', error);
-    }
-  }, 5 * 60 * 1000);
-}
+// Import SLA service for processing
+import slaService from './services/sla.service';
 
 // Start server
 const startServer = async () => {
@@ -128,6 +126,7 @@ const startServer = async () => {
     
     // Initialize database connection
     await initializeDatabase();
+    logger.info('Database connection initialized successfully');
     
     // Run database diagnostics to help troubleshoot connection issues
     await diagnoseDatabaseConnection();
@@ -140,14 +139,55 @@ const startServer = async () => {
       logger.info(`Server running on port ${PORT}`);
     });
     
-    // Setup recurring tasks
-    setupRecurringTasks();
+    // Start scheduled jobs
+    startScheduledJobs();
     
   } catch (error: any) {
     logger.error(`Error starting server: ${error.message}`);
     process.exit(1);
   }
 };
+
+// Handle clean shutdown
+process.on('SIGTERM', async () => {
+  logger.info('SIGTERM received. Shutting down gracefully...');
+  
+  // Flush logs before shutting down
+  try {
+    logger.info('Flushing logs to Supabase...');
+    await flushAllLogs();
+    stopLogBuffering();
+    logger.info('Logs flushed successfully');
+  } catch (error: any) {
+    logger.error(`Error flushing logs: ${error.message}`);
+  }
+  
+  stopScheduledJobs();
+  server.close(() => {
+    logger.info('HTTP server closed');
+    process.exit(0);
+  });
+});
+
+process.on('SIGINT', async () => {
+  logger.info('SIGINT received. Shutting down gracefully...');
+  
+  // Flush logs before shutting down
+  try {
+    logger.info('Flushing logs to Supabase...');
+    await flushAllLogs();
+    stopLogBuffering();
+    logger.info('Logs flushed successfully');
+  } catch (error: any) {
+    logger.error(`Error flushing logs: ${error.message}`);
+  }
+  
+  stopScheduledJobs();
+  server.close(() => {
+    logger.info('HTTP server closed');
+    process.exit(0);
+  });
+});
 
 // Handle unhandled promise rejections
 process.on('unhandledRejection', (error: Error) => {

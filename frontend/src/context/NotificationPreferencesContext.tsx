@@ -111,11 +111,17 @@ export const NotificationPreferencesProvider: React.FC<NotificationPreferencesPr
     
     switch (channel) {
       case 'email':
-        return preference.emailEnabled;
+        // Use emailEnabled if defined, otherwise fall back to email property if defined, otherwise default to true
+        return preference.emailEnabled !== undefined ? preference.emailEnabled : 
+               preference.email !== undefined ? preference.email : true;
       case 'push':
-        return preference.pushEnabled;
+        // Use pushEnabled if defined, otherwise fall back to push property if defined, otherwise default to true
+        return preference.pushEnabled !== undefined ? preference.pushEnabled : 
+               preference.push !== undefined ? preference.push : true;
       case 'inApp':
-        return preference.inAppEnabled;
+        // Use inAppEnabled if defined, otherwise fall back to in_app property if defined, otherwise default to true
+        return preference.inAppEnabled !== undefined ? preference.inAppEnabled : 
+               preference.in_app !== undefined ? preference.in_app : true;
       default:
         return true;
     }

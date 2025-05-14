@@ -46,6 +46,8 @@ interface LogEntry {
   url: string;
   sessionId?: string;
   userId?: string;
+  // Add source info to help server identify that it's frontend
+  source?: string;
 }
 
 // Logger class 
@@ -113,7 +115,8 @@ class Logger {
       userAgent: navigator.userAgent,
       url: window.location.href,
       sessionId: this.sessionId,
-      userId: this.extractUserId() // Extract user ID if available
+      userId: this.extractUserId(), // Extract user ID if available
+      source: 'frontend' // Explicitly mark as frontend source
     };
     
     this.logQueue.push(logEntry);
@@ -172,16 +175,16 @@ class Logger {
         console.error(message, meta || '');
         break;
       case LogLevel.WARN:
-        console.warn(message, meta || '');
+        // console.warn(message, meta || ''); // Removed this line
         break;
       case LogLevel.INFO:
         console.info(message, meta || '');
         break;
       case LogLevel.DEBUG:
-        console.debug(message, meta || '');
+        // console.debug(message, meta || ''); // Removed this line
         break;
       default:
-        console.log(message, meta || '');
+        // console.log(message, meta || ''); // This line is removed
     }
   }
 

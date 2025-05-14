@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   Box,
   Container,
@@ -37,12 +37,14 @@ import {
   Chip,
 } from '@mui/material';
 import { Edit as EditIcon, Save as SaveIcon, Cancel as CancelIcon, Upload as UploadIcon, LockReset as LockResetIcon, Close as CloseIcon, ExpandMore as ExpandMoreIcon, Notifications as NotificationsIcon, Email as EmailIcon, NotificationsActive as NotificationsActiveIcon, PhoneAndroid as PhoneAndroidIcon } from '@mui/icons-material';
-import { useAuth } from '../context/AuthContext';
+import { useAuth, User } from '../context/AuthContext';
 import { FormTextField } from '../components/common/FormField';
 import useFormValidation from '../utils/useFormValidation';
 import { profileSchema, changePasswordSchema } from '../utils/validationSchemas';
 import { format } from 'date-fns';
 import { formatInTimeZone } from 'date-fns-tz';
+import { SystemAlert } from '../context/NotificationContext';
+import { toast } from 'react-hot-toast';
 
 // List of common timezones
 const TIMEZONES = [
@@ -223,12 +225,13 @@ const gradientAccent = (theme: any) => ({
 });
 
 const ProfilePage: React.FC = () => {
-  const { user, updateProfile, changePassword } = useAuth();
+  const { user, updateProfile, changePassword, refreshUserData } = useAuth();
   const [editing, setEditing] = useState(false);
   const [avatarFile, setAvatarFile] = useState<File | null>(null);
   const [avatarPreview, setAvatarPreview] = useState<string | null>(null);
   const [removeCurrentAvatar, setRemoveCurrentAvatar] = useState(false);
   const [changePasswordOpen, setChangePasswordOpen] = useState(false);
+  const [isProcessing, setIsProcessing] = useState(false);
   const [notification, setNotification] = useState<{ open: boolean; message: string; type: 'success' | 'error' | 'info' }>({
     open: false,
     message: '',
@@ -239,11 +242,27 @@ const ProfilePage: React.FC = () => {
   
   const theme = useTheme();
 
+  // Add state to track whether notification settings have changed
+  const [notificationSettingsChanged, setNotificationSettingsChanged] = useState(false);
+
+  // Effect to refresh user data after successful profile update
+  const refreshProfileData = useCallback(async () => {
+    if (user) {
+      console.log('[ProfilePage] Explicitly refreshing user data from API');
+      try {
+        await refreshUserData();
+      } catch (error) {
+        console.error('[ProfilePage] Error refreshing user data:', error);
+      }
+    }
+  }, [user, refreshUserData]);
+
   // Profile form validation hook
   const { 
     formik: profileFormik, 
     isSubmitting: isProfileSubmitting, 
-    submitError: profileSubmitError 
+    submitError: profileSubmitError,
+    submitSuccess: profileSubmitSuccess
   } = useFormValidation({
     initialValues: { 
       firstName: '',
@@ -268,38 +287,95 @@ const ProfilePage: React.FC = () => {
       ),
     },
     validationSchema: profileSchema,
+    showSuccessNotification: false,
     onSubmit: async (values) => {
+      if (!user) return;
+      
+      setIsProcessing(true);
+      console.log('[ProfilePage] Submit form values:', JSON.stringify(values));
+      
       try {
         // Prepare update data
-        const updateData: any = { ...values };
-
-        // Handle avatar:
+        const updateData: Partial<User> & { avatar?: File | null } = {
+          firstName: values.firstName,
+          lastName: values.lastName,
+          email: values.email,
+          phoneNumber: values.phoneNumber,
+          designation: values.designation,
+          timezone: values.timezone,
+          language: values.language
+        };
+        
+        // Handle avatar changes
         if (avatarFile) {
-          // If a new file is explicitly selected, send it
-          updateData.avatarFile = avatarFile;
+          updateData.avatar = avatarFile;
         } else if (removeCurrentAvatar) {
-          // If remove button was clicked AND no new file selected after, signal removal
-          // Assuming updateProfile handles avatarFile: null as removal instruction
-          updateData.avatarFile = null; 
+          updateData.avatar = null;
         }
-        // If neither avatarFile nor removeCurrentAvatar is set, the backend should keep the existing avatar.
 
-        await updateProfile(updateData); // Send combined data
-
-        setEditing(false);
+        // Handle notification settings only if they were edited
+        if (notificationSettingsChanged) {
+          // Replace the entire notification settings object instead of just merging at top level
+          // This ensures all changes (including deletions or structure changes) are captured
+          (updateData as any).notificationSettings = values.notificationSettings;
+        }
+        
+        console.log('[ProfilePage] Update data being sent:', { 
+          ...updateData, 
+          avatar: updateData.avatar ? 'File object exists' : updateData.avatar === null ? 'null (remove)' : 'undefined (no change)' 
+        });
+        
+        const updatedUser = await updateProfile(updateData);
+        console.log('[ProfilePage] Profile updated successfully:', updatedUser);
+        
+        // Reset state after successful update
         setAvatarFile(null);
-        setAvatarPreview(null);
-        setRemoveCurrentAvatar(false); // Reset flag
-      } catch (error: any) {
-        // Reset remove flag on error as well
+        setAvatarPreview('');
         setRemoveCurrentAvatar(false);
+        setEditing(false);
+        setNotificationSettingsChanged(false);
+
+        // Allow the form to be edited again
+        setIsProcessing(false);
+        
+        // Show success toast
+        toast.success('Profile updated successfully');
+        
+        // Force refresh of user data to ensure UI shows updated information
+        await refreshProfileData();
+      } catch (error) {
+        console.error('[ProfilePage] Error updating profile:', error);
+        setIsProcessing(false);
+        toast.error(error instanceof Error ? error.message : 'Failed to update profile');
       }
     },
   });
 
+  // After a successful submit, refresh the user data 
+  useEffect(() => {
+    if (profileSubmitSuccess) {
+      refreshProfileData();
+    }
+  }, [profileSubmitSuccess, refreshProfileData]);
+
   // Effect to populate form once user data is loaded
   useEffect(() => {
     if (user) {
+      // Create a unique key based on user data for debugging
+      const userDataKey = JSON.stringify({
+        firstName: user.firstName,
+        lastName: user.lastName,
+        email: user.email,
+        phoneNumber: user.phoneNumber,
+        designation: user.designation,
+        timezone: user.timezone,
+        language: user.language
+      });
+      
+      console.log('[ProfilePage useEffect] User data changed:', userDataKey);
+      console.log('[ProfilePage useEffect] User timezone before resetForm:', user?.timezone);
+      console.log('[ProfilePage useEffect] Phone number before resetForm:', user?.phoneNumber);
+      
       // Convert old notification format to new format if needed
       const convertedNotificationSettings = { ...profileFormik.initialValues.notificationSettings };
       
@@ -341,23 +417,30 @@ const ProfilePage: React.FC = () => {
         });
       }
       
+      // Reset the form with the latest user data
+      const newValues = {
+        firstName: user.firstName || '',
+        lastName: user.lastName || '',
+        email: user.email || '',
+        phoneNumber: user.phoneNumber || '',
+        designation: user.designation || '',
+        timezone: user.timezone || 'UTC',
+        language: user.language || 'en',
+        notificationSettings: convertedNotificationSettings
+      };
+      
+      console.log('[ProfilePage useEffect] Resetting form with values:', JSON.stringify(newValues));
+      
+      // Reset the form with new values
       profileFormik.resetForm({
-        values: {
-          firstName: user.firstName || '',
-          lastName: user.lastName || '',
-          email: user.email || '',
-          phoneNumber: user.phoneNumber || '',
-          designation: user.designation || '',
-          timezone: user.timezone || 'UTC',
-          language: user.language || 'en',
-          notificationSettings: convertedNotificationSettings
-        }
+        values: newValues
       });
+      
       // Reset avatar removal flag when user data changes
       setRemoveCurrentAvatar(false); 
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps 
-  }, [user]); // Run only when user object changes
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user, JSON.stringify(user)]); // Run when user object changes OR when user data content changes
 
   // Change Password form validation hook
   const { 
@@ -371,6 +454,7 @@ const ProfilePage: React.FC = () => {
       confirmPassword: '',
     },
     validationSchema: changePasswordSchema,
+    showSuccessNotification: false, // Disable generic success notification as AuthContext handles it
     onSubmit: async (values) => {
        try {
          // Placeholder: Implement actual API call in AuthContext
@@ -436,6 +520,7 @@ const ProfilePage: React.FC = () => {
     setAvatarPreview(null);
     setAvatarFile(null);
     setRemoveCurrentAvatar(false); // Reset removal flag on cancel
+    setNotificationSettingsChanged(false); // Reset notification changes flag
     profileFormik.resetForm(); // Resets to initial values (or values from useEffect based on user)
   };
 
@@ -463,6 +548,7 @@ const ProfilePage: React.FC = () => {
     channel: 'email' | 'inApp' | 'push',
     checked: boolean
   ) => {
+    setNotificationSettingsChanged(true); // Mark notification settings as changed
     if (profileFormik.values.notificationSettings && 
         profileFormik.values.notificationSettings[notificationType]) {
       profileFormik.setFieldValue(
@@ -474,6 +560,7 @@ const ProfilePage: React.FC = () => {
 
   // Toggle the entire notification type
   const handleNotificationTypeToggle = (notificationType: string, checked: boolean) => {
+    setNotificationSettingsChanged(true); // Mark notification settings as changed
     profileFormik.setFieldValue(
       `notificationSettings.${notificationType}.enabled`,
       checked
@@ -627,12 +714,14 @@ const ProfilePage: React.FC = () => {
         </Grid>
 
         {profileSubmitError && (
-          <Alert severity="error" sx={{ my: 3 }}>
-            {profileSubmitError}
-          </Alert>
+          <SystemAlert 
+            message={profileSubmitError}
+            type="error"
+            sx={{ my: 3 }}
+          />
         )}
 
-        <Grid container spacing={3} sx={{ mt: 1 }}>
+        <Grid container spacing={1} sx={{ mt: 1 }}>
           {/* Left column - Personal info section */}
           <Grid item xs={12} md={4}>
             {/* Avatar Card */}
@@ -1027,7 +1116,6 @@ const ProfilePage: React.FC = () => {
                   </Box>
                   
                   <Accordion 
-                    defaultExpanded 
                     elevation={0}
                     sx={{ 
                       '&.MuiAccordion-root:before': { 
@@ -1148,6 +1236,15 @@ const ProfilePage: React.FC = () => {
                       Email notifications will be sent to your registered email address.
                     </Typography>
                   </Box>
+                  
+                  {editing && notificationSettingsChanged && (
+                    <Box sx={{ mt: 2, p: 1, borderRadius: 1, backgroundColor: alpha(theme.palette.warning.main, 0.08), display: 'flex', alignItems: 'center' }}>
+                      <NotificationsActiveIcon fontSize="small" color="warning" sx={{ mr: 1 }} />
+                      <Typography variant="caption" color="textSecondary">
+                        <strong>Notification settings have been changed.</strong> Click "Save Changes" to apply your preferences.
+                      </Typography>
+                    </Box>
+                  )}
                 </Box>
               </CardContent>
             </EnhancedCard>
@@ -1160,9 +1257,11 @@ const ProfilePage: React.FC = () => {
         <Box component="form" onSubmit={passwordFormik.handleSubmit} noValidate>
           <DialogContent>
              {passwordSubmitError && (
-               <Alert severity="error" sx={{ mb: 2 }}>
-                 {passwordSubmitError}
-               </Alert>
+               <SystemAlert 
+                 message={passwordSubmitError}
+                 type="error"
+                 sx={{ mb: 2 }}
+               />
              )}
             <TextField
               margin="dense"

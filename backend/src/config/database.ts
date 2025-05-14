@@ -9,7 +9,7 @@ import { Ticket } from '../models/Ticket';
 import { Comment } from '../models/Comment';
 import { Organization } from '../models/Organization';
 import { Attachment } from '../models/Attachment';
-import { KnowledgeBaseArticle } from '../models/KnowledgeBase';
+import { KnowledgeBaseArticle, KnowledgeBaseCategory } from '../models/KnowledgeBase';
 import { TicketStatus } from '../models/TicketStatus';
 import { TicketPriority } from '../models/TicketPriority';
 import { TicketType } from '../models/TicketType';
@@ -19,6 +19,10 @@ import { ChatMessage } from '../models/ChatMessage';
 import { NotificationPreference } from '../models/NotificationPreference';
 import { DepartmentMember } from '../models/DepartmentMember';
 import { Notification } from '../models/Notification';
+import { SLAPolicy } from '../models/SLAPolicy';
+import { SLAPolicyTicket } from '../models/SLAPolicyTicket';
+import { BusinessHours } from '../models/BusinessHours';
+import { Holiday } from '../models/Holiday';
 // Add any other entities you have here
 
 // Load environment variables
@@ -50,6 +54,7 @@ export const AppDataSource = new DataSource({
     Organization,
     Attachment,
     KnowledgeBaseArticle,
+    KnowledgeBaseCategory,
     TicketStatus,
     TicketPriority,
     TicketType,
@@ -59,12 +64,15 @@ export const AppDataSource = new DataSource({
     ChatMessage,
     NotificationPreference,
     Notification,
+    SLAPolicy,
+    SLAPolicyTicket,
+    BusinessHours,
+    Holiday,
     // Add other imported entity classes here
   ],
-  // Adjust migrations path for production build
-  migrations: [path.join(__dirname, '../migrations/**/*.js'), path.join(__dirname, '../migrations/**/*.ts')],
-  // Adjust subscribers path for production build
-  subscribers: [path.join(__dirname, '../subscribers/**/*.js'), path.join(__dirname, '../subscribers/**/*.ts')],
+  // No migrations used - schema is managed manually through schema.sql
+  migrations: [],
+  subscribers: [],
   ssl: process.env.DB_SSL === 'true' || process.env.DATABASE_URL ? {
     rejectUnauthorized: false
   } : false
@@ -114,9 +122,16 @@ export const initializeDatabase = async (): Promise<void> => {
         console.log('TypeORM database connection established successfully');
       }
       
-      // Run settings migration to ensure settings table exists
-      const { ensureSettingsTable } = require('../utils/settingsMigration');
-      await ensureSettingsTable();
+      // Validate database schema to ensure all required components exist
+      const { validateDatabaseSchema } = require('../utils/schemaValidator');
+      const isValid = await validateDatabaseSchema();
+      
+      if (!isValid) {
+        console.warn('Database schema validation failed. Some features may not work correctly.');
+        console.warn('Consider running initialize_database.js to restore the complete schema.');
+      } else {
+        console.log('Database schema validation successful');
+      }
       
       connected = true;
     } catch (err: any) {

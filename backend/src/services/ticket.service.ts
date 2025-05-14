@@ -2,7 +2,11 @@ import { TicketStatus } from '../models/TicketStatus';
 import { TicketPriority } from '../models/TicketPriority';
 import { TicketType } from '../models/TicketType';
 import { Department } from '../models/Department';
-import { pool, query } from '../config/database';
+import { pool, query, getRepository } from '../config/database';
+import slaService from './sla.service';
+import { Ticket } from '../models/Ticket';
+import { logger } from '../utils/logger';
+import { AppDataSource } from '../config/database';
 
 class TicketService {
   /**
@@ -153,6 +157,75 @@ class TicketService {
       console.error('Error fetching default ticket status:', error);
       throw error;
     }
+  }
+
+  async createTicket(ticketData: any) {
+    const ticketRepository = AppDataSource.getRepository(Ticket);
+    const newTicket = ticketRepository.create(ticketData);
+    const savedTicket = await ticketRepository.save(newTicket);
+    
+    // Auto-assign SLA policy based on ticket priority if SLA is enabled
+    if (savedTicket && typeof savedTicket === 'object' && 'priorityId' in savedTicket) {
+      try {
+        // Ensure we're passing a single Ticket object
+        const ticketForSLA = Array.isArray(savedTicket) ? savedTicket[0] : savedTicket;
+        await slaService.autoAssignSLAPolicy(ticketForSLA);
+      } catch (error) {
+        logger.error('Error auto-assigning SLA policy:', error);
+        // Continue with ticket creation even if SLA assignment fails
+      }
+    }
+    
+    return savedTicket;
+  }
+
+  /**
+   * Update a ticket with new data
+   * @param ticketId Ticket ID to update
+   * @param ticketData New ticket data
+   * @returns Updated ticket
+   */
+  async updateTicket(ticketId: number, ticketData: Partial<Ticket>): Promise<Ticket> {
+    const ticketRepository = AppDataSource.getRepository(Ticket);
+    
+    // Get the current ticket
+    const currentTicket = await ticketRepository.findOne({ 
+      where: { id: ticketId } 
+    });
+    
+    if (!currentTicket) {
+      throw new Error(`Ticket with ID ${ticketId} not found`);
+    }
+
+    // Check if priority is changing
+    const priorityChanged = 
+      ticketData.priorityId !== undefined && 
+      currentTicket.priorityId !== ticketData.priorityId;
+
+    // Update the ticket
+    await ticketRepository.update(ticketId, ticketData);
+    
+    // Get the updated ticket
+    const updatedTicket = await ticketRepository.findOne({ 
+      where: { id: ticketId } 
+    });
+    
+    if (!updatedTicket) {
+      throw new Error(`Failed to retrieve updated ticket with ID ${ticketId}`);
+    }
+    
+    // If priority changed, update SLA policy
+    if (priorityChanged) {
+      try {
+        await slaService.autoAssignSLAPolicy(updatedTicket);
+        logger.info(`Updated SLA policy for ticket ${ticketId} due to priority change`);
+      } catch (error) {
+        logger.error(`Error updating SLA policy for ticket ${ticketId}:`, error);
+        // Continue with ticket update even if SLA update fails
+      }
+    }
+    
+    return updatedTicket;
   }
 }
 

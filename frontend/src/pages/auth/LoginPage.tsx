@@ -56,6 +56,9 @@ const LoginPage: React.FC = () => {
   }, [locationState, showSuccess, navigate, location.pathname, location.search]);
   
   // Show error notification if there is an auth error
+  // This is now handled by AuthContext directly, 
+  // so we don't need to show duplicate error notifications here
+  /*
   useEffect(() => {
     if (error && error !== processedErrorRef.current) {
       showError(error, { title: 'Authentication Error' });
@@ -65,6 +68,18 @@ const LoginPage: React.FC = () => {
       processedErrorRef.current = null;
     }
   }, [error, showError, clearError]);
+  */
+
+  // Keep reference to prevent repeated error handling
+  useEffect(() => {
+    if (error) {
+      // Just clear the error; notification is handled by AuthContext
+      processedErrorRef.current = error;
+      clearError();
+    } else {
+      processedErrorRef.current = null;
+    }
+  }, [error, clearError]);
 
   // Initialize with email from redirection or empty string
   const initialEmail = locationState?.email || '';
@@ -86,7 +101,6 @@ const LoginPage: React.FC = () => {
           navigate(redirectTo);
         } else {
           // Login failed, error state is set in context, useEffect will handle notification
-          console.log("Login failed, error handled by notification system via useEffect");
         }
       } catch (error) {
         // This catch block should ideally not be reached now unless there's an unexpected error

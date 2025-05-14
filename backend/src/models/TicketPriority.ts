@@ -1,6 +1,7 @@
 import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, UpdateDateColumn, ManyToOne, OneToMany, JoinColumn } from 'typeorm';
 import { Ticket } from './Ticket';
 import { Organization } from './Organization';
+import { SLAPolicy } from './SLAPolicy';
 
 @Entity('ticket_priorities')
 export class TicketPriority {
@@ -25,6 +26,9 @@ export class TicketPriority {
 
   @OneToMany(() => Ticket, ticket => ticket.priority)
   tickets: Ticket[];
+
+  @OneToMany(() => SLAPolicy, slaPolicy => slaPolicy.ticketPriority)
+  slaPolicies: SLAPolicy[];
 
   @CreateDateColumn({ name: 'created_at' })
   createdAt: Date;

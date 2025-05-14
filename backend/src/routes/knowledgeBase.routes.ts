@@ -11,15 +11,20 @@ const router = express.Router();
  */
 router.get('/', async (req, res) => {
   try {
-    // This would use the KnowledgeBaseService to get articles
-    const articles = await import('../services/knowledgeBase.service')
-      .then(module => module.default.searchArticles(req.query.q as string || '', {
+    // Use the KnowledgeBaseService to get articles
+    const result = await import('../services/knowledgeBase.service')
+      .then(module => module.default.getArticles({
+        query: req.query.q as string || '',
         visibility: 'public',
         status: 'published',
-        ...req.query
+        page: req.query.page ? parseInt(req.query.page as string, 10) : 1,
+        limit: req.query.limit ? parseInt(req.query.limit as string, 10) : 10,
+        categoryId: req.query.categoryId as string,
+        tagId: req.query.tagId as string,
+        organizationId: req.query.organizationId ? parseInt(req.query.organizationId as string, 10) : undefined
       }));
       
-    return res.json(articles);
+    return res.json(result);
   } catch (error) {
     console.error('Error fetching articles:', error);
     return res.status(500).json({ message: 'Server error' });

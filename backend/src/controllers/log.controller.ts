@@ -21,6 +21,8 @@ export const logController = {
       }
       
       // Process each log in the batch
+      let processedCount = 0;
+      
       for (const logData of logs) {
         const { level, message, timestamp, appName, meta, userAgent, url, sessionId, userId } = logData;
         
@@ -30,13 +32,20 @@ export const logController = {
           continue; // Skip invalid logs rather than failing the whole batch
         }
 
-        // Format log entry for Supabase
-        const logEntry = `${timestamp || new Date().toISOString()} ${level}: ${message}
+        // Normalize log type for storage
+        let logType = 'general';
+        if (level === 'error') {
+          logType = 'error';
+        } else if (level === 'http') {
+          logType = 'http';
+        }
+
+        // Format log entry for Supabase as a JSON structure
+        const logMessage = `${message}
 User-Agent: ${userAgent || 'not provided'}
 URL: ${url || 'not provided'}
 Session: ${sessionId || 'not provided'}
 User: ${userId || 'anonymous'}
-${meta ? `\nMetadata: ${JSON.stringify(meta)}` : ''}
 IP: ${req.ip}`;
         
         // First, log using the backend logger
@@ -55,15 +64,17 @@ IP: ${req.ip}`;
         // Don't await to avoid slowing down the response
         const useSupabaseStorage = process.env.USE_SUPABASE_LOGS === 'true';
         if (useSupabaseStorage) {
-          uploadLogToStorage(logEntry, level, 'frontend')
+          uploadLogToStorage(logMessage, logType, 'frontend')
             .catch(error => console.error('Error uploading frontend log to Supabase:', error));
         }
+        
+        processedCount++;
       }
 
       // Return success
       return res.status(200).json({ 
         status: 'success',
-        message: `${logs.length} log(s) saved successfully`
+        message: `${processedCount} log(s) saved successfully`
       });
     } catch (error: any) {
       logger.error(`Error saving frontend log: ${error.message}`);

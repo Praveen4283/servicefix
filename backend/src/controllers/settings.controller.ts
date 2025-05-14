@@ -15,6 +15,31 @@ interface EmailSettings {
   enableEmailNotifications: boolean;
 }
 
+// Interface for general settings
+interface GeneralSettings {
+  companyName: string;
+  supportEmail: string;
+  maxFileSize: number;
+  allowGuestTickets: boolean;
+  defaultTimeZone: string;
+}
+
+// Interface for ticket settings
+interface TicketSettings {
+  defaultPriority: string;
+  closedTicketReopen: number;
+  autoCloseResolved: number;
+  enableCustomerSatisfaction: boolean;
+  requireCategory: boolean;
+  enableSLA: boolean;
+}
+
+// Interface for SLA settings
+interface SLASettings {
+  organizationId: number;
+  policies: any[];
+}
+
 // User interface for authenticated requests (used locally for type casting)
 interface AuthenticatedUser {
   id: string;
@@ -287,5 +312,274 @@ export const testEmailSettings = async (
       success: false,
       message: `Failed to send test email: ${error.message}`
     });
+  }
+};
+
+/**
+ * Get general settings
+ */
+export const getGeneralSettings = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+) => {
+  try {
+    // Get settings from the database
+    const result = await query(
+      'SELECT * FROM settings WHERE category = $1 LIMIT 1',
+      ['general']
+    );
+
+    // If settings exist in database, return them
+    if (result.rows.length > 0) {
+      return res.status(200).json({
+        status: 'success',
+        data: result.rows[0].settings_data
+      });
+    }
+    
+    // If no settings found in database, return default settings
+    const defaultSettings: GeneralSettings = {
+      companyName: 'ServiceFix Support',
+      supportEmail: 'support@servicefix.com',
+      maxFileSize: 10, // MB
+      allowGuestTickets: true,
+      defaultTimeZone: 'UTC'
+    };
+    
+    return res.status(200).json({
+      status: 'success',
+      data: defaultSettings
+    });
+  } catch (error) {
+    logger.error('Error fetching general settings:', error);
+    next(error);
+  }
+};
+
+/**
+ * Update general settings
+ */
+export const updateGeneralSettings = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+) => {
+  try {
+    const settings: GeneralSettings = req.body;
+    
+    // Validate required fields
+    if (!settings.companyName || !settings.supportEmail) {
+      return res.status(400).json({
+        status: 'error',
+        message: 'Required fields are missing'
+      });
+    }
+    
+    // Check if settings already exist
+    const checkResult = await query(
+      'SELECT * FROM settings WHERE category = $1',
+      ['general']
+    );
+    
+    let result;
+    
+    if (checkResult.rows.length === 0) {
+      // If settings don't exist, insert new row
+      result = await query(
+        'INSERT INTO settings (category, settings_data) VALUES ($1, $2) RETURNING *',
+        ['general', settings]
+      );
+    } else {
+      // If settings exist, update existing row
+      result = await query(
+        'UPDATE settings SET settings_data = $1, updated_at = CURRENT_TIMESTAMP WHERE category = $2 RETURNING *',
+        [settings, 'general']
+      );
+    }
+    
+    res.status(200).json({
+      status: 'success',
+      message: 'General settings updated successfully',
+      data: result.rows[0].settings_data
+    });
+  } catch (error) {
+    logger.error('Error updating general settings:', error);
+    next(error);
+  }
+};
+
+/**
+ * Get ticket settings
+ */
+export const getTicketSettings = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+) => {
+  try {
+    // Get settings from the database
+    const result = await query(
+      'SELECT * FROM settings WHERE category = $1 LIMIT 1',
+      ['ticket']
+    );
+
+    // If settings exist in database, return them
+    if (result.rows.length > 0) {
+      return res.status(200).json({
+        status: 'success',
+        data: result.rows[0].settings_data
+      });
+    }
+    
+    // If no settings found in database, return default settings
+    const defaultSettings: TicketSettings = {
+      defaultPriority: 'medium',
+      closedTicketReopen: 7, // days
+      autoCloseResolved: 3, // days
+      enableCustomerSatisfaction: true,
+      requireCategory: false,
+      enableSLA: true
+    };
+    
+    return res.status(200).json({
+      status: 'success',
+      data: defaultSettings
+    });
+  } catch (error) {
+    logger.error('Error fetching ticket settings:', error);
+    next(error);
+  }
+};
+
+/**
+ * Update ticket settings
+ */
+export const updateTicketSettings = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+) => {
+  try {
+    const settings: TicketSettings = req.body;
+    
+    // Check if settings already exist
+    const checkResult = await query(
+      'SELECT * FROM settings WHERE category = $1',
+      ['ticket']
+    );
+    
+    let result;
+    
+    if (checkResult.rows.length === 0) {
+      // If settings don't exist, insert new row
+      result = await query(
+        'INSERT INTO settings (category, settings_data) VALUES ($1, $2) RETURNING *',
+        ['ticket', settings]
+      );
+    } else {
+      // If settings exist, update existing row
+      result = await query(
+        'UPDATE settings SET settings_data = $1, updated_at = CURRENT_TIMESTAMP WHERE category = $2 RETURNING *',
+        [settings, 'ticket']
+      );
+    }
+    
+    res.status(200).json({
+      status: 'success',
+      message: 'Ticket settings updated successfully',
+      data: result.rows[0].settings_data
+    });
+  } catch (error) {
+    logger.error('Error updating ticket settings:', error);
+    next(error);
+  }
+};
+
+/**
+ * Get SLA settings (stored policies)
+ */
+export const getSLASettings = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+) => {
+  try {
+    // Get settings from the database
+    const result = await query(
+      'SELECT * FROM settings WHERE category = $1 LIMIT 1',
+      ['sla']
+    );
+
+    // If settings exist in database, return them
+    if (result.rows.length > 0) {
+      return res.status(200).json({
+        status: 'success',
+        data: result.rows[0].settings_data
+      });
+    }
+    
+    // If no settings found in database, return empty settings
+    const defaultSettings: SLASettings = {
+      organizationId: 1001,
+      policies: []
+    };
+    
+    return res.status(200).json({
+      status: 'success',
+      data: defaultSettings
+    });
+  } catch (error) {
+    logger.error('Error fetching SLA settings:', error);
+    next(error);
+  }
+};
+
+/**
+ * Update SLA settings (stored policies)
+ */
+export const updateSLASettings = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+) => {
+  try {
+    const settings: SLASettings = req.body;
+    
+    // Validate organization ID
+    if (!settings.organizationId) {
+      settings.organizationId = 1001; // Default organization ID
+    }
+    
+    // Check if settings already exist
+    const checkResult = await query(
+      'SELECT * FROM settings WHERE category = $1',
+      ['sla']
+    );
+    
+    let result;
+    
+    if (checkResult.rows.length === 0) {
+      // If settings don't exist, insert new row
+      result = await query(
+        'INSERT INTO settings (category, settings_data) VALUES ($1, $2) RETURNING *',
+        ['sla', settings]
+      );
+    } else {
+      // If settings exist, update existing row
+      result = await query(
+        'UPDATE settings SET settings_data = $1, updated_at = CURRENT_TIMESTAMP WHERE category = $2 RETURNING *',
+        [settings, 'sla']
+      );
+    }
+    
+    res.status(200).json({
+      status: 'success',
+      message: 'SLA settings updated successfully',
+      data: result.rows[0].settings_data
+    });
+  } catch (error) {
+    logger.error('Error updating SLA settings:', error);
+    next(error);
   }
 }; 

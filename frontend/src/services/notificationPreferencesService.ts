@@ -7,17 +7,27 @@ export enum NotificationEventType {
   TICKET_COMMENT = 'ticket_comment',
   MENTION = 'mention',
   SLA_BREACH = 'sla_breach',
-  SYSTEM_ALERT = 'system_alert'
+  SYSTEM_ALERT = 'system_alert',
+  // Add these fields to match what we're seeing from the API logs
+  NEW_TICKET_ASSIGNED = 'newTicketAssigned',
+  TICKET_UPDATED_STATUS = 'ticketUpdated',
+  MENTION_IN_COMMENT = 'mentionInComment',
+  SYSTEM_UPDATES = 'systemUpdates',
+  NEW_KB_ARTICLE = 'newKbArticle'
 }
 
 // Interface for notification preference
 export interface NotificationPreference {
   id?: string;
   userId?: string;
-  eventType: NotificationEventType;
-  emailEnabled: boolean;
-  pushEnabled: boolean;
-  inAppEnabled: boolean;
+  eventType: NotificationEventType | string; // Allow for string to handle unexpected types
+  emailEnabled?: boolean;
+  pushEnabled?: boolean;
+  inAppEnabled?: boolean;
+  // Add alternative format properties to handle different API responses
+  email?: boolean;
+  push?: boolean;
+  in_app?: boolean;
 }
 
 // Define display names for the notification types
@@ -27,7 +37,13 @@ export const notificationEventNames: Record<NotificationEventType, string> = {
   [NotificationEventType.TICKET_COMMENT]: 'New comment on ticket',
   [NotificationEventType.MENTION]: 'You are mentioned',
   [NotificationEventType.SLA_BREACH]: 'SLA deadline approaching',
-  [NotificationEventType.SYSTEM_ALERT]: 'System alerts'
+  [NotificationEventType.SYSTEM_ALERT]: 'System alerts',
+  // Add names for the new event types
+  [NotificationEventType.NEW_TICKET_ASSIGNED]: 'New ticket assigned to you',
+  [NotificationEventType.TICKET_UPDATED_STATUS]: 'Ticket status updated',
+  [NotificationEventType.MENTION_IN_COMMENT]: 'You are mentioned in a comment',
+  [NotificationEventType.SYSTEM_UPDATES]: 'System updates',
+  [NotificationEventType.NEW_KB_ARTICLE]: 'New knowledge base article'
 };
 
 // Define descriptions for the notification types
@@ -37,7 +53,13 @@ export const notificationEventDescriptions: Record<NotificationEventType, string
   [NotificationEventType.TICKET_COMMENT]: 'Receive notifications when someone comments on your ticket',
   [NotificationEventType.MENTION]: 'Receive notifications when someone mentions you',
   [NotificationEventType.SLA_BREACH]: 'Receive notifications when a ticket is approaching its SLA deadline',
-  [NotificationEventType.SYSTEM_ALERT]: 'Receive system alerts and announcements'
+  [NotificationEventType.SYSTEM_ALERT]: 'Receive system alerts and announcements',
+  // Add descriptions for the new event types
+  [NotificationEventType.NEW_TICKET_ASSIGNED]: 'Receive notifications when a new ticket is assigned to you',
+  [NotificationEventType.TICKET_UPDATED_STATUS]: 'Receive notifications when a ticket status is updated',
+  [NotificationEventType.MENTION_IN_COMMENT]: 'Receive notifications when you are mentioned in a comment',
+  [NotificationEventType.SYSTEM_UPDATES]: 'Receive notifications about system updates',
+  [NotificationEventType.NEW_KB_ARTICLE]: 'Receive notifications when new knowledge base articles are published'
 };
 
 /**

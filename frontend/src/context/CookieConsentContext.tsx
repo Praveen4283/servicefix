@@ -31,7 +31,6 @@ interface CookieConsentContextValue {
   rejectAllCookies: () => void;
   updateConsentPreferences: (preferences: Partial<Omit<ConsentPreferences, 'necessary' | 'lastUpdated'>>) => void;
   hasConsented: (category: ConsentCategory) => boolean;
-  resetConsent: () => void;
 }
 
 // Create the context
@@ -89,15 +88,6 @@ export const CookieConsentProvider: React.FC<CookieConsentProviderProps> = ({ ch
     setShowConsentBanner(false);
   };
 
-  // Function to reset consent for testing/debugging
-  const resetConsent = () => {
-    setConsentPreferences(defaultConsentState);
-    if (typeof window !== 'undefined') {
-      localStorage.removeItem(CONSENT_STORAGE_KEY);
-    }
-    setShowConsentBanner(true);
-  };
-
   // Accept all cookie categories
   const acceptAllCookies = () => {
     updateConsentPreferences({
@@ -132,7 +122,6 @@ export const CookieConsentProvider: React.FC<CookieConsentProviderProps> = ({ ch
     rejectAllCookies,
     updateConsentPreferences,
     hasConsented,
-    resetConsent
   };
 
   return <CookieConsentContext.Provider value={value}>{children}</CookieConsentContext.Provider>;

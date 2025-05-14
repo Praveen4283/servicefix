@@ -17,6 +17,16 @@ const NOTIFICATION_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 days for auto-cleanup 
 // Constants for deduplication
 const DEDUPLICATION_WINDOW_MS = 3000; // 3 seconds window for deduplication
 
+// Debug flag
+const isDebugMode = process.env.NODE_ENV === 'development';
+
+// Logger function
+const debugLog = (message: string, ...args: any[]) => {
+  if (isDebugMode) {
+    // console.log(message, ...args); // Removed this line
+  }
+};
+
 // Throttling state
 let lastNotificationTimestamp = 0;
 let notificationCountMap = new Map<string, number>();
@@ -56,8 +66,10 @@ interface ApiNotification {
   message: string;
   link?: string;
   is_read: boolean;
+  isRead?: boolean; // Support for camelCase format
   type: string;
   created_at: string;
+  createdAt?: string; // Support for camelCase format
   metadata?: {
     ticket_id?: string;
     comment_id?: string;
@@ -122,19 +134,25 @@ const notificationService = {
       );
       
       // Extract the notifications array from the response data
-      // The response structure appears to be {success: boolean, data: {notifications: Array, pagination: Object}}
       let apiNotifications;
       
       // Handle different possible response structures
       if (responseData?.data?.notifications) {
         // API returns {success: true, data: {notifications: []}}
         apiNotifications = responseData.data.notifications;
+        debugLog('Extracted notifications from data.notifications:', apiNotifications.length);
       } else if (responseData?.notifications) {
         // API returns {notifications: []}
         apiNotifications = responseData.notifications;
+        debugLog('Extracted notifications from responseData.notifications:', apiNotifications.length);
       } else if (Array.isArray(responseData)) {
         // API returns notifications array directly
         apiNotifications = responseData;
+        debugLog('Response was direct array:', apiNotifications.length);
+      } else if (responseData?.success && responseData?.data?.notifications) {
+        // API returns {success: true, data: {notifications: []}}
+        apiNotifications = responseData.data.notifications;
+        debugLog('Extracted from success/data structure:', apiNotifications.length);
       } else {
         // No recognizable structure
         console.error('Error fetching notifications: Unrecognized response structure', responseData);
@@ -180,16 +198,79 @@ const notificationService = {
       }
 
       // Transform API notifications to our format
-      const transformedNotifications: Notification[] = apiNotifications.map((apiNotification: ApiNotification) => ({
+      const transformedNotifications: Notification[] = apiNotifications.map((apiNotification: ApiNotification) => {
+        // Handle timestamp creation with extensive debugging
+        let timestamp: number;
+        try {
+          // Try to parse the timestamp from various possible formats
+          const dateSource = apiNotification.created_at || apiNotification.createdAt;
+          
+          if (isDebugMode) {
+            debugLog('------- Notification Timestamp Debug -------');
+            debugLog(`Original date source: ${dateSource}`);
+            debugLog(`Type of date source: ${typeof dateSource}`);
+          }
+          
+          if (typeof dateSource === 'number') {
+            // If it's already a numeric timestamp
+            timestamp = dateSource;
+            if (isDebugMode) {
+              debugLog(`Using numeric timestamp directly: ${timestamp}`);
+            }
+          } else if (typeof dateSource === 'string') {
+            // If it's a string date (ISO format from backend)
+            // IMPORTANT: Force the date to UTC first, then get timestamp
+            const dateObj = new Date(dateSource);
+            timestamp = dateObj.getTime();
+            
+            if (isDebugMode) {
+              debugLog(`Parsed date object: ${dateObj.toString()}`);
+              debugLog(`Date ISO string: ${dateObj.toISOString()}`);
+              debugLog(`Resulting timestamp: ${timestamp}`);
+            }
+            
+            if (isNaN(timestamp)) {
+              console.warn('Invalid date string from notification:', dateSource);
+              timestamp = Date.now(); // Fallback to current time
+              if (isDebugMode) {
+                debugLog(`Using fallback timestamp (now): ${timestamp}`);
+              }
+            }
+          } else {
+            // If neither string nor number, use current time
+            console.warn('Unexpected date format:', dateSource);
+            timestamp = Date.now();
+            if (isDebugMode) {
+              debugLog(`Using fallback timestamp (now): ${timestamp}`);
+            }
+          }
+        } catch (err) {
+          console.error('Error parsing date:', err);
+          timestamp = Date.now(); // Fallback to current time
+          if (isDebugMode) {
+            debugLog(`Using fallback timestamp after error (now): ${timestamp}`);
+          }
+        }
+        
+        // Handle read status - support both snake_case and camelCase
+        const isRead = 
+          apiNotification.hasOwnProperty('is_read') ? Boolean(apiNotification.is_read) :
+          apiNotification.hasOwnProperty('isRead') ? Boolean(apiNotification.isRead) :
+          false;
+        
+        return {
         id: apiNotification.id.toString(),
         message: apiNotification.message || '',
         type: (apiNotification.type as any) || 'info',
         duration: 0, // App notifications don't auto-dismiss
-        timestamp: new Date(apiNotification.created_at).getTime(),
-        isRead: Boolean(apiNotification.is_read),
+          timestamp: timestamp,
+          isRead: isRead,
         title: apiNotification.title || '',
         category: 'app' // API notifications are always app notifications
-      }));
+        };
+      });
+
+      debugLog(`Transformed notifications: ${transformedNotifications.length}`);
 
       // Merge with existing notifications in local storage (keeping most recent 100)
       const existingNotifications = getNotificationsFromLocalStorage();
@@ -233,22 +314,31 @@ const notificationService = {
    */
   markAsRead: async (id: string): Promise<void> => {
     try {
-      // Use POST instead of PATCH to avoid CORS issues
-      await withRetry(
-        () => apiClient.post(`/notifications/${id}/read`),
-        3, // 3 retries
-        1000 // 1 second initial delay
-      );
+      // console.log(`Marking notification ${id} as read`); // Removed this line
       
-      // Update local storage
+      // Update local storage immediately for UI responsiveness
       const notifications = getNotificationsFromLocalStorage();
       const updatedNotifications = notifications.map(notification => 
         notification.id === id ? { ...notification, isRead: true } : notification
       );
       saveNotificationsToLocalStorage(updatedNotifications);
+      
+      // Then update server
+      try {
+        // Use POST instead of PATCH to avoid CORS issues
+        await withRetry(
+          () => apiClient.post(`/notifications/${id}/read`),
+          3, // 3 retries
+          1000 // 1 second initial delay
+        );
+        // console.log(`Successfully marked notification ${id} as read on server`); // Removed this line
+      } catch (apiError) {
+        // Log the error but keep the local update
+        console.error(`Error marking notification ${id} as read on server:`, apiError);
+      }
     } catch (error) {
-      console.error(`Error marking notification ${id} as read:`, error);
-      // Update local storage even if API fails
+      console.error(`Error in markAsRead for notification ${id}:`, error);
+      // Still update local storage even if error occurs
       const notifications = getNotificationsFromLocalStorage();
       const updatedNotifications = notifications.map(notification => 
         notification.id === id ? { ...notification, isRead: true } : notification
@@ -294,7 +384,7 @@ const notificationService = {
     // Check for duplicates within the deduplication window
     const lastSimilarTimestamp = recentNotifications.get(fingerprint);
     if (lastSimilarTimestamp && (now - lastSimilarTimestamp < DEDUPLICATION_WINDOW_MS)) {
-      console.log('[Deduplication] Skipping notification:', notification.message);
+      // console.log('[Deduplication] Skipping notification:', notification.message); // Removed this line
       // Return the *existing* similar notification from storage if possible, or the current one
       const existing = getNotificationsFromLocalStorage().find(n => getNotificationFingerprint(n, isCommonAuthMessage) === fingerprint);
       return existing || notification;
@@ -341,7 +431,7 @@ const notificationService = {
           // Replace the old notification
           notifications[existingIndex] = updatedNotification;
           saveNotificationsToLocalStorage(notifications);
-          console.log('[Throttling] Updated count for:', updatedNotification.message);
+          // console.log('[Throttling] Updated count for:', updatedNotification.message); // Removed this line
           return updatedNotification;
         }
       }
@@ -357,9 +447,9 @@ const notificationService = {
     if (!notifications.some(n => n.id === notification.id)) {
         const updatedNotifications = [...notifications, notification];
         saveNotificationsToLocalStorage(updatedNotifications);
-        console.log('[Notification Added] Added:', notification.message);
+        // console.log('[Notification Added] Added:', notification.message); // Removed this line
     } else {
-        console.log('[Notification Skipped] Already exists by ID:', notification.message);
+        // console.log('[Notification Skipped] Already exists by ID:', notification.message); // Removed this line
         // Optionally update the existing one if needed, but for now, just skip adding
         return notifications.find(n => n.id === notification.id) || notification;
     }
@@ -516,25 +606,12 @@ function getNotificationsFromLocalStorage(): Notification[] {
  */
 function saveNotificationsToLocalStorage(notifications: Notification[]): void {
   try {
-    // Check if we need to trim notifications before saving
     let notificationsToSave = notifications;
-    
     if (notifications.length > MAX_LOCAL_NOTIFICATIONS) {
-      // Keep all unread and then sort the rest by timestamp (newest first)
-      const unread = notifications.filter(n => !n.isRead);
-      const read = notifications.filter(n => n.isRead)
-        .sort((a, b) => b.timestamp - a.timestamp);
-      
-      // Keep only the most recent read notifications up to the limit
-      notificationsToSave = [
-        ...unread, 
-        ...read.slice(0, MAX_LOCAL_NOTIFICATIONS - unread.length)
-      ];
-      
-      console.log(`Trimmed notifications from ${notifications.length} to ${notificationsToSave.length}`);
+      // Trim older notifications if exceeding max limit
+      notificationsToSave = notifications.slice(0, MAX_LOCAL_NOTIFICATIONS);
+      // console.log(`Trimmed notifications from ${notifications.length} to ${notificationsToSave.length}`); // Removed this line
     }
-    
-    // Save to localStorage
     localStorage.setItem(NOTIFICATIONS_STORAGE_KEY, JSON.stringify(notificationsToSave));
   } catch (error) {
     console.error('Error saving notifications to local storage:', error);
@@ -551,15 +628,14 @@ function saveNotificationsToLocalStorage(notifications: Notification[]): void {
       
       // Keep only unread and newest notifications up to the emergency limit
       const allNotifications = [...notifications].sort((a, b) => b.timestamp - a.timestamp);
-      const trimmed = allNotifications.slice(0, emergencyLimit);
+      let trimmed = allNotifications.slice(0, emergencyLimit);
       
-      try {
-        localStorage.setItem(NOTIFICATIONS_STORAGE_KEY, JSON.stringify(trimmed));
-        console.log(`Emergency trim complete, kept ${trimmed.length} notifications`);
-      } catch (secondError) {
-        console.error('Failed even with emergency trim, clearing notifications', secondError);
-        localStorage.removeItem(NOTIFICATIONS_STORAGE_KEY);
+      // Fallback: if filtering fails, keep the newest MAX_LOCAL_NOTIFICATIONS / 2
+      if (trimmed.length < MAX_LOCAL_NOTIFICATIONS / 2 && notifications.length > MAX_LOCAL_NOTIFICATIONS / 2) {
+        trimmed = notifications.slice(0, MAX_LOCAL_NOTIFICATIONS / 2);
       }
+      // console.log(`Emergency trim complete, kept ${trimmed.length} notifications`); // Removed this line
+      saveNotificationsToLocalStorage(trimmed);
     }
   }
 }
@@ -568,42 +644,28 @@ function saveNotificationsToLocalStorage(notifications: Notification[]): void {
  * Clean up old notifications periodically
  */
 const cleanupStorage = () => {
-  try {
-    const notifications = getNotificationsFromLocalStorage();
-    const now = Date.now();
-    
-    // Keep efficient storage by removing old notifications
-    const validNotifications = notifications.filter(notification => {
-      // Always keep unread notifications
-      if (!notification.isRead) return true;
-      
-      // Remove read notifications older than TTL
-      return (now - notification.timestamp) < NOTIFICATION_TTL_MS;
-    });
-    
-    if (validNotifications.length > MAX_LOCAL_NOTIFICATIONS) {
-      console.log(`Running scheduled cleanup of notifications (${validNotifications.length} > ${MAX_LOCAL_NOTIFICATIONS})`);
-      
-      // Keep all unread and then sort the rest by timestamp (newest first)
-      const unread = validNotifications.filter(n => !n.isRead);
-      const read = validNotifications.filter(n => n.isRead)
-        .sort((a, b) => b.timestamp - a.timestamp);
-      
-      // Keep only the most recent read notifications up to the limit
-      const toKeep = [
-        ...unread, 
-        ...read.slice(0, MAX_LOCAL_NOTIFICATIONS - unread.length)
-      ];
-      
-      saveNotificationsToLocalStorage(toKeep);
-      console.log(`Cleanup complete, kept ${toKeep.length} notifications`);
-    } else if (validNotifications.length < notifications.length) {
-      // If we removed any expired notifications, update storage
-      saveNotificationsToLocalStorage(validNotifications);
-      console.log(`Removed ${notifications.length - validNotifications.length} expired notifications`);
+  const notifications = getNotificationsFromLocalStorage();
+  const now = Date.now();
+  
+  // Filter out notifications that are read and older than TTL
+  const validNotifications = notifications.filter(n => {
+    if (n.isRead && n.timestamp) {
+      return (now - n.timestamp) < NOTIFICATION_TTL_MS;
     }
-  } catch (error) {
-    console.error('Error during storage cleanup:', error);
+    return true; // Keep unread or timeless notifications
+  });
+
+  if (validNotifications.length > MAX_LOCAL_NOTIFICATIONS) {
+    // console.log(`Running scheduled cleanup of notifications (${validNotifications.length} > ${MAX_LOCAL_NOTIFICATIONS})`); // Removed this line
+    // If still over limit after removing expired, sort by timestamp (newest first) and take the top MAX_LOCAL_NOTIFICATIONS
+    const sorted = validNotifications.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
+    const toKeep = sorted.slice(0, MAX_LOCAL_NOTIFICATIONS);
+    saveNotificationsToLocalStorage(toKeep);
+    // console.log(`Cleanup complete, kept ${toKeep.length} notifications`); // Removed this line
+  } else if (validNotifications.length < notifications.length) {
+    // If only expired notifications were removed, save the valid ones
+    saveNotificationsToLocalStorage(validNotifications);
+    // console.log(`Removed ${notifications.length - validNotifications.length} expired notifications`); // Removed this line
   }
 };
 

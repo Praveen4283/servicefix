@@ -31,6 +31,8 @@ export interface TicketSettings {
   autoCloseResolved: number;
   enableCustomerSatisfaction: boolean;
   requireCategory: boolean;
+  enableSLA: boolean;
+  // SLA settings will be configured per priority and stored in the database
 }
 
 /**

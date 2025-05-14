@@ -7,6 +7,7 @@ import { TicketPriority } from './TicketPriority';
 import { TicketType } from './TicketType';
 import { Department } from './Department';
 import { Organization } from './Organization';
+import { SLAPolicyTicket } from './SLAPolicyTicket';
 
 export enum TicketSource {
   EMAIL = 'email',
@@ -14,6 +15,14 @@ export enum TicketSource {
   PHONE = 'phone',
   CHAT = 'chat',
   SOCIAL = 'social'
+}
+
+export enum SLAStatus {
+  ACTIVE = 'active',
+  PAUSED = 'paused',
+  BREACHED = 'breached',
+  COMPLETED = 'completed',
+  INACTIVE = 'inactive'
 }
 
 @Entity('tickets')
@@ -56,11 +65,10 @@ export class Ticket {
   departmentId: number;
 
   @Column({
-    type: 'enum',
-    enum: TicketSource,
+    type: 'varchar',
     default: TicketSource.PORTAL
   })
-  source: TicketSource;
+  source: string;
 
   @Column({ nullable: true, name: 'due_date' })
   dueDate: Date;
@@ -110,6 +118,18 @@ export class Ticket {
 
   @OneToMany(() => Attachment, attachment => attachment.ticket)
   attachments: Attachment[];
+
+  @OneToMany(() => SLAPolicyTicket, slaPolicyTicket => slaPolicyTicket.ticket)
+  slaPolicyTickets: SLAPolicyTicket[];
+
+  @Column({ nullable: true, name: 'sla_status', length: 50 })
+  slaStatus: string;
+
+  @Column({ name: 'first_response_sla_breached', default: false })
+  firstResponseSlaBreached: boolean;
+
+  @Column({ name: 'resolution_sla_breached', default: false })
+  resolutionSlaBreached: boolean;
 
   @CreateDateColumn({ name: 'created_at' })
   createdAt: Date;

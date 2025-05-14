@@ -1,3 +1,14 @@
+/**
+ * Consolidated API client service
+ * 
+ * This file combines functionality from the original api.ts and apiClient.ts
+ * to provide a single source of truth for API communication.
+ * 
+ * The main export is the apiClient instance with advanced functionality.
+ * For backward compatibility, this file also exports an 'api' instance
+ * that mimics the behavior of the previous api.ts
+ */
+
 import axios, { AxiosError, AxiosInstance, AxiosRequestConfig, AxiosResponse } from 'axios';
 import { User } from '../context/AuthContext';
 import { 
@@ -8,6 +19,7 @@ import {
   mapProfileUpdateToDTO,
   createDataURLFromFile
 } from '../models/UserDTO';
+import { withRetry, createRetryableFunction } from '../utils/apiUtils';
 
 // Define response type for consistent response structure
 export interface ApiResponse<T = any> {
@@ -25,7 +37,8 @@ export interface ApiError {
 }
 
 class ApiClient {
-  private client: AxiosInstance;
+  // Changed from private to protected to allow access for backward compatibility exports
+  protected client: AxiosInstance;
   private baseURL: string;
 
   constructor() {
@@ -41,7 +54,11 @@ class ApiClient {
     // Add request interceptor for auth token
     this.client.interceptors.request.use(
       (config) => {
-        const token = localStorage.getItem('authToken');
+        // Check for tokens with both key names for backward compatibility
+        const authToken = localStorage.getItem('authToken');
+        const legacyToken = localStorage.getItem('token');
+        const token = authToken || legacyToken;
+        
         if (token && config.headers) {
           config.headers.Authorization = `Bearer ${token}`;
         }
@@ -162,7 +179,9 @@ class ApiClient {
       // Try to refresh the token
       this.post<{ token: string; refreshToken: string }>('/auth/refresh-token', { refreshToken })
         .then((response) => {
+          // Store token under both names for backward compatibility
           localStorage.setItem('authToken', response.token);
+          localStorage.setItem('token', response.token);
           localStorage.setItem('refreshToken', response.refreshToken);
           window.location.reload(); // Reload the page with the new token
         })
@@ -178,7 +197,9 @@ class ApiClient {
 
   // Log out user
   private logout = (): void => {
+    // Clear all token variations for consistency
     localStorage.removeItem('authToken');
+    localStorage.removeItem('token');
     localStorage.removeItem('refreshToken');
     localStorage.removeItem('user');
     
@@ -186,33 +207,81 @@ class ApiClient {
     window.location.href = '/login';
   };
 
-  // GET request
+  // Get request headers including auth token
+  private getRequestHeaders(): Record<string, string> {
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+    };
+    
+    // Check for tokens with both key names for backward compatibility
+    const authToken = localStorage.getItem('authToken');
+    const legacyToken = localStorage.getItem('token');
+    const token = authToken || legacyToken;
+    
+    if (token) {
+      headers.Authorization = `Bearer ${token}`;
+    }
+    
+    return headers;
+  }
+
+  // GET request with retry functionality
   public get<T = any>(
+    url: string,
+    params?: Record<string, any>,
+    config?: AxiosRequestConfig
+  ): Promise<T> {
+    return withRetry(() => this._get<T>(url, params, config), 3, 1000);
+  }
+
+  // Internal GET request implementation
+  private _get<T = any>(
     url: string,
     params?: Record<string, any>,
     config?: AxiosRequestConfig
   ): Promise<T> {
     console.log(`[API Client] GET Request: ${url}`, { params, config }); // Log request details
     return this.client
-      .get<ApiResponse<T>>(url, { ...config, params })
+      .get<ApiResponse<T> | T>(url, { ...config, params })
       .then((response) => {
-        console.log(`[API Client] GET Response Raw Data for ${url}:`, JSON.stringify(response.data)); // Log raw response data
+        console.log(`[API Client] GET Response Raw Data for ${url}:`, response.data); // Log raw response data
         
-        // Check if the response has the expected wrapper format
-        if (response.data && typeof response.data === 'object' && 'status' in response.data) {
-          if (response.data.status === 'success') {
-            console.log(`[API Client] GET Success Data for ${url}:`, JSON.stringify(response.data.data)); // Log extracted data
-            return response.data.data as T;
-          } else {
-            // Throw an error based on the API response message if available
-            const errorMessage = response.data.message || 'Request failed with status: ' + response.data.status;
-            console.error(`[API Client] GET Error Status in Response for ${url}:`, errorMessage);
-            throw new Error(errorMessage);
+        // Check if response is in expected format with data property
+        if (response.data && typeof response.data === 'object') {
+          // If it matches our ApiResponse format with status and data
+          if ('status' in response.data && 'data' in response.data) {
+            const apiResponse = response.data as ApiResponse<T>;
+            
+            if (apiResponse.status === 'success') {
+              console.log(`[API Client] GET Success Data for ${url}:`, apiResponse.data);
+              return apiResponse.data;
+            } else {
+              // Throw an error based on the API response message if available
+              const errorMessage = apiResponse.message || 'Request failed';
+              console.error(`[API Client] GET Error Status in Response for ${url}:`, errorMessage);
+              throw new Error(errorMessage);
+            }
           }
+          // Success response with standardized structure
+          else if ('success' in response.data && 'data' in response.data) {
+            console.log(`[API Client] GET Success Data from success structure for ${url}:`, (response.data as any).data);
+            return (response.data as any).data;
+          }
+          // Check if this is a notification preferences endpoint
+          else if (url.includes('/notifications/preferences')) {
+            // Special handling for notification preferences which may come in various formats
+            console.log(`[API Client] Processing notification preferences data for ${url}`);
+            return response.data as T;
+          }
+          // Fall back to assume direct data structure when not following ApiResponse
+          else {
+            console.log(`[API Client] GET Unexpected Response Format for ${url}. Returning raw data.`);
+            return response.data as T;
+          }
+        } else {
+          // For simple responses (strings, numbers, etc.)
+          return response.data as T;
         }
-        // Fallback for unexpected response format (e.g., direct data without wrapper)
-        console.warn(`[API Client] GET Unexpected Response Format for ${url}. Returning raw data.`);
-        return response.data as T;
       })
       .catch(error => {
         // Log the processed error from the interceptor or a new error
@@ -367,12 +436,18 @@ class ApiClient {
    * @returns Promise resolving to the updated User object
    */
   public async updateUserProfile(userId: string, profileData: any): Promise<User> {
+    console.log('[ApiClient] updateUserProfile - Received profile data:', JSON.stringify(profileData));
     const profileDTO = mapProfileUpdateToDTO(profileData); // contains { ..., avatar: File | null | undefined }
+    console.log('[ApiClient] updateUserProfile - After mapping to DTO:', JSON.stringify({...profileDTO, avatar: profileDTO.avatar ? 'File object' : profileDTO.avatar}));
 
     const avatarFile = profileDTO.avatar; // File | null | undefined
     delete profileDTO.avatar; // remove dto.avatar
 
     const currentAuthUser = JSON.parse(localStorage.getItem('user') || '{}') as User;
+    console.log('[ApiClient] updateUserProfile - Current user from localStorage:', JSON.stringify({
+      ...currentAuthUser,
+      avatarUrl: currentAuthUser.avatarUrl ? 'Avatar URL exists' : 'No avatar URL'
+    }));
 
     // Handle avatar logic based on avatarFile state
     if (avatarFile instanceof File) { // Case 1: New file uploaded
@@ -402,10 +477,15 @@ class ApiClient {
     }
 
     // Send the PUT request with the potentially updated profileDTO.avatar_url
+    console.log('[ApiClient] updateUserProfile - Final DTO being sent to API:', JSON.stringify(profileDTO));
     return this.put<any>(`/users/${userId}`, profileDTO)
       .then(response => {
+        console.log('[ApiClient] updateUserProfile - Raw API response:', JSON.stringify(response));
         const normalizedResponse = this.normalizeUserResponse(response);
-        return mapUserDTOToUser(normalizedResponse);
+        console.log('[ApiClient] updateUserProfile - Normalized response:', JSON.stringify(normalizedResponse));
+        const user = mapUserDTOToUser(normalizedResponse);
+        console.log('[ApiClient] updateUserProfile - Final user object:', JSON.stringify(user));
+        return user;
       });
   }
 
@@ -415,6 +495,8 @@ class ApiClient {
    * @returns A properly formatted UserDTO object
    */
   private normalizeUserResponse(response: any): UserDTO {
+    console.log('[ApiClient] normalizeUserResponse - Raw input:', JSON.stringify(response));
+    
     let organizationData: { id: string; name: string } | undefined = undefined;
     
     if (response.organization) {
@@ -449,10 +531,14 @@ class ApiClient {
       // Include notification settings, ensuring it's an object
       notification_settings: typeof response.notification_settings === 'object' && response.notification_settings !== null 
                              ? response.notification_settings 
-                             : undefined,
+                             : (typeof response.notificationSettings === 'object' && response.notificationSettings !== null
+                                ? response.notificationSettings
+                                : undefined),
       created_at: response.created_at || response.createdAt,
       updated_at: response.updated_at || response.updatedAt
     };
+    
+    console.log('[ApiClient] normalizeUserResponse - Normalized output:', JSON.stringify(normalized));
     
     return normalized;
   }
@@ -571,5 +657,48 @@ class ApiClient {
 
 // Create a single instance for the application
 const apiClient = new ApiClient();
+
+// For backward compatibility, export a simple axios instance that mimics the original api.ts
+// Create a new axios instance with similar configuration to the original api.ts
+export const api = axios.create({
+  baseURL: process.env.REACT_APP_API_URL || 'http://localhost:5000',
+  headers: {
+    'Content-Type': 'application/json',
+  },
+});
+
+// Add a request interceptor to include auth token from local storage - like original api.ts
+api.interceptors.request.use(
+  (config) => {
+    const authToken = localStorage.getItem('authToken');
+    const legacyToken = localStorage.getItem('token');
+    const token = authToken || legacyToken;
+    
+    if (token) {
+      config.headers.Authorization = `Bearer ${token}`;
+    }
+    return config;
+  },
+  (error) => Promise.reject(error)
+);
+
+// Add the same error handling as in apiClient
+api.interceptors.response.use(
+  (response) => response,
+  (error) => {
+    if (error.response?.status === 401) {
+      localStorage.removeItem('authToken');
+      localStorage.removeItem('token');
+      localStorage.removeItem('refreshToken');
+      localStorage.removeItem('user');
+      
+      if (!window.location.pathname.includes('/login')) {
+        window.location.href = '/login?session=expired';
+      }
+    }
+    
+    return Promise.reject(error);
+  }
+);
 
 export default apiClient; 

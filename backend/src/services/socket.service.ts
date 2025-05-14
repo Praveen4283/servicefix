@@ -2,6 +2,7 @@ import { Server as HttpServer } from 'http';
 import { Server, Socket } from 'socket.io';
 import jwt from 'jsonwebtoken';
 import { logger } from '../utils/logger';
+import notificationService from './notification.service';
 
 interface UserSocket {
   userId: number;
@@ -111,6 +112,11 @@ class SocketService {
     // Notify client that connection is successful
     socket.emit('connected', { status: 'connected', userId });
 
+    // Handle client notifications
+    socket.on('client:notification', (data) => {
+      this.handleClientNotification(userId, data, socket);
+    });
+
     // Handle disconnect
     socket.on('disconnect', () => {
       logger.info(`User ${userId} disconnected from socket ${socket.id}`);
@@ -125,6 +131,61 @@ class SocketService {
         this.connectedUsers.delete(userId);
       }
     });
+  }
+
+  /**
+   * Handle notification sent from client
+   * @param userId ID of the user who sent the notification
+   * @param data Notification data
+   * @param socket Socket instance
+   */
+  private handleClientNotification(userId: number, data: any, socket: Socket): void {
+    logger.info(`Received client notification from user ${userId}:`, JSON.stringify(data));
+    
+    try {
+      // Check if this client has already shown this notification
+      const { directlySent, isPersistent, ...notification } = data;
+      
+      // Get notification data in the format our service expects
+      const notificationData = {
+        title: notification.title || 'Notification',
+        message: notification.message,
+        type: notification.type || 'info',
+        link: notification.link,
+        metadata: notification.metadata
+      };
+      
+      // If the client wants this to be persistent, store it in the database
+      if (isPersistent !== false) {
+        notificationService.createInAppNotification(
+          userId.toString(),
+          notificationData
+        ).then(() => {
+          logger.info(`Saved notification for user ${userId} to database`);
+        }).catch(err => {
+          logger.error(`Failed to save notification for user ${userId}:`, err);
+        });
+      }
+      
+      // If the client has already shown this notification, don't send it back
+      if (directlySent) {
+        logger.info(`Skipping re-sending notification to user ${userId} as it was directly sent`);
+        return;
+      }
+      
+      // If needed, broadcast to other clients of this user
+      // (this notification originated from one client but should be seen by all)
+      const socketIds = this.connectedUsers.get(userId) || [];
+      socketIds.forEach(sid => {
+        if (sid !== socket.id) { // Don't send back to originator
+          this.io?.to(sid).emit('notification', notification);
+        }
+      });
+      
+    } catch (error) {
+      logger.error('Error handling client notification:', error);
+      socket.emit('error', { message: 'Failed to process notification' });
+    }
   }
 
   /**

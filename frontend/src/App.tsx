@@ -19,7 +19,6 @@ import { TicketProvider } from './context/TicketContext';
 import { ThemeProvider } from './context/ThemeContext';
 import { CookieConsentProvider } from './context/CookieConsentContext';
 import { ErrorBoundary } from './components/ErrorBoundary';
-import { testLocalStorage } from './utils/debugTools';
 import { isDevelopment } from './utils/environment';
 import CookieConsentBanner from './components/common/CookieConsentBanner';
 import { initializeNotificationSystem, shutdownNotificationSystem } from './services/notificationInitializer';
@@ -55,11 +54,6 @@ import ChatbotWidget from './components/ChatbotWidget';
 
 // Constants
 const IS_DEVELOPMENT = isDevelopment();
-
-// Test localStorage in development mode
-if (IS_DEVELOPMENT) {
-  testLocalStorage();
-}
 
 // Loading component for Suspense fallback
 const LoadingSpinner = () => (
@@ -103,16 +97,6 @@ const ErrorFallback = ({ error, resetErrorBoundary }: { error: Error, resetError
       Try again
     </Button>
   </Paper>
-);
-
-// Temporary placeholder component
-const PlaceholderComponent = () => (
-  <Box sx={{ p: 4, textAlign: 'center', maxWidth: 800, mx: 'auto' }}>
-    <Typography variant="h4" gutterBottom>Coming Soon</Typography>
-    <Typography variant="body1">
-      This feature is currently under development and will be available soon in ServiceFix.
-    </Typography>
-  </Box>
 );
 
 // Placeholder components for routes with import issues or missing implementations

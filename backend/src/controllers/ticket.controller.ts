@@ -9,6 +9,8 @@ import { Multer } from 'multer';
 import { uploadFile } from '../utils/supabase';
 import { createClient } from '@supabase/supabase-js';
 import path from 'path';
+import slaService from '../services/sla.service';
+import { isPendingStatus, isInProgressStatus, logStatusChange } from '../utils/ticketUtils';
 
 // Initialize Supabase client for direct operations
 const supabaseUrl = process.env.SUPABASE_URL || '';
@@ -153,6 +155,7 @@ export const getTickets = async (
         t.ai_summary,
         t.source,
         t.is_spam,
+        t.sla_status,
         json_build_object(
           'id', req.id,
           'email', req.email,
@@ -198,7 +201,29 @@ export const getTickets = async (
         )) FROM ticket_tags ttg
         JOIN tags tag ON ttg.tag_id = tag.id
         WHERE ttg.ticket_id = t.id) as tags,
-        (SELECT COUNT(*) FROM ticket_comments tc WHERE tc.ticket_id = t.id) as comment_count
+        (SELECT COUNT(*) FROM ticket_comments tc WHERE tc.ticket_id = t.id) as comment_count,
+        (
+          SELECT json_build_object(
+            'id', spt.id,
+            'firstResponseDueAt', spt.first_response_due_at,
+            'nextResponseDueAt', spt.next_response_due_at,
+            'resolutionDueAt', spt.resolution_due_at,
+            'firstResponseMet', spt.first_response_met,
+            'nextResponseMet', spt.next_response_met,
+            'resolutionMet', spt.resolution_met,
+            'slaPolicy', json_build_object(
+              'id', sp.id,
+              'name', sp.name,
+              'firstResponseHours', sp.first_response_hours,
+              'nextResponseHours', sp.next_response_hours,
+              'resolutionHours', sp.resolution_hours,
+              'businessHoursOnly', sp.business_hours_only
+            )
+          )
+          FROM sla_policy_tickets spt
+          JOIN sla_policies sp ON spt.sla_policy_id = sp.id
+          WHERE spt.ticket_id = t.id
+        ) as sla_info
       FROM tickets t
       JOIN users req ON t.requester_id = req.id
       LEFT JOIN users asn ON t.assignee_id = asn.id
@@ -244,8 +269,8 @@ export const getTickets = async (
     const formattedTickets = tickets.map(ticket => ({
       ...ticket,
       id: ticket.id.toString(), // Ensure ID is string
-      status: ticket.status?.name, // Extract name for frontend
-      priority: ticket.priority?.name, // Extract name for frontend
+      status: ticket.status, // Use full status object
+      priority: ticket.priority, // Use full priority object
       tags: ticket.tags || [], // Ensure tags is an array
       requester: ticket.requester,
       assignee: ticket.assignee,
@@ -262,7 +287,9 @@ export const getTickets = async (
       sentiment_score: ticket.sentiment_score,
       ai_summary: ticket.ai_summary,
       source: ticket.source,
-      is_spam: ticket.is_spam
+      is_spam: ticket.is_spam,
+      sla_status: ticket.sla_status,
+      sla_info: ticket.sla_info
     })); 
 
     res.status(200).json({
@@ -294,7 +321,7 @@ export const getTicketById = async (
   try {
     const { id } = req.params;
     
-    // Get ticket details
+    // Improved query to include SLA policy information
     const ticketQuery = `
       SELECT 
         t.id, 
@@ -309,6 +336,7 @@ export const getTicketById = async (
         t.ai_summary,
         t.source,
         t.is_spam,
+        t.sla_status,
         json_build_object(
           'id', req.id,
           'email', req.email,
@@ -364,19 +392,6 @@ export const getTicketById = async (
       LEFT JOIN ticket_types tt ON t.type_id = tt.id
       WHERE t.id = $1
     `;
-    
-    const ticketResult = await query(ticketQuery, [id]);
-    
-    if (ticketResult.rows.length === 0) {
-      throw new AppError('Ticket not found', 404);
-    }
-    
-    const ticket = ticketResult.rows[0];
-    
-    // Check if user has access to this ticket
-    if (req.user.role !== 'admin' && ticket.organization_id !== req.user.organizationId) {
-      throw new AppError('You do not have permission to access this ticket', 403);
-    }
     
     // Get comments
     const commentsQuery = `
@@ -443,18 +458,62 @@ export const getTicketById = async (
       ORDER BY created_at ASC
     `;
     
-    // Execute parallel queries
-    const [commentsResult, historyResult, attachmentsResult] = await Promise.all([
+    // Also get SLA information for the ticket
+    const slaQuery = `
+      SELECT 
+        spt.id,
+        spt.ticket_id,
+        spt.sla_policy_id,
+        spt.first_response_due_at,
+        spt.next_response_due_at,
+        spt.resolution_due_at,
+        spt.first_response_met,
+        spt.next_response_met,
+        spt.resolution_met,
+        spt.metadata,
+        json_build_object(
+          'id', sp.id,
+          'name', sp.name,
+          'description', sp.description,
+          'organizationId', sp.organization_id,
+          'ticketPriorityId', sp.ticket_priority_id,
+          'firstResponseHours', sp.first_response_hours,
+          'nextResponseHours', sp.next_response_hours,
+          'resolutionHours', sp.resolution_hours,
+          'businessHoursOnly', sp.business_hours_only
+        ) as policy
+      FROM sla_policy_tickets spt
+      JOIN sla_policies sp ON spt.sla_policy_id = sp.id
+      WHERE spt.ticket_id = $1
+    `;
+    
+    // Execute all queries in parallel
+    const [ticketResult, commentsResult, historyResult, attachmentsResult, slaResult] = await Promise.all([
+      query(ticketQuery, [id]),
       query(commentsQuery, [id]),
       query(historyQuery, [id]),
-      query(attachmentsQuery, [id]) // Fetch attachments
+      query(attachmentsQuery, [id]),
+      query(slaQuery, [id])
     ]);
 
     const comments = commentsResult.rows;
     const history = historyResult.rows;
     const attachments = attachmentsResult.rows;
+    const slaInfo = slaResult.rows.length > 0 ? slaResult.rows[0] : null;
     
-    // Return ticket with comments, history, and attachments
+    // Check if ticket exists
+    if (ticketResult.rows.length === 0) {
+      throw new AppError('Ticket not found', 404);
+    }
+    
+    const ticket = ticketResult.rows[0];
+    
+    // Check if user has access to this ticket
+    if (req.user.role !== 'admin' && ticket.organization_id !== req.user.organizationId) {
+      throw new AppError('You do not have permission to access this ticket', 403);
+    }
+    
+    // Return ticket with comments, history, attachments, and SLA info
     res.status(200).json({
       status: 'success',
       data: {
@@ -462,7 +521,8 @@ export const getTicketById = async (
           ...ticket,
           comments,
           history,
-          attachments, // Include attachments in the response
+          attachments,
+          slaInfo // Include SLA information in the response
         },
       },
     });
@@ -510,6 +570,8 @@ export const createTicket = async (
     const statusId = statusResult.rows[0].id;
 
     const client = await pool.connect();
+    let newTicketId: number;
+    
     try {
       await client.query('BEGIN');
       
@@ -550,7 +612,7 @@ export const createTicket = async (
           ai_summary,
           source
         ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
-        RETURNING id`,
+        RETURNING id, due_date`,
         [
           subject,
           description,
@@ -561,14 +623,14 @@ export const createTicket = async (
           statusId,
           typeId || null,
           req.user.organizationId,
-          dueDate || null,
+          dueDate || null, // Due date will be set by the trigger
           sentimentScore,
           aiSummary,
           'web',
         ]
       );
       
-      const newTicketId = ticketResult.rows[0].id;
+      newTicketId = ticketResult.rows[0].id;
       
       // --- Handle Tags --- 
       const tagIds: number[] = [];
@@ -712,6 +774,154 @@ export const createTicket = async (
       // Commit transaction
       await client.query('COMMIT');
       
+      // After transaction is committed, create SLA policy tickets record
+      if (priorityId) {
+        try {
+          // Check if SLA policy ticket already exists
+          const existingSlaTicket = await query(
+            'SELECT id FROM sla_policy_tickets WHERE ticket_id = $1',
+            [newTicketId]
+          );
+          
+          // Only proceed if no SLA policy ticket exists
+          if (existingSlaTicket.rows.length === 0) {
+            // Get or create SLA policy
+            const slaPolicyResult = await query(
+              `SELECT id FROM sla_policies 
+               WHERE organization_id = $1 AND ticket_priority_id = $2`,
+              [req.user.organizationId, priorityId]
+            );
+            
+            let slaPolicyId: number | null = null;
+            
+            if (slaPolicyResult.rows.length === 0) {
+              // Create a new SLA policy
+              const priorityResult = await query(
+                'SELECT name, sla_hours FROM ticket_priorities WHERE id = $1',
+                [priorityId]
+              );
+              
+              if (priorityResult.rows.length > 0) {
+                const priority = priorityResult.rows[0];
+                const slaHours = priority.sla_hours;
+                
+                const newPolicyResult = await query(
+                  `INSERT INTO sla_policies (
+                    name,
+                    description,
+                    organization_id,
+                    ticket_priority_id,
+                    first_response_hours,
+                    next_response_hours,
+                    resolution_hours,
+                    business_hours_only
+                  ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+                  RETURNING id`,
+                  [
+                    `${priority.name} Priority SLA`,
+                    `Default SLA policy for ${priority.name} priority tickets`,
+                    req.user.organizationId,
+                    priorityId,
+                    Math.max(1, Math.floor(slaHours / 4)),
+                    Math.max(2, Math.floor(slaHours / 2)),
+                    slaHours,
+                    true
+                  ]
+                );
+                
+                slaPolicyId = newPolicyResult.rows[0].id;
+              }
+            } else {
+              slaPolicyId = slaPolicyResult.rows[0].id;
+            }
+            
+            if (slaPolicyId) {
+              // Get policy details
+              const policyResult = await query(
+                'SELECT * FROM sla_policies WHERE id = $1',
+                [slaPolicyId]
+              );
+              
+              if (policyResult.rows.length > 0) {
+                const policy = policyResult.rows[0];
+                const createdAt = new Date();
+                
+                // Calculate due dates
+                const firstResponseDue = new Date(createdAt.getTime() + policy.first_response_hours * 60 * 60 * 1000);
+                const nextResponseDue = new Date(createdAt.getTime() + policy.next_response_hours * 60 * 60 * 1000);
+                const resolutionDue = new Date(createdAt.getTime() + policy.resolution_hours * 60 * 60 * 1000);
+                
+                // Create metadata
+                const metadata = {
+                  ticket_id: newTicketId,
+                  subject,
+                  priority_id: priorityId,
+                  type_id: typeId,
+                  department_id: departmentId,
+                  requester_id: actualRequesterId,
+                  assignee_id: assigneeId,
+                  created_at: createdAt,
+                  sla_policy: {
+                    id: policy.id,
+                    name: policy.name,
+                    first_response_hours: policy.first_response_hours,
+                    next_response_hours: policy.next_response_hours,
+                    resolution_hours: policy.resolution_hours,
+                    business_hours_only: policy.business_hours_only
+                  },
+                  pausePeriods: [],
+                  totalPausedTime: 0
+                };
+                
+                // Create SLA policy ticket
+                await query(
+                  `INSERT INTO sla_policy_tickets (
+                    ticket_id,
+                    sla_policy_id,
+                    first_response_due_at,
+                    next_response_due_at,
+                    resolution_due_at,
+                    first_response_met,
+                    next_response_met,
+                    resolution_met,
+                    metadata
+                  ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+                  [
+                    newTicketId,
+                    slaPolicyId,
+                    firstResponseDue,
+                    nextResponseDue,
+                    resolutionDue,
+                    false,
+                    false,
+                    false,
+                    JSON.stringify(metadata)
+                  ]
+                );
+                
+                // Update ticket with SLA status if not already set by trigger
+                const ticketResult = await query(
+                  'SELECT due_date FROM tickets WHERE id = $1',
+                  [newTicketId]
+                );
+                
+                if (!ticketResult.rows[0].due_date) {
+                  await query(
+                    'UPDATE tickets SET sla_status = $1, due_date = $2 WHERE id = $3',
+                    ['active', resolutionDue, newTicketId]
+                  );
+                }
+              }
+            }
+          } else {
+            logger.info(`SLA policy ticket already exists for ticket ${newTicketId}, skipping creation`);
+          }
+        } catch (slaError) {
+          // Log SLA error but don't fail the request
+          logger.error('Error creating SLA policy ticket:', slaError);
+        }
+      }
+      
       // Return created ticket ID
       res.status(201).json({
         status: 'success',
@@ -722,14 +932,8 @@ export const createTicket = async (
       });
     } catch (error) {
       await client.query('ROLLBACK');
-      // Clean up uploaded files if transaction fails
-      if (files && files.length > 0) {
-        files.forEach(file => {
-          fs.unlink(file.path, (err) => {
-            if (err) logger.error(`Failed to delete uploaded file ${file.path} after transaction rollback:`, err);
-          });
-        });
-      }
+      // When using memory storage, there are no files to clean up
+      // (files are stored in memory as buffers, not on disk)
       throw error;
     } finally {
       client.release();
@@ -792,6 +996,9 @@ export const updateTicket = async (
     ) {
       throw new AppError('You can only update tickets you created', 403);
     }
+    
+    // Store the old status ID for comparison
+    const oldStatusId = ticket.status_id;
     
     // Start transaction
     const client = await pool.connect();
@@ -1046,6 +1253,70 @@ export const updateTicket = async (
             const tagValuesPlaceholders = numericTagIds.map((_, index) => `($1, $${index + 2})`).join(',');
             const ticketTagQuery = `INSERT INTO ticket_tags (ticket_id, tag_id) VALUES ${tagValuesPlaceholders}`;
             await client.query(ticketTagQuery, [id, ...numericTagIds]);
+          }
+        }
+      }
+      
+      // After updating the ticket and before saving - Check if status changed
+      if (req.body.statusId && req.body.statusId !== oldStatusId) {
+        // Get the new status name to check for specific status types
+        const newStatus = await query(
+          'SELECT name FROM ticket_statuses WHERE id = $1',
+          [req.body.statusId]
+        );
+        const oldStatus = await query(
+          'SELECT name FROM ticket_statuses WHERE id = $1',
+          [oldStatusId]
+        );
+        
+        if (newStatus.rows.length > 0 && oldStatus.rows.length > 0) {
+          // Log the status change
+          logStatusChange(Number(id), oldStatus.rows[0].name, newStatus.rows[0].name);
+          
+          // If changing to a pending status - pause SLA
+          if (isPendingStatus(newStatus.rows[0].name) && !isPendingStatus(oldStatus.rows[0].name)) {
+            await slaService.pauseSLA(Number(id));
+            logger.info(`SLA paused for ticket #${id} due to status change to ${newStatus.rows[0].name}`);
+          } 
+          // If changing from a pending to an in-progress status - resume SLA
+          else if (isInProgressStatus(newStatus.rows[0].name) && isPendingStatus(oldStatus.rows[0].name)) {
+            await slaService.resumeSLA(Number(id));
+            logger.info(`SLA resumed for ticket #${id} due to status change to ${newStatus.rows[0].name}`);
+          }
+        }
+      }
+      
+      // If priority changed, re-assign SLA policy and update due date
+      if (priorityId && priorityId !== ticket.priority_id) {
+        // Get the updated ticket - we don't need to update priority_id again as it was done in the main update
+        const updatedTicket = await client.query(
+          'SELECT * FROM tickets WHERE id = $1',
+          [id]
+        );
+        
+        if (updatedTicket.rows.length > 0) {
+          try {
+            // Auto-assign SLA based on the new priority
+            const slaPolicyTicket = await slaService.autoAssignSLAPolicy(updatedTicket.rows[0]);
+            logger.info(`SLA policy re-assigned for ticket #${id} due to priority change`);
+            
+            // If we got an SLA policy ticket, update the due_date in the tickets table
+            if (slaPolicyTicket) {
+              // Use the resolution due date as the ticket due date
+              const dueDate = slaPolicyTicket.resolutionDueAt;
+              
+              await client.query(
+                'UPDATE tickets SET due_date = $1 WHERE id = $2',
+                [dueDate, id]
+              );
+              
+              logger.info(`Due date updated for ticket #${id} to ${dueDate} based on new SLA policy`);
+            } else {
+              logger.warn(`No SLA policy found for ticket #${id} with priority ${priorityId}`);
+            }
+          } catch (error) {
+            logger.error(`Error updating SLA for ticket #${id}:`, error);
+            // Continue with the transaction even if SLA update fails
           }
         }
       }
@@ -1732,6 +2003,73 @@ export const addTicketComment = async (
     } finally {
       client.release();
     }
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * Update SLA for a ticket after priority change
+ * This endpoint can be used to manually trigger SLA update
+ */
+export const updateTicketSLA = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+) => {
+  try {
+    const { id } = req.params;
+    
+    if (!id) {
+      throw new AppError('Ticket ID is required', 400);
+    }
+    
+    // Get ticket
+    const ticketResult = await query(
+      'SELECT * FROM tickets WHERE id = $1',
+      [id]
+    );
+    
+    if (ticketResult.rows.length === 0) {
+      throw new AppError('Ticket not found', 404);
+    }
+    
+    const ticket = ticketResult.rows[0];
+    
+    // Auto-assign SLA policy based on current priority
+    const slaPolicyTicket = await slaService.autoAssignSLAPolicy(ticket);
+    
+    if (!slaPolicyTicket) {
+      return res.status(200).json({
+        status: 'warning',
+        data: {
+          message: 'No SLA policy found for ticket',
+          ticketId: ticket.id,
+          priorityId: ticket.priority_id
+        }
+      });
+    }
+    
+    // Update the due_date in tickets table based on SLA
+    await query(
+      'UPDATE tickets SET due_date = $1 WHERE id = $2',
+      [slaPolicyTicket.resolutionDueAt, id]
+    );
+    
+    // Get updated ticket
+    const updatedTicketResult = await query(
+      'SELECT * FROM tickets WHERE id = $1',
+      [id]
+    );
+    
+    res.status(200).json({
+      status: 'success',
+      data: {
+        message: 'SLA updated successfully',
+        ticket: updatedTicketResult.rows[0],
+        sla: slaPolicyTicket
+      }
+    });
   } catch (error) {
     next(error);
   }

@@ -405,40 +405,37 @@ router.put('/:id', authenticate, async (req, res) => {
  */
 router.delete('/:id', authenticate, authorize([UserRole.ADMIN]), async (req, res) => {
   try {
-    try {
-      const userRepository = getRepository(User);
-      const userId = req.params.id;
-      const loggedInUserId = req.user.id; // Get the ID of the admin making the request
-      
-      // Check if admin is trying to delete themselves
-      if (userId === loggedInUserId.toString()) { // Compare as strings potentially
-        return res.status(400).json({ message: 'Administrators cannot deactivate their own account.' });
-      }
-      
-      const user = await userRepository.findOne({ where: { id: userId } as any });
-      
-      if (!user) {
-        return res.status(404).json({ message: 'User not found' });
-      }
-      
-      // Check if the target user is an admin
-      if (user.role === UserRole.ADMIN) {
-        return res.status(400).json({ message: 'Admin accounts cannot be deactivated.' });
-      }
-      
-      // Proceed with deactivation only if checks pass
-      user.isActive = false;
-      await userRepository.save(user);
-      
-      return res.json({ message: 'User deactivated successfully' });
-    } catch (dbError: any) {
-      console.error('Database error when deactivating user:', dbError);
-      return res.status(500).json({ message: 'Database error', error: dbError.message });
+    const userRepository = getRepository(User);
+    const userId = req.params.id;
+    const loggedInUserId = req.user.id; // Get the ID of the admin making the request
+    
+    // Check if admin is trying to delete themselves
+    if (userId === loggedInUserId.toString()) { // Compare as strings potentially
+      return res.status(400).json({ message: 'Administrators cannot deactivate their own account.' });
     }
-
+    
+    const user = await userRepository.findOne({ where: { id: userId } as any });
+    
+    if (!user) {
+      return res.status(404).json({ message: 'User not found' });
+    }
+    
+    // Check if the target user is an admin
+    if (user.role === UserRole.ADMIN) {
+      return res.status(400).json({ message: 'Admin accounts cannot be deactivated.' });
+    }
+    
+    // Proceed with deactivation only if checks pass
+    user.isActive = false;
+    await userRepository.save(user);
+    
+    return res.json({ message: 'User deactivated successfully' });
   } catch (error) {
     console.error('Error deactivating user:', error);
-    return res.status(500).json({ message: 'Server error' });
+    return res.status(500).json({ 
+      message: 'Server error',
+      error: error instanceof Error ? error.message : 'Unknown error'
+    });
   }
 });
 
@@ -516,36 +513,33 @@ router.get('/:id/organization', authenticate, async (req, res) => {
       return res.status(403).json({ message: 'Unauthorized' });
     }
     
-    try {
-      const userRepository = getRepository(User);
-      const userId = req.params.id;
-      const user = await userRepository.findOne({ 
-        where: { id: userId } as any,
-        relations: ['organization'] 
-      });
-      
-      if (!user) {
-        return res.status(404).json({ message: 'User not found' });
-      }
-      if (!user.organization) {
-        return res.status(404).json({ message: 'User has no organization assigned' });
-      }
-      
-      return res.json({
-        organization: {
-          id: user.organization.id,
-          name: user.organization.name,
-          domain: user.organization.domain
-        }
-      });
-    } catch (error: any) {
-      console.error('Error fetching organization:', error);
-      return res.status(500).json({ message: 'Failed to fetch organization data', error: error.message });
+    const userRepository = getRepository(User);
+    const userId = req.params.id;
+    const user = await userRepository.findOne({ 
+      where: { id: userId } as any,
+      relations: ['organization'] 
+    });
+    
+    if (!user) {
+      return res.status(404).json({ message: 'User not found' });
     }
-
+    if (!user.organization) {
+      return res.status(404).json({ message: 'User has no organization assigned' });
+    }
+    
+    return res.json({
+      organization: {
+        id: user.organization.id,
+        name: user.organization.name,
+        domain: user.organization.domain
+      }
+    });
   } catch (error) {
     console.error('Error fetching organization:', error);
-    return res.status(500).json({ message: 'Server error' });
+    return res.status(500).json({ 
+      message: 'Failed to fetch organization data',
+      error: error instanceof Error ? error.message : 'Unknown error'
+    });
   }
 });
 
@@ -622,6 +616,8 @@ router.delete('/:id/avatar', authenticate, async (req, res, next) => {
 router.get('/roles/agent', authenticate, authorize([UserRole.ADMIN, UserRole.AGENT]), async (req, res) => {
   try {
     const userRepository = getRepository(User);
+    const deptMemberRepository = getRepository(DepartmentMember);
+    const departmentRepository = getRepository(Department);
     
     // Query for users with role 'agent' or 'admin'
     const agents = await userRepository.find({
@@ -632,18 +628,33 @@ router.get('/roles/agent', authenticate, authorize([UserRole.ADMIN, UserRole.AGE
       order: { firstName: 'ASC', lastName: 'ASC' }
     });
     
-    // Format the response
-    const formattedAgents = agents.map(agent => ({
-      id: agent.id,
-      firstName: agent.firstName,
-      lastName: agent.lastName,
-      email: agent.email,
-      role: agent.role,
-      avatarUrl: agent.avatarUrl,
-      designation: agent.designation
+    // For each agent, fetch their department relationship
+    const agentsWithDepartments = await Promise.all(agents.map(async (agent) => {
+      // Find department membership
+      const departmentMember = await deptMemberRepository.findOne({
+        where: { userId: agent.id },
+        relations: ['department']
+      });
+      
+      // Extract department info
+      const department = departmentMember?.department ? {
+        id: departmentMember.department.id,
+        name: departmentMember.department.name
+      } : null;
+      
+      return {
+        id: agent.id,
+        firstName: agent.firstName,
+        lastName: agent.lastName,
+        email: agent.email,
+        role: agent.role,
+        avatarUrl: agent.avatarUrl,
+        designation: agent.designation,
+        department // Include department info
+      };
     }));
     
-    return res.json({ agents: formattedAgents });
+    return res.json({ agents: agentsWithDepartments });
   } catch (error) {
     console.error('Error fetching agents list:', error);
     return res.status(500).json({ message: 'Failed to fetch user data' });

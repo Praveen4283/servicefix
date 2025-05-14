@@ -91,7 +91,6 @@ const RegisterPage: React.FC = () => {
           navigate('/login', { state: { registered: true, email: values.email } });
         } else {
           // Failure is handled by the useEffect watching the error state
-          console.log('Registration failed, error handling delegated.');
         }
       } catch (error) {
         // This catch block should ideally not be reached

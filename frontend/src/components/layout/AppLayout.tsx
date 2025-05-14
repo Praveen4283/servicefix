@@ -46,6 +46,7 @@ import { useAuth } from '../../context/AuthContext';
 import { NotificationContainer, useNotification, NotificationMenu } from '../../context/NotificationContext';
 import { useTheme as useThemeContext } from '../../context/ThemeContext';
 import CookieStatusIndicator from '../common/CookieStatusIndicator';
+import AccessAlarmIcon from '@mui/icons-material/AccessAlarm';
 
 // Layout props
 interface AppLayoutProps {
@@ -803,8 +804,7 @@ const AppLayout: React.FC<AppLayoutProps> = ({ children }) => {
 
       {/* Popups and Menus */}
       {isAuthenticated && renderProfileMenu}
-      {isAuthenticated && renderMobileMenu}
-      <NotificationContainer />
+      {isAuthenticated && renderMobileMenu}      
     </Box>
   );
 };
