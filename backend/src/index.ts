@@ -81,6 +81,7 @@ export const JWT_REFRESH_EXPIRES_IN = process.env.JWT_REFRESH_EXPIRES_IN || '7d'
 
 // Create Express app
 const app = express();
+app.set('trust proxy', 1); // Trust first proxy - needed for Render deployment
 const PORT = process.env.PORT || 4000;
 const server = http.createServer(app);
 
