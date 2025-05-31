@@ -309,7 +309,8 @@ export const login = asyncHandler(async (
     res.cookie('accessToken', token, {
       httpOnly: true,
       secure: process.env.NODE_ENV === 'production',
-      sameSite: 'lax',
+      sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax',
+      path: '/',
       maxAge: 60 * 60 * 1000 // 1 hour in milliseconds
     });
     
@@ -317,7 +318,8 @@ export const login = asyncHandler(async (
     res.cookie('refreshToken', refreshToken, {
       httpOnly: true,
       secure: process.env.NODE_ENV === 'production',
-      sameSite: 'lax',
+      sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax',
+      path: '/',
       maxAge: 7 * 24 * 60 * 60 * 1000 // 7 days in milliseconds
     });
 
@@ -356,7 +358,8 @@ export const refreshToken = asyncHandler(async (
     res.cookie('accessToken', result.token, {
       httpOnly: true,
       secure: process.env.NODE_ENV === 'production',
-      sameSite: 'lax',
+      sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax',
+      path: '/',
       maxAge: 60 * 60 * 1000 // 1 hour in milliseconds
     });
 
@@ -381,9 +384,19 @@ export const logout = asyncHandler(async (
   next: NextFunction
 ) => {
   try {
-    // Clear cookies
-    res.clearCookie('accessToken');
-    res.clearCookie('refreshToken');
+    // Clear cookies with the same settings as when they were set
+    res.clearCookie('accessToken', {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax',
+      path: '/'
+    });
+    res.clearCookie('refreshToken', {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax',
+      path: '/'
+    });
     
     // Get refresh token from cookie
     const refreshToken = req.cookies.refreshToken;
