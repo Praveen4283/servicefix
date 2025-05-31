@@ -1,4 +1,5 @@
 import { User } from '../context/AuthContext';
+import { JsonObject, MetadataObject } from '../types/common';
 
 /**
  * Data Transfer Object for User
@@ -112,12 +113,28 @@ export function mapUserToDTO(user: Partial<User>): Partial<UserDTO> {
 }
 
 /**
+ * ProfileUpdateData - Frontend data type for profile updates
+ */
+export interface ProfileUpdateData {
+  firstName?: string;
+  lastName?: string;
+  phoneNumber?: string;
+  designation?: string;
+  timezone?: string;
+  language?: string;
+  notificationSettings?: Record<string, { email: boolean; push: boolean; in_app: boolean } | boolean>;
+  avatarFile?: File | null;
+  avatarUrl?: string | null;
+  email?: string;
+}
+
+/**
  * Maps frontend profile update data to DTO format for the API
  * Handles special case for avatar file
  * @param data Profile update data from frontend form
  * @returns Formatted data for backend API
  */
-export function mapProfileUpdateToDTO(data: any): ProfileUpdateDTO {
+export function mapProfileUpdateToDTO(data: ProfileUpdateData): ProfileUpdateDTO {
   const dto: ProfileUpdateDTO = {};
   
   // Handle all possible profile fields with proper frontend->backend name mapping

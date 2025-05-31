@@ -220,8 +220,20 @@ export const testEmailSettings = async (
       emailReplyTo 
     } = req.body;
     
-    // Use type assertion instead of relying on extended Request type
-    const user = req.user as AuthenticatedUser;
+    // Get user's email from the user record in the database
+    const userResult = await query(
+      'SELECT email, first_name FROM users WHERE id = $1',
+      [req.user.id]
+    );
+    
+    if (userResult.rows.length === 0) {
+      return res.status(400).json({
+        status: 'error',
+        message: 'User not found'
+      });
+    }
+    
+    const userData = userResult.rows[0];
     
     // Validate required fields
     if (!smtpServer || !smtpPort || !smtpUsername || !emailFromName || !emailReplyTo) {
@@ -232,7 +244,7 @@ export const testEmailSettings = async (
     }
     
     // Validate user has an email
-    if (!user || !user.email) {
+    if (!userData.email) {
       return res.status(400).json({
         status: 'error',
         message: 'User email not found'
@@ -276,12 +288,12 @@ export const testEmailSettings = async (
     });
     
     // Get user's name for the email, with fallbacks
-    const userName = user.firstName || user.first_name || 'User';
+    const userName = userData.first_name || 'User';
     
     // Send test email to the authenticated user
     await transporter.sendMail({
       from: `"${emailFromName}" <${smtpUsername}>`,
-      to: user.email,
+      to: userData.email,
       subject: 'ServiceFix Email Configuration Test',
       html: `
         <h2>Email Configuration Test</h2>

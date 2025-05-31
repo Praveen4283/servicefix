@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useEffect, useState, ReactNode, useCallback } from 'react';
 import apiClient from '../services/apiClient';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import notificationService from '../services/notificationService';
 import { notificationManager } from '../services/notificationManager';
 
@@ -172,63 +172,78 @@ const dispatchNotificationEvent = (type: NotificationEventType, detail: Notifica
 
 export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   const [state, setState] = useState<AuthState>(initialState);
+  const navigate = useNavigate();
+  const location = useLocation();
 
   // Initialize the auth state
   useEffect(() => {
     const initializeAuth = async () => {
+      setState(prevState => ({ ...prevState, isLoading: true }));
+      
       try {
-        const token = localStorage.getItem('authToken');
+        // Only try to validate if on a protected route
+        // This prevents validation loops on public pages
+        const isPublicRoute = ['/login', '/register', '/forgot-password', '/reset-password'].some(
+          route => location.pathname.startsWith(route)
+        );
         
-        if (!token) {
-          setState({
-            ...initialState,
-            isLoading: false
-          });
-          return;
+        if (!isPublicRoute) {
+          try {
+            // Use consistent auth path without duplicate /api prefix
+            const response = await apiClient.get('/auth/validate');
+            console.log('[AuthContext] Validate response:', response);
+            
+            // Extract user data from the response, handling different response structures
+            let userData;
+            
+            if (response?.user) {
+              // Direct user property in response
+              userData = response.user;
+            } else if (response?.data?.user) {
+              // Nested user property
+              userData = response.data.user;
+            } else if (response?.status === 'success' && response?.user) {
+              // Standard API response format
+              userData = response.user;
+            }
+            
+            if (userData) {
+              setState({
+                isAuthenticated: true,
+                user: userData,
+                isLoading: false,
+                error: null,
+                registrationSuccess: false
+              });
+              return;
+            }
+          } catch (error) {
+            console.log('[AuthContext] Validation failed:', error);
+            // If validation fails on a protected route, redirect to login
+            if (!isPublicRoute) {
+              navigate('/login');
+            }
+          }
         }
         
-        const userData = localStorage.getItem('user');
-        if (!userData) {
-          // Token exists but no user data - clear localStorage and reset state
-          localStorage.removeItem('authToken');
-          setState({
-            ...initialState,
-            isLoading: false
-          });
-          return;
-        }
-        
-        // Parse user data
-        try {
-          const user = JSON.parse(userData);
-          setState({
-            isAuthenticated: true,
-            user,
-            isLoading: false,
-            error: null,
-            registrationSuccess: false
-          });
-        } catch (error) {
-          // Malformed user data - clear localStorage and reset state
-          localStorage.removeItem('authToken');
-          localStorage.removeItem('user');
-          setState({
-            ...initialState,
-            isLoading: false,
-            error: 'Failed to parse user data'
-          });
-        }
-      } catch (error) {
-        console.error('Auth initialization error:', error);
+        // If we're here, user is not authenticated
+        setState({
+          ...initialState,
+          isLoading: false
+        });
+      } catch (error: any) {
+        console.error('[AuthContext] Error during auth initialization:', error);
         setState({
           ...initialState,
           isLoading: false,
-          error: 'Failed to initialize authentication'
+          error: error.message || 'Authentication error'
         });
       }
     };
-    
+
     initializeAuth();
+    // Only run this effect once on mount
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Login function
@@ -242,60 +257,94 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     });
     
     try {
-      // Actual API call
+      // Actual API call with correct API path without duplicate /api prefix
       const response = await apiClient.post<any>('/auth/login', { email, password });
       
-      const { token, user: userDataFromApi, refreshToken } = response;
+      // Detailed logging of the response
+      console.log('[AuthContext] Login response:', response);
       
-      // Use the correctly destructured user object
-      const finalUserData = { ...userDataFromApi };
+      // Extract user data from the response, handling different response structures
+      let userData;
       
-      // Add last login time if not provided by backend
-      if (!finalUserData.lastLogin) {
-        finalUserData.lastLogin = new Date().toISOString();
+      if (response?.user) {
+        // Direct user property in response
+        userData = response.user;
+      } else if (response?.data?.user) {
+        // Nested user property in data
+        userData = response.data.user;
+      } else if (response?.data) {
+        // Assume the data itself is the user object
+        userData = response.data;
+      } else {
+        // Default case - use the entire response as user data
+        userData = response;
       }
       
-      // Save token to localStorage
-      localStorage.setItem('authToken', token);
-      localStorage.setItem('refreshToken', refreshToken);
-
-      localStorage.setItem('user', JSON.stringify(finalUserData)); // Save the final user data
+      if (!userData) {
+        throw new Error('Invalid response format: No user data found');
+      }
+      
+      // Format user data for consistency
+      const formattedUser: User = {
+        id: userData.id || userData._id || '',
+        email: userData.email || '',
+        firstName: userData.firstName || userData.first_name || '',
+        lastName: userData.lastName || userData.last_name || '',
+        role: userData.role || 'customer',
+        avatarUrl: userData.avatarUrl || userData.avatar_url || '',
+        designation: userData.designation || userData.job_title || userData.jobTitle || '',
+        organizationId: userData.organizationId || userData.organization_id || (userData.organization ? userData.organization.id : ''),
+        lastLogin: userData.lastLogin || userData.last_login_at || userData.lastLoginAt || '',
+        organization: userData.organization
+      };
+      
+      // Tokens are now stored in HttpOnly cookies by the server
+      // No need to manually store tokens in localStorage
       
       // Update auth state
       setState({
+        ...state,
         isAuthenticated: true,
-        user: finalUserData, // Set the final user data into state
+        user: formattedUser,
         isLoading: false,
-        error: null,
-        registrationSuccess: false
+        error: null
       });
-
-      // Dispatch a custom event to notify components to refresh data (like notifications)
-      window.dispatchEvent(new CustomEvent('user:login-success'));
-
-      // Use notification manager for immediate feedback (toast)
+      
+      // Show success notification
       dispatchNotificationEvent(NotificationEventType.AUTH_SUCCESS, {
-        message: `Welcome back, ${finalUserData.firstName}!`, 
+        message: `Welcome back, ${formattedUser.firstName}!`,
         type: 'success',
-        duration: 5000,
         title: 'Login Successful'
       });
       
-      return true; // Indicate success
-    } catch (error: any) {
-      // Get the error message
-      const errorMessage = error.response?.data?.message || 'An error occurred during login';
+      // Add event listener for session timeout
+      setupSessionTimeoutHandler();
       
-      // Set the error in the state
+      return true;
+    } catch (error: any) {
+      // Handle login error
+      console.error('[AuthContext] Login error:', error);
+      
+      // Extract error message
+      const errorMessage = error.message || 'Login failed. Please try again.';
+      
+      // Update state with error
       setState({
         ...state,
+        isAuthenticated: false,
+        user: null,
         isLoading: false,
-        error: errorMessage,
-        registrationSuccess: false
+        error: errorMessage
       });
-      // Dispatch error notification event for login failure
-      dispatchNotificationEvent(NotificationEventType.AUTH_ERROR, { message: errorMessage, type: 'error', duration: 5000, title: 'Login Failed' });
-      return false; // Indicate failure
+      
+      // Show error notification
+      dispatchNotificationEvent(NotificationEventType.AUTH_ERROR, {
+        message: errorMessage,
+        type: 'error',
+        title: 'Login Error'
+      });
+      
+      return false;
     }
   };
 
@@ -310,24 +359,39 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     });
     
     try {
-      // Actual API call
+      // Actual API call with correct API path without duplicate /api prefix
       const response = await apiClient.post('/auth/register', userData);
+      console.log('[AuthContext] Register response:', response);
       
-      // If registration is successful, set success state
-      setState({
-        ...state,
-        isLoading: false,
-        error: null,
-        registrationSuccess: true
-      });
+      // Check for successful registration
+      const isSuccess = 
+        (response?.status === 'success') || 
+        (response?.data?.status === 'success') ||
+        (response && !response.error);
       
-      // Dispatch success notification event
-      dispatchNotificationEvent(NotificationEventType.AUTH_SUCCESS, { message: 'Registration successful! Please log in.', type: 'success', duration: 5000 });
-      
-      return true; // Indicate success
+      if (isSuccess) {
+        // If registration is successful, set success state
+        setState({
+          ...state,
+          isLoading: false,
+          error: null,
+          registrationSuccess: true
+        });
+        
+        // Dispatch success notification event
+        dispatchNotificationEvent(NotificationEventType.AUTH_SUCCESS, { 
+          message: 'Registration successful! Please log in.', 
+          type: 'success', 
+          duration: 5000 
+        });
+        
+        return true; // Indicate success
+      } else {
+        throw new Error(response?.message || response?.data?.message || 'Registration failed');
+      }
     } catch (error: any) {
       // Get the error message 
-      const errorMessage = error.response?.data?.message || 'An error occurred during registration';
+      const errorMessage = error.response?.data?.message || error.message || 'An error occurred during registration';
       
       // Set the error in the state
       setState({
@@ -338,41 +402,72 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       });
       
       // Dispatch error notification event
-      dispatchNotificationEvent(NotificationEventType.AUTH_ERROR, { message: errorMessage, type: 'error', duration: 5000 });
+      dispatchNotificationEvent(NotificationEventType.AUTH_ERROR, { 
+        message: errorMessage, 
+        type: 'error', 
+        duration: 5000 
+      });
       
       return false; // Indicate failure
     }
   };
 
-  // Logout function
-  const logout = () => {
-    try {
-      // Placeholder: Call backend logout endpoint
-      // await apiClient.post('/auth/logout'); 
-      
-      localStorage.removeItem('authToken');
-      localStorage.removeItem('refreshToken');
-      localStorage.removeItem('user');
-    } catch (error) {
-      console.error('Error during logout:', error);
-    }
+  // Add session timeout handler
+  const setupSessionTimeoutHandler = () => {
+    // Listen for visibility changes to detect when user returns to the tab
+    document.addEventListener('visibilitychange', checkSessionStatus);
     
-    setState({
-      isAuthenticated: false,
-      user: null,
-      isLoading: false,
-      error: null,
-      registrationSuccess: false
-    });
-    // Optional: Redirect after logout (handled by ProtectedRoute logic)
-    // navigate('/login');
+    // Check session status periodically (every 5 minutes)
+    const intervalId = setInterval(checkSessionStatus, 5 * 60 * 1000);
+    
+    // Store the interval ID to clear it later
+    return () => {
+      document.removeEventListener('visibilitychange', checkSessionStatus);
+      clearInterval(intervalId);
+    };
   };
+  
+  // Check if the session is still valid
+  const checkSessionStatus = async () => {
+    // Only check if the document is visible and user is authenticated
+    if (document.visibilityState === 'visible' && state.isAuthenticated) {
+      try {
+        // Validate the session
+        await apiClient.get('/auth/validate');
+      } catch (error) {
+        // If validation fails, logout the user
+        console.warn('[AuthContext] Session validation failed, logging out');
+        logout();
+      }
+    }
+  };
+
+  /**
+   * Logout the current user
+   */
+  const logout = useCallback(() => {
+    // Call the server to invalidate the session and clear the cookies
+    apiClient.post('/auth/logout', {})
+      .catch(error => console.error('[AuthContext] Error during logout:', error))
+      .finally(() => {
+        // Reset the auth state regardless of the server response
+        setState({
+          ...state,
+          isAuthenticated: false,
+          user: null,
+          isLoading: false
+        });
+        
+        // Redirect to login page
+        navigate('/login');
+      });
+  }, [navigate, state]);
 
   // Reset password function
   const resetPassword = async (email: string): Promise<void> => {
     setState({ ...state, isLoading: true, error: null });
     try {
-      // Actual API call
+      // Actual API call without duplicate /api prefix
       await apiClient.post('/auth/forgot-password', { email }); 
       // Dispatch success notification event
       dispatchNotificationEvent(NotificationEventType.AUTH_SUCCESS, { message: 'Password reset email sent. Please check your inbox.', type: 'success', duration: 5000 });
@@ -426,10 +521,12 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       const changedFieldsMetadata: Array<{field: string, oldValue: any, newValue: any}> = [];
 
       // Define default channel structure for notification settings comparison
-      const defaultChannels = { email: true, inApp: true, push: false };
+      // Used for reference when comparing notification settings formats
+      // const defaultChannels = { email: true, inApp: true, push: false };
       const allPossibleNotificationKeys = Object.keys(userData.notificationSettings || {});
       
-      const normalizeAndSortObject = (obj: any): any => {
+      // Helper for consistent object comparison - kept for future use
+      /* const normalizeAndSortObject = (obj: any): any => {
         if (typeof obj !== 'object' || obj === null) return obj;
         try {
           const normalized = JSON.parse(JSON.stringify(obj)); // Deep clone
@@ -445,7 +542,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
           console.error("Error normalizing object:", e);
           return obj; // Return original on error
         }
-      };
+      }; */
 
       const buildConsistentNotificationStructure = (settingsSource: any): any => {
         const consistentStructure: any = {};
@@ -553,8 +650,6 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       if (actualChangedFieldNames.length === 1) {
         const change = changedFieldsMetadata[0];
         const fieldName = actualChangedFieldNames[0];
-        const oldDisplayValue = change.oldValue === undefined || change.oldValue === null || change.oldValue === '' ? '(not set)' : JSON.stringify(change.oldValue);
-        const newDisplayValue = change.newValue === undefined || change.newValue === null || change.newValue === '' ? '(not set)' : JSON.stringify(change.newValue);
         
         // Special formatting for simple values
         if (typeof change.oldValue !== 'object' && typeof change.newValue !== 'object') {
@@ -630,8 +725,8 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
      if (!state.user) throw new Error('User not authenticated');
      setState({ ...state, isLoading: true, error: null });
      try {
-       // Actual API call
-       await apiClient.post('/auth/change-password', { oldPassword: currentPassword, newPassword }); 
+       // Actual API call without duplicate /api prefix
+       await apiClient.post('/auth/change-password', { oldPassword: currentPassword, newPassword });
        
        // Send success notification
        dispatchNotificationEvent(NotificationEventType.AUTH_SUCCESS, { 

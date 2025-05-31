@@ -51,6 +51,21 @@ const renderEstimatedSLA = (slaStatus: SLAStatus | null, theme: any) => {
   );
 };
 
+// Add a color mapping function
+const getStatusColor = (statusColor: 'success' | 'error' | 'warning' | 'default', theme: any): string => {
+  switch (statusColor) {
+    case 'success':
+      return theme.palette.success.main;
+    case 'error':
+      return theme.palette.error.main;
+    case 'warning':
+      return theme.palette.warning.main;
+    case 'default':
+    default:
+      return theme.palette.grey[500];
+  }
+};
+
 const SLABadge: React.FC<SLABadgeProps> = ({ 
   ticketId, 
   refreshTrigger = 0, 
@@ -372,7 +387,7 @@ const SLABadge: React.FC<SLABadgeProps> = ({
       <Box sx={{ width: '100%' }}>
         <Box display="flex" justifyContent="space-between" alignItems="center" mb={0.5}>
           <Box display="flex" alignItems="center">
-            <StatusIcon fontSize="small" sx={{ color: theme.palette[statusColor].main }} />
+            <StatusIcon fontSize="small" sx={{ color: getStatusColor(statusColor, theme) }} />
             <Typography variant="body2" fontWeight="medium" ml={0.5}>
               {slaStatusText}
             </Typography>

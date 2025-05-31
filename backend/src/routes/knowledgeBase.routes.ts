@@ -1,6 +1,7 @@
 import express from 'express';
 import { authenticate, authorize } from '../middleware/auth.middleware';
 import { UserRole } from '../models/User';
+import { idToNumber, idToString } from '../utils/idUtils';
 
 const router = express.Router();
 
@@ -77,10 +78,7 @@ router.post('/', authenticate, authorize([UserRole.ADMIN, UserRole.AGENT]), asyn
     const knowledgeBaseService = (await import('../services/knowledgeBase.service')).default;
     
     // Convert req.user.id to number
-    const authorIdNumber = parseInt(req.user.id, 10);
-    if (isNaN(authorIdNumber)) {
-        return res.status(400).json({ message: 'Invalid user ID format' });
-    }
+    const authorIdNumber = idToNumber(req.user.id) || 0;
 
     const article = await knowledgeBaseService.createArticle({
       title,
@@ -116,10 +114,7 @@ router.put('/:id', authenticate, authorize([UserRole.ADMIN, UserRole.AGENT]), as
     }
     
     // Convert req.user.id to number for comparison
-    const reqUserIdNumber = parseInt(req.user.id, 10);
-    if (isNaN(reqUserIdNumber)) {
-        return res.status(400).json({ message: 'Invalid user ID format in request' });
-    }
+    const reqUserIdNumber = idToNumber(req.user.id) || 0;
 
     // Only admins can edit anyone's articles, agents can only edit their own
     if (req.user.role !== UserRole.ADMIN && article.authorId !== reqUserIdNumber) { // Compare with converted number

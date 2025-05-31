@@ -158,11 +158,11 @@ const CreateTicketPage: React.FC = () => {
         // Append ticket data fields
         formData.append('subject', values.subject);
         formData.append('description', values.description);
-        formData.append('requesterId', user.id.toString()); // Ensure ID is string
-        if (values.departmentId) formData.append('departmentId', values.departmentId);
-        if (values.typeId) formData.append('typeId', values.typeId);
-        if (values.priorityId) formData.append('priorityId', values.priorityId);
-        if (values.assigneeId) formData.append('assigneeId', values.assigneeId);
+        formData.append('requesterId', Number(user.id).toString()); // Convert to number first
+        if (values.departmentId) formData.append('departmentId', Number(values.departmentId).toString());
+        if (values.typeId) formData.append('typeId', Number(values.typeId).toString());
+        if (values.priorityId) formData.append('priorityId', Number(values.priorityId).toString());
+        if (values.assigneeId) formData.append('assigneeId', Number(values.assigneeId).toString());
         // Append tags as a JSON string (backend will parse)
         if (selectedTags.length > 0) {
           formData.append('tags', JSON.stringify(selectedTags)); 
@@ -202,12 +202,22 @@ const CreateTicketPage: React.FC = () => {
           console.warn('Ticket created, but no new ticket data received. Navigating to list.');
           navigate('/tickets');
         }
-      } catch (error) {
+      } catch (error: any) {
         console.error('Error creating ticket:', error);
-        setSubmitError('Failed to create ticket. Please try again.');
-        // Show error notification for better visibility
-        addNotification('Failed to create ticket. Please try again.', 'error', {
-          title: 'Error',
+        
+        // Extract detailed error message from API response if available
+        let errorMessage = 'Failed to create ticket. Please try again.';
+        if (error.response?.data?.message) {
+          errorMessage = error.response.data.message;
+        } else if (error.message) {
+          errorMessage = error.message;
+        }
+        
+        setSubmitError(errorMessage);
+        
+        // Show error notification with the detailed message
+        addNotification(errorMessage, 'error', {
+          title: 'Error Creating Ticket',
           duration: 0 // No auto-dismiss for errors
         });
       }

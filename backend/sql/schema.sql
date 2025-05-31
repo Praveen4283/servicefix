@@ -213,11 +213,15 @@ CREATE TABLE IF NOT EXISTS sla_policy_tickets (
   resolution_met BOOLEAN,
   created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
   updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-  metadata JSONB
+  metadata JSONB,
+  CONSTRAINT unique_ticket_sla_policy UNIQUE (ticket_id)
 );
 
 -- Comment on metadata column
 COMMENT ON COLUMN sla_policy_tickets.metadata IS 'JSON structure containing: {pausePeriods: [{startedAt: Date, endedAt: Date}], totalPausedTime: number}';
+
+-- Comment on unique constraint
+COMMENT ON CONSTRAINT unique_ticket_sla_policy ON sla_policy_tickets IS 'Ensures each ticket has only one SLA policy assigned at a time to prevent conflicts';
 
 -- Automation rules
 CREATE TABLE IF NOT EXISTS automation_rules (
@@ -419,7 +423,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_settings_category ON settings (category);
 INSERT INTO settings (category, settings_data) 
 VALUES (
     'email', 
-    '{"smtpServer": "smtp.mailgun.org", "smtpPort": 587, "smtpUsername": "postmaster@sandboxeca4aa11a2a34b0d969c416f32d7686d.mailgun.org", "smtpPassword": "Raju@4283", "emailFromName": "ServiceFix Support", "emailReplyTo": "support@servicefix.com", "enableEmailNotifications": true}'
+    '{"smtpServer": "smtp.example.com", "smtpPort": 587, "smtpUsername": "username", "smtpPassword": "password_placeholder", "emailFromName": "ServiceFix Support", "emailReplyTo": "support@example.com", "enableEmailNotifications": true}'
 )
 ON CONFLICT (category) DO NOTHING;
 
@@ -987,7 +991,7 @@ $$ LANGUAGE plpgsql;
 CREATE OR REPLACE FUNCTION reassign_sla_on_priority_change()
 RETURNS TRIGGER AS $$
 DECLARE
-  sla_policy_id BIGINT;
+  new_sla_policy_id BIGINT;
   current_policy_id BIGINT;
   policy_record RECORD;
   first_response_due TIMESTAMP WITH TIME ZONE;
@@ -1006,14 +1010,14 @@ BEGIN
     END IF;
     
     -- Get SLA policy for this priority and organization
-    SELECT sp.id INTO sla_policy_id
+    SELECT sp.id INTO new_sla_policy_id
     FROM sla_policies sp
     WHERE sp.organization_id = NEW.organization_id AND sp.ticket_priority_id = NEW.priority_id;
     
     -- If no policy found, create one
-    IF NOT FOUND OR sla_policy_id IS NULL THEN
+    IF NOT FOUND OR new_sla_policy_id IS NULL THEN
       BEGIN
-        sla_policy_id := get_or_create_sla_policy_for_priority(NEW.priority_id, NEW.organization_id);
+        new_sla_policy_id := get_or_create_sla_policy_for_priority(NEW.priority_id, NEW.organization_id);
       EXCEPTION WHEN OTHERS THEN
         RAISE NOTICE 'Failed to create SLA policy for ticket % with priority %: %', NEW.id, NEW.priority_id, SQLERRM;
         NEW.sla_status := 'inactive';
@@ -1021,14 +1025,14 @@ BEGIN
       END;
     END IF;
     
-    -- Check if the ticket already has this policy assigned
+    -- Check if the ticket already has an SLA policy assigned
     SELECT spt.sla_policy_id INTO current_policy_id
     FROM sla_policy_tickets spt
     WHERE spt.ticket_id = NEW.id;
     
     -- If ticket already has this exact policy, no need to update
-    IF FOUND AND current_policy_id = sla_policy_id THEN
-      RAISE NOTICE 'Ticket % already has SLA policy % assigned', NEW.id, sla_policy_id;
+    IF FOUND AND current_policy_id = new_sla_policy_id THEN
+      RAISE NOTICE 'Ticket % already has SLA policy % assigned', NEW.id, new_sla_policy_id;
       -- Update ticket's SLA status to ensure correct status
       NEW.sla_status := COALESCE(NEW.sla_status, 'active');
       RETURN NEW;
@@ -1037,11 +1041,11 @@ BEGIN
     -- Get policy details
     SELECT * INTO policy_record
     FROM sla_policies
-    WHERE id = sla_policy_id;
+    WHERE id = new_sla_policy_id;
     
     IF NOT FOUND THEN
       -- Policy not found, log an error but continue
-      RAISE NOTICE 'SLA policy % not found for ticket % with priority %', sla_policy_id, NEW.id, NEW.priority_id;
+      RAISE NOTICE 'SLA policy % not found for ticket % with priority %', new_sla_policy_id, NEW.id, NEW.priority_id;
       NEW.sla_status := 'inactive';
       RETURN NEW;
     END IF;
@@ -1054,32 +1058,41 @@ BEGIN
     -- Update due date on ticket
     NEW.due_date := resolution_due;
     
-    -- Update or create SLA policy ticket
-    INSERT INTO sla_policy_tickets (
-      ticket_id,
-      sla_policy_id,
-      first_response_due_at,
-      next_response_due_at,
-      resolution_due_at,
-      first_response_met,
-      next_response_met,
-      resolution_met
-    )
-    VALUES (
-      NEW.id,
-      sla_policy_id,
-      first_response_due,
-      next_response_due,
-      resolution_due,
-      FALSE,
-      FALSE,
-      FALSE
-    )
-    ON CONFLICT (ticket_id) DO UPDATE SET
-      sla_policy_id = EXCLUDED.sla_policy_id,
-      first_response_due_at = EXCLUDED.first_response_due_at,
-      next_response_due_at = EXCLUDED.next_response_due_at,
-      resolution_due_at = EXCLUDED.resolution_due_at;
+    -- If an SLA policy ticket exists, update it, otherwise create a new one
+    IF current_policy_id IS NOT NULL THEN
+      UPDATE sla_policy_tickets
+      SET 
+        sla_policy_id = new_sla_policy_id,
+        first_response_due_at = first_response_due,
+        next_response_due_at = next_response_due,
+        resolution_due_at = resolution_due
+      WHERE ticket_id = NEW.id;
+      
+      RAISE NOTICE 'Updated SLA policy for ticket % from % to %', NEW.id, current_policy_id, new_sla_policy_id;
+    ELSE
+      INSERT INTO sla_policy_tickets (
+        ticket_id,
+        sla_policy_id,
+        first_response_due_at,
+        next_response_due_at,
+        resolution_due_at,
+        first_response_met,
+        next_response_met,
+        resolution_met
+      )
+      VALUES (
+        NEW.id,
+        new_sla_policy_id,
+        first_response_due,
+        next_response_due,
+        resolution_due,
+        FALSE,
+        FALSE,
+        FALSE
+      );
+      
+      RAISE NOTICE 'Created new SLA policy ticket for ticket % with policy %', NEW.id, new_sla_policy_id;
+    END IF;
     
     -- Update ticket with SLA status
     NEW.sla_status := 'active';
@@ -1104,38 +1117,38 @@ END;
 $$ LANGUAGE plpgsql;
 
 -- Function to update ticket SLA status
-CREATE OR REPLACE FUNCTION update_ticket_sla_status(ticket RECORD)
-RETURNS RECORD AS $$
+CREATE OR REPLACE FUNCTION update_ticket_sla_status()
+RETURNS TRIGGER AS $$
 DECLARE
   status_is_resolved BOOLEAN;
   status_is_pending BOOLEAN;
   status_text VARCHAR;
 BEGIN
   -- Check if priority is null
-  IF ticket.priority_id IS NULL THEN
-    ticket.sla_status := 'inactive';
-    RETURN ticket;
+  IF NEW.priority_id IS NULL THEN
+    NEW.sla_status := 'inactive';
+    RETURN NEW;
   END IF;
   
   -- Check if status is resolved
   SELECT ts.is_resolved INTO status_is_resolved
   FROM ticket_statuses ts
-  WHERE ts.id = ticket.status_id;
+  WHERE ts.id = NEW.status_id;
   
   -- Check if status is pending
-  status_is_pending := is_pending_status(ticket.status_id);
+  status_is_pending := is_pending_status(NEW.status_id);
   
   -- Get SLA status text
   status_text := get_sla_status_text(
-    COALESCE(ticket.resolution_sla_breached, FALSE),
+    COALESCE(NEW.resolution_sla_breached, FALSE),
     status_is_resolved,
     status_is_pending,
     FALSE  -- priority is not null
   );
   
-  ticket.sla_status := status_text;
+  NEW.sla_status := status_text;
   
-  RETURN ticket;
+  RETURN NEW;
 END;
 $$ LANGUAGE plpgsql;
 
@@ -1143,17 +1156,17 @@ $$ LANGUAGE plpgsql;
 CREATE OR REPLACE FUNCTION update_tickets_sla_status()
 RETURNS VOID AS $$
 DECLARE
-  ticket RECORD;
+  ticket_record RECORD;
 BEGIN
-  FOR ticket IN 
+  FOR ticket_record IN 
     SELECT t.* 
     FROM tickets t
     WHERE t.priority_id IS NOT NULL
   LOOP
     -- Update SLA breaches
-    PERFORM check_sla_breaches(ticket.id);
+    PERFORM check_sla_breaches(ticket_record.id);
     
-    -- Update SLA status
+    -- Update SLA status using direct calculation rather than calling the trigger function
     UPDATE tickets
     SET sla_status = (
       SELECT get_sla_status_text(
@@ -1164,9 +1177,9 @@ BEGIN
       )
       FROM tickets t
       JOIN ticket_statuses ts ON t.status_id = ts.id
-      WHERE t.id = ticket.id
+      WHERE t.id = ticket_record.id
     )
-    WHERE id = ticket.id;
+    WHERE id = ticket_record.id;
   END LOOP;
 END;
 $$ LANGUAGE plpgsql;

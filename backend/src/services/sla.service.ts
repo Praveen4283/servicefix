@@ -339,33 +339,60 @@ class SLAService {
 
   /**
    * Process ticket first response and update SLA status
+   * @param ticketId Ticket ID to process first response for
+   * @param userId User ID who made the response (if applicable)
+   * @returns Updated SLA policy ticket or null if none exists
    */
-  async processFirstResponse(ticketId: number): Promise<void> {
+  async processFirstResponse(ticketId: number, userId?: number): Promise<SLAPolicyTicket | null> {
     const slaPolicyTicketRepository = AppDataSource.getRepository(SLAPolicyTicket);
+    const ticketRepository = AppDataSource.getRepository(Ticket);
     const now = createUTCDate();
+
+    logger.info(`Processing first response for ticket ${ticketId}`);
 
     // Get SLA information for the ticket
     const slaInfo = await slaPolicyTicketRepository.findOne({ 
-      where: { ticketId } as any 
+      where: { ticketId } as any,
+      relations: ['slaPolicy']
     });
 
-    if (slaInfo && slaInfo.firstResponseMet === undefined) {
+    if (!slaInfo) {
+      logger.warn(`No SLA policy found for ticket ${ticketId}`);
+      return null;
+    }
+
+    // Only process if first response hasn't been marked yet
+    if (slaInfo.firstResponseMet === undefined) {
       // Check if response is within SLA
       const isWithinSLA = now <= slaInfo.firstResponseDueAt;
       
-      // Update SLA status
+      // Update SLA policy ticket
       slaInfo.firstResponseMet = isWithinSLA;
       await slaPolicyTicketRepository.save(slaInfo);
 
+      // Update ticket's first response breach status in the tickets table
+      const ticket = await ticketRepository.findOne({ where: { id: ticketId } as any });
+      if (ticket) {
+        ticket.firstResponseSlaBreached = !isWithinSLA;
+        await ticketRepository.save(ticket);
+      }
+
       logger.info(`Ticket ${ticketId} first response processed. Within SLA: ${isWithinSLA}`);
+    } else {
+      logger.info(`First response for ticket ${ticketId} was already processed. Status: ${slaInfo.firstResponseMet}`);
     }
+
+    return slaInfo;
   }
 
   /**
-   * Process ticket resolution and update SLA status
+   * Process resolution SLA and update status
+   * @param ticketId Ticket ID to process resolution for
+   * @returns Updated SLA policy ticket or null if none exists
    */
-  async processResolution(ticketId: number): Promise<void> {
+  async processResolutionSLA(ticketId: number): Promise<SLAPolicyTicket | null> {
     const slaPolicyTicketRepository = AppDataSource.getRepository(SLAPolicyTicket);
+    const ticketRepository = AppDataSource.getRepository(Ticket);
     const now = createUTCDate();
 
     // Get SLA information for the ticket
@@ -373,7 +400,12 @@ class SLAService {
       where: { ticketId } as any 
     });
 
-    if (slaInfo && slaInfo.resolutionMet === undefined) {
+    if (!slaInfo) {
+      return null;
+    }
+
+    // Only process if resolution hasn't been marked yet
+    if (slaInfo.resolutionMet === undefined) {
       // Check if resolution is within SLA
       const isWithinSLA = now <= slaInfo.resolutionDueAt;
       
@@ -381,10 +413,62 @@ class SLAService {
       slaInfo.resolutionMet = isWithinSLA;
       await slaPolicyTicketRepository.save(slaInfo);
 
+      // Update ticket's resolution breach status in the tickets table
+      const ticket = await ticketRepository.findOne({ where: { id: ticketId } as any });
+      if (ticket) {
+        ticket.resolutionSlaBreached = !isWithinSLA;
+        await ticketRepository.save(ticket);
+      }
+
       logger.info(`Ticket ${ticketId} resolution processed. Within SLA: ${isWithinSLA}`);
     }
+
+    return slaInfo;
   }
-  
+
+  /**
+   * Update SLA breach status in ticket record
+   * @param ticketId Ticket ID to update
+   * @returns Updated ticket or null if not found
+   */
+  async updateTicketSLABreachStatus(ticketId: number): Promise<Ticket | null> {
+    const ticketRepository = AppDataSource.getRepository(Ticket);
+    const slaPolicyTicketRepository = AppDataSource.getRepository(SLAPolicyTicket);
+    
+    // Get the ticket first
+    const ticket = await ticketRepository.findOne({ where: { id: ticketId } as any });
+    if (!ticket) {
+      return null;
+    }
+    
+    // Get current SLA status
+    const slaStatus = await this.checkSLAStatus(ticket);
+    
+    if (!slaStatus) {
+      return null;
+    }
+    
+    // Update ticket breach status
+    ticket.firstResponseSlaBreached = slaStatus.isFirstResponseBreached;
+    ticket.resolutionSlaBreached = slaStatus.isResolutionBreached;
+    
+    // Set SLA status field
+    if (ticket.slaStatus !== 'paused') {
+      if (slaStatus.isResolutionBreached) {
+        ticket.slaStatus = 'breached';
+      } else if (slaStatus.resolutionPercentage >= 90) {
+        ticket.slaStatus = 'critical';
+      } else if (slaStatus.resolutionPercentage >= 75) {
+        ticket.slaStatus = 'warning';
+      } else {
+        ticket.slaStatus = 'active';
+      }
+    }
+    
+    await ticketRepository.save(ticket);
+    return ticket;
+  }
+
   /**
    * Check for tickets needing escalation and apply escalation actions
    * @returns Number of tickets escalated
@@ -613,6 +697,12 @@ class SLAService {
       const slaPolicyTicketRepository = AppDataSource.getRepository(SLAPolicyTicket);
       const ticketRepository = AppDataSource.getRepository(Ticket);
       
+      // Check if SLA is already assigned to this ticket first
+      const existingSLA = await slaPolicyTicketRepository.findOne({
+        where: { ticketId: ticket.id } as any,
+        relations: ['slaPolicy']
+      });
+      
       // Find SLA policy for this priority
       const slaPolicy = await slaPolicyRepository.findOne({
         where: { 
@@ -621,32 +711,42 @@ class SLAService {
         }
       }) as SLAPolicy | null;
       
-      // Get ticket with priority information
-      const fullTicket = await ticketRepository.findOne({
-        where: { id: ticket.id },
-        relations: ['priority']
-      });
+      // Get ticket with priority information only if needed
+      let fullTicket: Ticket | null = null;
+      let matchingPolicy: SLAPolicy | null = slaPolicy;
       
       // If no direct policy match, try to find policy based on priority name
-      let matchingPolicy: SLAPolicy | null = slaPolicy;
-      if (!matchingPolicy && fullTicket?.priority?.name) {
-        const priorityName = fullTicket.priority.name.toLowerCase();
-        logger.info(`No direct SLA policy match, trying to find default SLA for priority name: ${priorityName}`);
-        
-        // Look for any policy matching the priority name pattern
-        const policies = await slaPolicyRepository.find({
-          where: { organizationId: ticket.organizationId }
+      if (!matchingPolicy) {
+        fullTicket = await ticketRepository.findOne({
+          where: { id: ticket.id },
+          relations: ['priority']
         });
         
-        // Try to find a policy with a name containing the priority name
-        matchingPolicy = policies.find(p => 
-          p.name.toLowerCase().includes(priorityName) || 
-          (p.description && p.description.toLowerCase().includes(priorityName))
-        ) || null; // Convert undefined to null
-        
-        if (matchingPolicy) {
-          logger.info(`Found matching SLA policy ${matchingPolicy.id} for priority name ${priorityName}`);
+        if (fullTicket?.priority?.name) {
+          const priorityName = fullTicket.priority.name.toLowerCase();
+          logger.debug(`No direct SLA policy match, trying to find default SLA for priority name: ${priorityName}`);
+          
+          // Look for any policy matching the priority name pattern
+          const policies = await slaPolicyRepository.find({
+            where: { organizationId: ticket.organizationId }
+          });
+          
+          // Try to find a policy with a name containing the priority name
+          matchingPolicy = policies.find(p => 
+            p.name.toLowerCase().includes(priorityName) || 
+            (p.description && p.description.toLowerCase().includes(priorityName))
+          ) || null; // Convert undefined to null
+          
+          if (matchingPolicy) {
+            logger.debug(`Found matching SLA policy ${matchingPolicy.id} for priority name ${priorityName}`);
+          }
         }
+      }
+      
+      // If same policy is already assigned, don't reassign
+      if (existingSLA && matchingPolicy && existingSLA.slaPolicyId === matchingPolicy.id) {
+        logger.info(`Ticket ${ticket.id} already has SLA policy ${existingSLA.slaPolicyId} assigned`);
+        return existingSLA;
       }
       
       if (!matchingPolicy) {
@@ -654,20 +754,10 @@ class SLAService {
         return null;
       }
       
-      // Check if SLA is already assigned to this ticket
-      const existingSLA = await slaPolicyTicketRepository.findOne({
-        where: { ticketId: ticket.id } as any,
-        relations: ['slaPolicy']
-      });
-      
-      // If same policy is already assigned, check if we need to update it
-      if (existingSLA && existingSLA.slaPolicyId === matchingPolicy.id) {
-        logger.info(`Ticket ${ticket.id} already has SLA policy ${existingSLA.slaPolicyId} assigned`);
-        return existingSLA;
+      // Only log successful assignments when we're actually going to make a change
+      if (!existingSLA || (existingSLA && existingSLA.slaPolicyId !== matchingPolicy.id)) {
+        logger.info(`Assigning SLA policy ${matchingPolicy.id} to ticket ${ticket.id} for priority ID ${ticket.priorityId}`);
       }
-      
-      // If priority changed, we need to update the SLA policy
-      logger.info(`Assigning/updating SLA policy ${matchingPolicy.id} to ticket ${ticket.id} based on priority ID ${ticket.priorityId}`);
       
       // Create new SLA assignment or update existing one
       return this.assignSLAToTicket(ticket.id, matchingPolicy.id);
@@ -993,6 +1083,16 @@ class SLAService {
     
     // Save the updated SLA information
     return await slaPolicyTicketRepository.save(slaInfo);
+  }
+
+  /**
+   * Get a ticket by ID
+   * @param ticketId The ID of the ticket to retrieve
+   * @returns The ticket or null if not found
+   */
+  async getTicketById(ticketId: number): Promise<Ticket | null> {
+    const ticketRepository = AppDataSource.getRepository(Ticket);
+    return ticketRepository.findOne({ where: { id: ticketId } as any });
   }
 }
 

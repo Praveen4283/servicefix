@@ -1,8 +1,27 @@
 # ServiceFix - Service Desk & Support Ticket System
 
-*Last Updated: May 28, 2024*
+*Last Updated: June 12, 2024*
 
 A comprehensive service desk and ticket management system built with React, Node.js, and PostgreSQL.
+
+## Recent Improvements
+
+- 🔐 **CSRF Protection**: Added CSRF token endpoint to secure API requests against cross-site request forgery
+- 📨 **Notification Service**: Improved notification service initialization with lazy loading and database connection resilience
+- 🔒 **Authentication Flow**: Enhanced logout functionality to handle edge cases and ensure secure session termination
+- 🚀 **Route Consistency**: Fixed logout redirect paths to use correct login URL across frontend components
+- 🚨 **Error Handling**: Improved error handling for database connection issues during application startup
+- 🧹 **Type Safety**: Removed excessive use of `any` types and improved TypeScript typing throughout the codebase
+- 🔄 **Naming Conventions**: Added utilities to standardize conversion between snake_case (database) and camelCase (TypeScript) naming
+- 🏗️ **React Patterns**: Updated components to use modern React patterns with functional components and hooks
+- 🧩 **Code Organization**: Improved code organization with better separation of concerns and more consistent patterns
+- 🛠️ **Dependency Cleanup**: Removed unused dependencies (chart.js, react-chartjs-2, notistack, react-icons) to improve build time and reduce bundle size
+- 🔄 **UI Library Standardization**: Consolidated UI components to use Material-UI instead of mixing with Ant Design
+- 🖥️ **Knowledge Base Article Detail**: Implemented complete article detail page with rich content display
+- 📱 **Chatbot Enhancement**: Improved chatbot implementation with ticket creation and article navigation features
+- 🔔 **Notification System**: Created standardized notification utilities for consistent messaging
+- 🚀 **Build Process**: Enhanced backend build process with production-optimized scripts
+- 🗃️ **Storage Integration**: Consolidated Supabase client initialization for more reliable file operations
 
 ## Features
 
@@ -31,6 +50,44 @@ ServiceFix uses a modern architecture with a clear separation between frontend a
 - **Real-time**: WebSocket integration via Socket.io for live updates and notifications
 - **File Storage**: Supabase Storage for file handling and media uploads
 - **Caching**: Local caching with React Query for API data
+
+### Backend Architecture
+
+The backend follows a modular, TypeScript-based architecture with several key features:
+
+#### Error Handling
+- Centralized error handling with the `AppError` class
+- Different error types with appropriate HTTP status codes
+- Structured error responses for API clients
+- Async error handling with the `asyncHandler` utility
+
+#### Authentication System
+- JWT-based authentication with access and refresh tokens
+- Centralized authentication service (`authService`)
+- CSRF protection for non-GET requests
+- Secure password reset and token management
+
+#### Dependency Injection
+- Custom dependency injection container for managing services
+- Registration of services with singleton/non-singleton support
+- Clear dependency management without circular dependencies
+
+#### Database Management
+- TypeORM integration with PostgreSQL
+- Database migrations for schema changes
+- Schema version tracking table for migration history
+- Database connection pool with retry logic
+
+#### API Versioning
+- Versioned API routes (/api/v1/...)
+- Backward compatibility support
+- Standardized API responses
+
+#### Security Features
+- CSRF protection middleware
+- Rate limiting for API endpoints
+- Helmet for HTTP security headers
+- Content Security Policy (CSP) implementation
 
 ### Architectural Patterns
 
@@ -194,87 +251,330 @@ FRONTEND_URL=http://localhost:3000
 
 ## API Documentation
 
-The ServiceFix backend provides a comprehensive RESTful API. Here's an overview of the main API endpoints:
+The ServiceFix backend provides a comprehensive RESTful API with robust versioning support. The API is accessible via both versioned (`/api/v1/`) and legacy (`/api/`) endpoints for backward compatibility.
+
+### API Versioning and Structure
+
+- **Current Version**: v1
+- **Base URL**: `/api/v1` (recommended) or `/api` (legacy)
+- **Authentication**: JWT Bearer token required for most endpoints
+- **Response Format**: JSON with consistent structure (`{ status: 'success|error', data|message: {...} }`)
+- **Rate Limiting**: Configurable rate limiting to protect against abuse
+- **Error Handling**: Structured error responses with appropriate HTTP status codes
 
 ### Authentication Endpoints
 
-- **POST /api/auth/login** - User login
-- **POST /api/auth/register** - Register new user
-- **POST /api/auth/forgot-password** - Request password reset
-- **POST /api/auth/reset-password** - Reset password with token
-- **POST /api/auth/refresh-token** - Refresh access token
+- **POST /api/v1/auth/register** - Register a new user
+  - Required fields: `email`, `password`, `firstName`, `lastName`, `organizationId`
+  - Optional fields: `role`, `avatar`, `phone`, `timezone`, `language`
+
+- **POST /api/v1/auth/login** - User login
+  - Required fields: `email`, `password`
+  - Returns: Access token, refresh token, and user profile
+
+- **POST /api/v1/auth/refresh-token** - Refresh access token
+  - Required fields: `refreshToken`
+  - Returns: New access token and refresh token
+
+- **POST /api/v1/auth/logout** - Logout user
+  - Requires authentication
+  - Required fields: `refreshToken`
+
+- **POST /api/v1/auth/forgot-password** - Request password reset
+  - Required fields: `email`
+  - Sends reset email with token
+
+- **POST /api/v1/auth/reset-password** - Reset password with token
+  - Required fields: `token`, `password`
+
+- **POST /api/v1/auth/change-password** - Change password (authenticated)
+  - Requires authentication
+  - Required fields: `currentPassword`, `newPassword`
+
+- **GET /api/v1/csrf-token** - Get CSRF token for form submissions
+  - Returns: CSRF token to be included in subsequent requests
 
 ### Ticket Endpoints
 
-- **GET /api/tickets** - List tickets with pagination and filtering
-- **POST /api/tickets** - Create new ticket
-- **GET /api/tickets/:id** - Get ticket details
-- **PUT /api/tickets/:id** - Update ticket
-- **DELETE /api/tickets/:id** - Delete ticket
-- **GET /api/tickets/:id/comments** - Get ticket comments
-- **POST /api/tickets/:id/comments** - Add comment to ticket
-- **POST /api/tickets/:id/assign** - Assign ticket to agent
+- **GET /api/v1/tickets** - List tickets with pagination and filtering
+  - Query parameters: `page`, `limit`, `sortBy`, `sortOrder`, and various filters
+  - Requires authentication
+
+- **GET /api/v1/tickets/:id** - Get ticket details
+  - Requires authentication
+  - Returns: Complete ticket details with related entities
+
+- **POST /api/v1/tickets** - Create new ticket
+  - Requires authentication
+  - Required fields: `subject`, `description`, `requesterId`, `priorityId`
+  - Optional fields: `assigneeId`, `departmentId`, `typeId`, `dueDate`, `tags`
+  - Supports file uploads via `multipart/form-data`
+
+- **PUT /api/v1/tickets/:id** - Update ticket
+  - Requires authentication
+  - Updateable fields: `subject`, `description`, `assigneeId`, `departmentId`, `priorityId`, `statusId`, `typeId`, `dueDate`, `tags`
+
+- **DELETE /api/v1/tickets/:id** - Delete ticket
+  - Requires authentication with appropriate permissions
+
+- **POST /api/v1/tickets/:id/comments** - Add comment to ticket
+  - Requires authentication
+  - Required fields: `content`
+  - Optional fields: `isInternal`
+
+- **GET /api/v1/tickets/:id/history** - Get ticket history
+  - Requires authentication
+  - Returns: Timeline of ticket changes with user information
+
+- **POST /api/v1/tickets/:id/attachments** - Upload attachments to ticket
+  - Requires authentication
+  - Supports multiple file uploads (max 10 files)
+  - Files sent via `multipart/form-data`
+
+- **GET /api/v1/tickets/attachments/download/:attachmentId** - Download attachment
+  - Requires authentication
+  - Returns: File download stream
+
+- **POST /api/v1/tickets/:id/update-sla** - Update ticket SLA
+  - Requires authentication
+  - Updates SLA based on current ticket priority
+
+### Ticket Reference Data Endpoints
+
+- **GET /api/v1/tickets/departments** - List all departments
+- **GET /api/v1/tickets/priorities** - List all ticket priorities
+- **GET /api/v1/tickets/types** - List all ticket types
+- **GET /api/v1/tickets/statuses** - List all ticket statuses
 
 ### User Endpoints
 
-- **GET /api/users** - List users
-- **GET /api/users/:id** - Get user details
-- **PUT /api/users/:id** - Update user
-- **DELETE /api/users/:id** - Delete user
-- **GET /api/users/me** - Get current user profile
-- **PUT /api/users/me** - Update current user profile
+- **GET /api/v1/users** - List users with pagination and filtering
+  - Requires authentication with appropriate permissions
+  - Query parameters: `page`, `limit`, `search`, `role`, `isActive`
+
+- **GET /api/v1/users/:id** - Get user details
+  - Requires authentication
+
+- **PUT /api/v1/users/:id** - Update user
+  - Requires authentication with appropriate permissions
+  - Updateable fields: `firstName`, `lastName`, `email`, `role`, `isActive`, etc.
+
+- **DELETE /api/v1/users/:id** - Delete user
+  - Requires authentication with admin permissions
+
+- **GET /api/v1/users/me** - Get current user profile
+  - Requires authentication
+  - Returns: Complete user profile with permissions
+
+- **PUT /api/v1/users/me** - Update current user profile
+  - Requires authentication
+  - Updateable fields: `firstName`, `lastName`, `avatar`, `phone`, `timezone`, `language`
+
+- **PUT /api/v1/users/me/preferences** - Update user preferences
+  - Requires authentication
+  - Updateable fields: Various user preferences (theme, notifications, etc.)
 
 ### Knowledge Base Endpoints
 
-- **GET /api/knowledge** - List knowledge base articles
-- **POST /api/knowledge** - Create new article
-- **GET /api/knowledge/:id** - Get article details
-- **PUT /api/knowledge/:id** - Update article
-- **DELETE /api/knowledge/:id** - Delete article
-- **GET /api/knowledge/categories** - List article categories
+- **GET /api/v1/knowledge** - List knowledge base articles
+  - Query parameters: `page`, `limit`, `search`, `categoryId`, `status`
+
+- **GET /api/v1/knowledge/:id** - Get article details
+  - Returns: Complete article with related data
+
+- **POST /api/v1/knowledge** - Create new article
+  - Requires authentication with appropriate permissions
+  - Required fields: `title`, `content`, `categoryId`
+  - Optional fields: `status`, `tags`, `excerpt`, `metaTitle`, `metaDescription`
+
+- **PUT /api/v1/knowledge/:id** - Update article
+  - Requires authentication with appropriate permissions
+  - Updateable fields: All article fields
+
+- **DELETE /api/v1/knowledge/:id** - Delete article
+  - Requires authentication with appropriate permissions
+
+- **GET /api/v1/knowledge/categories** - List article categories
+  - Returns: Hierarchical category structure
+
+- **POST /api/v1/knowledge/categories** - Create new category
+  - Requires authentication with appropriate permissions
+  - Required fields: `name`, `slug`
+  - Optional fields: `description`, `parentId`, `icon`, `isPrivate`
 
 ### Notification Endpoints
 
-- **GET /api/notifications** - Get user notifications with pagination and filtering
-- **GET /api/notifications/unread** - Get count of unread notifications
-- **PUT /api/notifications/:id/read** - Mark specific notification as read
-- **PUT /api/notifications/read-all** - Mark all notifications as read
-- **DELETE /api/notifications/:id** - Delete a specific notification
-- **DELETE /api/notifications/all** - Delete all notifications for the current user
-- **GET /api/notifications/preferences** - Get notification preferences for current user
-- **PUT /api/notifications/preferences** - Update notification preferences
-- **POST /api/notifications/test** - Send a test notification (admin only)
+- **GET /api/v1/notifications** - Get user notifications with pagination
+  - Requires authentication
+  - Query parameters: `page`, `limit`, `read` (true/false)
+
+- **POST /api/v1/notifications/:id/read** - Mark specific notification as read
+  - Requires authentication
+
+- **POST /api/v1/notifications/read-all** - Mark all notifications as read
+  - Requires authentication
+
+- **DELETE /api/v1/notifications/:id** - Delete a specific notification
+  - Requires authentication
+
+- **DELETE /api/v1/notifications** - Delete all notifications for the current user
+  - Requires authentication
+
+- **GET /api/v1/notifications/preferences** - Get notification preferences
+  - Requires authentication
+  - Returns: User's notification preferences for different channels and event types
+
+- **PUT /api/v1/notifications/preferences** - Update notification preferences
+  - Requires authentication
+  - Updateable fields: Channel preferences (email, push, in-app) for different event types
+
+- **POST /api/v1/notifications/test** - Send a test notification (development only)
+  - Requires authentication
 
 ### SLA Endpoints
 
-- **GET /api/sla** - Get SLA policies
-- **POST /api/sla** - Create new SLA policy
-- **GET /api/sla/:id** - Get SLA policy details
-- **PUT /api/sla/:id** - Update SLA policy
-- **DELETE /api/sla/:id** - Delete SLA policy
+- **GET /api/v1/sla** - Get SLA policies
+  - Requires authentication
+  - Query parameters: `organizationId`
+
+- **POST /api/v1/sla** - Create new SLA policy
+  - Requires authentication with appropriate permissions
+  - Required fields: `name`, `organizationId`, `ticketPriorityId`, `resolutionHours`
+  - Optional fields: `description`, `firstResponseHours`, `nextResponseHours`, `businessHoursOnly`
+
+- **GET /api/v1/sla/:id** - Get SLA policy details
+  - Requires authentication
+
+- **PUT /api/v1/sla/:id** - Update SLA policy
+  - Requires authentication with appropriate permissions
+  - Updateable fields: All SLA policy fields
+
+- **DELETE /api/v1/sla/:id** - Delete SLA policy
+  - Requires authentication with appropriate permissions
 
 ### Business Hours Endpoints
 
-- **GET /api/business-hours** - Get business hours configurations
-- **POST /api/business-hours** - Create business hours configuration
-- **GET /api/business-hours/:id** - Get specific business hours configuration
-- **PUT /api/business-hours/:id** - Update business hours configuration
-- **DELETE /api/business-hours/:id** - Delete business hours configuration
+- **GET /api/v1/business-hours** - Get business hours configurations
+  - Requires authentication
+  - Query parameters: `organizationId`
+
+- **POST /api/v1/business-hours** - Create business hours configuration
+  - Requires authentication with appropriate permissions
+  - Required fields: `name`, `organizationId`
+  - Optional fields: Day-specific start/end times, `timezone`, `isDefault`
+
+- **GET /api/v1/business-hours/:id** - Get specific business hours configuration
+  - Requires authentication
+
+- **PUT /api/v1/business-hours/:id** - Update business hours configuration
+  - Requires authentication with appropriate permissions
+  - Updateable fields: All business hours fields
+
+- **DELETE /api/v1/business-hours/:id** - Delete business hours configuration
+  - Requires authentication with appropriate permissions
+
+### Chatbot Endpoints
+
+- **GET /api/v1/chat/conversations** - List chat conversations
+  - Requires authentication
+
+- **POST /api/v1/chat/conversations** - Create new conversation
+  - Requires authentication
+  - Optional fields: `visitorId`
+
+- **GET /api/v1/chat/conversations/:id** - Get conversation details
+  - Requires authentication
+
+- **POST /api/v1/chat/conversations/:id/messages** - Add message to conversation
+  - Requires authentication
+  - Required fields: `content`
+  - Optional fields: `metadata`
+
+- **GET /api/v1/chat/conversations/:id/messages** - Get conversation messages
+  - Requires authentication
+  - Query parameters: `page`, `limit`
+
+- **POST /api/v1/chat/conversations/:id/end** - End conversation
+  - Requires authentication
+
+### Report Endpoints
+
+- **GET /api/v1/reports/tickets/summary** - Get ticket summary statistics
+  - Requires authentication
+  - Query parameters: `startDate`, `endDate`, `departmentId`
+
+- **GET /api/v1/reports/tickets/by-status** - Get tickets grouped by status
+  - Requires authentication
+  - Query parameters: `startDate`, `endDate`, `departmentId`
+
+- **GET /api/v1/reports/tickets/by-priority** - Get tickets grouped by priority
+  - Requires authentication
+  - Query parameters: `startDate`, `endDate`, `departmentId`
+
+- **GET /api/v1/reports/tickets/by-agent** - Get tickets grouped by agent
+  - Requires authentication
+  - Query parameters: `startDate`, `endDate`, `departmentId`
+
+- **GET /api/v1/reports/sla/compliance** - Get SLA compliance reports
+  - Requires authentication
+  - Query parameters: `startDate`, `endDate`, `departmentId`
+
+- **GET /api/v1/reports/agent/performance** - Get agent performance metrics
+  - Requires authentication
+  - Query parameters: `startDate`, `endDate`, `agentId`
 
 ### Settings Endpoints
 
-- **GET /api/settings** - Get all settings
-- **GET /api/settings/:category** - Get settings by category (email, general, ticket, sla)
-- **PUT /api/settings/:category** - Update settings for category
-- **GET /api/settings/email** - Get email configuration settings
-- **PUT /api/settings/email** - Update email configuration settings
-- **POST /api/settings/email/test** - Test email configuration by sending a test email
-- **GET /api/settings/general** - Get general application settings
-- **PUT /api/settings/general** - Update general application settings
-- **GET /api/settings/ticket** - Get ticket-related settings
-- **PUT /api/settings/ticket** - Update ticket-related settings
-- **GET /api/settings/sla** - Get SLA configuration settings
-- **PUT /api/settings/sla** - Update SLA configuration settings
+- **GET /api/v1/settings** - Get all settings
+  - Requires authentication with appropriate permissions
+
+- **GET /api/v1/settings/:category** - Get settings by category
+  - Requires authentication with appropriate permissions
+  - Available categories: `email`, `general`, `ticket`, `sla`
+
+- **PUT /api/v1/settings/:category** - Update settings for category
+  - Requires authentication with appropriate permissions
+  - Request body: JSON object with settings for the specified category
+
+- **GET /api/v1/settings/email** - Get email configuration settings
+  - Requires authentication with appropriate permissions
+  - Returns: SMTP configuration and notification settings
+
+- **PUT /api/v1/settings/email** - Update email configuration settings
+  - Requires authentication with admin permissions
+  - Updateable fields: `smtpServer`, `smtpPort`, `smtpUsername`, `smtpPassword`, `emailFromName`, `emailReplyTo`, `enableEmailNotifications`
+
+- **POST /api/v1/settings/email/test** - Test email configuration
+  - Requires authentication with admin permissions
+  - Sends a test email to the authenticated user
+
+### AI Integration Endpoints
+
+- **POST /api/v1/ai/analyze-sentiment** - Analyze text sentiment
+  - Requires authentication
+  - Required fields: `text`
+  - Returns: Sentiment score and analysis
+
+- **POST /api/v1/ai/generate-summary** - Generate AI summary for text
+  - Requires authentication
+  - Required fields: `text`
+  - Returns: Concise summary of provided text
+
+- **POST /api/v1/ai/suggest-category** - Suggest ticket category based on text
+  - Requires authentication
+  - Required fields: `text`
+  - Returns: Suggested categories and confidence scores
+
+- **POST /api/v1/ai/suggest-priority** - Suggest ticket priority based on text
+  - Requires authentication
+  - Required fields: `text`
+  - Returns: Suggested priority and confidence score
+
+- **POST /api/v1/ai/suggest-response** - Generate suggested response
+  - Requires authentication
+  - Required fields: `ticketId` or `text`
+  - Optional fields: `maxLength`
+  - Returns: AI-generated response suggestion
 
 For detailed API documentation including request/response formats and example usage, refer to the [API Documentation](https://example.com/api-docs) when running the application with the `ENABLE_DOCS=true` environment variable.
 
@@ -1071,7 +1371,7 @@ Key frontend components and their latest significant changes:
 
 | Component | Latest Version | Last Updated | File Path |
 |-----------|---------------|-------------|-----------|
-| LandingPage | 2.4.0 | May 22, 2024 | frontend/src/pages/LandingPage.tsx |
+| LandingPage | 2.5.0 | May 22, 2024 | frontend/src/pages/LandingPage.tsx |
 | HeroSection | 3.2.0 | May 22, 2024 | frontend/src/components/landing/HeroSection.tsx |
 | FeaturesSection | 2.9.0 | May 22, 2024 | frontend/src/components/landing/FeaturesSection.tsx |
 | TestimonialsSection | 2.6.0 | May 22, 2024 | frontend/src/components/landing/TestimonialsSection.tsx |
@@ -1086,10 +1386,10 @@ Key frontend components and their latest significant changes:
 | ProfilePage | 2.2.0 | May 26, 2024 | frontend/src/pages/ProfilePage.tsx |
 | TicketContext | 3.3.0 | May 22, 2024 | frontend/src/context/TicketContext.tsx |
 | AuthContext | 2.7.0 | May 26, 2024 | frontend/src/context/AuthContext.tsx |
-| NotificationContext | 2.2.0 | May 26, 2024 | frontend/src/context/NotificationContext.tsx |
-| NotificationPreferencesContext | 1.2.0 | May 26, 2024 | frontend/src/context/NotificationPreferencesContext.tsx |
+| NotificationContext | 2.3.0 | May 27, 2024 | frontend/src/context/NotificationContext.tsx |
+| NotificationPreferencesContext | 1.3.0 | May 27, 2024 | frontend/src/context/NotificationPreferencesContext.tsx |
 | ThemeContext | 1.5.0 | May 22, 2024 | frontend/src/context/ThemeContext.tsx |
-| CookieConsentContext | 1.1.0 | May 22, 2024 | frontend/src/context/CookieConsentContext.tsx |
+| CookieConsentContext | 1.2.0 | May 22, 2024 | frontend/src/context/CookieConsentContext.tsx |
 
 For a complete and detailed version history of all components, including changelogs and optimization plans, please refer to the [VERSION_HISTORY.md](./VERSION_HISTORY.md) file in the project root. This file contains:
 
@@ -1125,6 +1425,128 @@ npm run storybook
 ## Code Optimization Status
 
 Recent code optimizations completed:
+- **NotificationContext Refactoring**: Successfully reduced from 1256 lines to 400 lines by splitting into modular components
+- **Landing Page Components**: Identified large components (HeroSection: 784 lines, TestimonialsSection: 547 lines) that require refactoring for maintainability
+- **Bundle Size Optimization**: Implemented code splitting and lazy loading for main routes
+- **Performance Monitoring**: Added Lighthouse performance tracking with baseline metrics
+
+Ongoing optimization efforts:
+- Component structure refactoring to reduce size and improve maintainability
+- Centralized styling system implementation to reduce duplication
+- Icon import optimization to reduce bundle size 
+
+## Recent Development Updates
+
+### Component Refactoring Progress (May-June 2024)
+- **NotificationContext**: Successfully reduced from 1256 lines to 400 lines by implementing modular architecture
+- **HeroSection**: Refactoring in progress, targeting reduction from 784 lines to less than 300 lines
+- **ProfilePage**: Scheduled for refactoring by June 7, 2024
+- **TestimonialsSection** and **FeaturesSection**: Scheduled for refactoring by June 21, 2024
+
+### Recent Infrastructure Updates
+- **TypeScript Updates**: Backend now uses TypeScript 5.5.2 with performance improvements
+- **Socket.io**: Updated to v4.8.1 for both client and server with enhanced authentication
+- **UI Libraries**: Added Chakra UI 3.17.0 alongside Material UI for enhanced components
+- **Data Fetching**: Integrated React Query for improved data fetching and state management
+- **Email System**: Enhanced email handling with better error recovery and configuration
+
+### Critical Fixes (May 2024)
+- Fixed issues with double notifications in the notification system
+- Improved handling of notification preferences across different formats
+- Enhanced SMTP error handling with automatic retry mechanisms
+- Fixed various UI issues with notification components in mobile view
+- Resolved issues with settings data handling and validation
+
+### Latest Component Versions
+| Component | Current Version | Last Updated |
+|-----------|----------------|-------------|
+| NotificationContext | 2.3.0 | May 27, 2024 |
+| AuthContext | 2.7.0 | May 26, 2024 |
+| ProfilePage | 2.2.0 | May 26, 2024 |
+| LandingPage | 2.5.0 | May 22, 2024 |
+| HeroSection | 3.2.0 | May 22, 2024 |
+| TicketContext | 3.3.0 | May 22, 2024 |
+
+## Version History
+
+ServiceFix maintains detailed version history to enable rollback to previous versions if needed.
+
+### Git-Based Version Control
+
+All code is tracked in Git, allowing for easy restoration to any previous commit:
+
+```bash
+# View commit history with details
+git log --pretty=format:"%h %ad | %s%d [%an]" --graph --date=short
+
+# Restore a specific file to a previous version
+git checkout [commit-hash] -- path/to/file
+
+# Restore the entire codebase to a previous state
+git checkout [commit-hash]
+```
+
+### Component Version History
+
+Key frontend components and their latest significant changes:
+
+| Component | Latest Version | Last Updated | File Path |
+|-----------|---------------|-------------|-----------|
+| LandingPage | 2.5.0 | May 22, 2024 | frontend/src/pages/LandingPage.tsx |
+| HeroSection | 3.2.0 | May 22, 2024 | frontend/src/components/landing/HeroSection.tsx |
+| FeaturesSection | 2.9.0 | May 22, 2024 | frontend/src/components/landing/FeaturesSection.tsx |
+| TestimonialsSection | 2.6.0 | May 22, 2024 | frontend/src/components/landing/TestimonialsSection.tsx |
+| PricingSection | 2.5.0 | May 22, 2024 | frontend/src/components/landing/PricingSection.tsx |
+| ContactSection | 2.3.0 | May 22, 2024 | frontend/src/components/landing/ContactSection.tsx |
+| FooterSection | 2.0.0 | May 22, 2024 | frontend/src/components/landing/FooterSection.tsx |
+| ChatbotWidget | 2.7.0 | May 22, 2024 | frontend/src/components/ChatbotWidget.tsx |
+| ReportsPage | 3.1.0 | May 22, 2024 | frontend/src/pages/ReportsPage.tsx |
+| KnowledgeBasePage | 2.8.0 | May 22, 2024 | frontend/src/pages/KnowledgeBasePage.tsx |
+| AnalyticsDashboardPage | 3.0.0 | May 22, 2024 | frontend/src/pages/AnalyticsDashboardPage.tsx |
+| CookiesPage | 1.0.0 | May 22, 2024 | frontend/src/pages/CookiesPage.tsx |
+| ProfilePage | 2.2.0 | May 26, 2024 | frontend/src/pages/ProfilePage.tsx |
+| TicketContext | 3.3.0 | May 22, 2024 | frontend/src/context/TicketContext.tsx |
+| AuthContext | 2.7.0 | May 26, 2024 | frontend/src/context/AuthContext.tsx |
+| NotificationContext | 2.3.0 | May 27, 2024 | frontend/src/context/NotificationContext.tsx |
+| NotificationPreferencesContext | 1.3.0 | May 27, 2024 | frontend/src/context/NotificationPreferencesContext.tsx |
+| ThemeContext | 1.5.0 | May 22, 2024 | frontend/src/context/ThemeContext.tsx |
+| CookieConsentContext | 1.2.0 | May 22, 2024 | frontend/src/context/CookieConsentContext.tsx |
+
+For a complete and detailed version history of all components, including changelogs and optimization plans, please refer to the [VERSION_HISTORY.md](./VERSION_HISTORY.md) file in the project root. This file contains:
+
+- Detailed changelogs for all major components
+- Component size metrics
+- Optimization plans and strategies
+- Recent fixes and updates
+- Known stable versions for rollback purposes
+
+The VERSION_HISTORY.md file is regularly updated with each release and serves as the definitive record of changes to the application.
+
+### How to Restore Previous Versions
+
+#### Using Git
+
+```bash
+# For example, to restore HeroSection.tsx to its state on March 10, 2024:
+git log --before="2024-03-10" --after="2024-03-09" -- frontend/src/components/landing/HeroSection.tsx
+# Find the commit hash from the output
+git checkout [commit-hash] -- frontend/src/components/landing/HeroSection.tsx
+```
+
+#### Using Storybook (for UI Components)
+
+The Storybook instance contains versioned UI components that can be visually inspected:
+
+```bash
+# Start Storybook to view component versions
+cd frontend
+npm run storybook
+```
+
+## Code Optimization Status
+
+Recent code optimizations completed:
+- **NotificationContext Refactoring**: Successfully reduced from 1256 lines to 400 lines by splitting into modular components
 - **Landing Page Components**: Identified large components (HeroSection: 784 lines, TestimonialsSection: 547 lines) that require refactoring for maintainability
 - **Bundle Size Optimization**: Implemented code splitting and lazy loading for main routes
 - **Performance Monitoring**: Added Lighthouse performance tracking with baseline metrics

@@ -1,4 +1,4 @@
-import React, { Suspense, useEffect } from 'react';
+import React, { Suspense, useEffect, lazy } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import { 
   CssBaseline, 
@@ -26,31 +26,32 @@ import { initializeNotificationSystem, shutdownNotificationSystem } from './serv
 // Layouts
 import AppLayout from './components/layout/AppLayout';
 
-// Public pages
+// Public pages - No code splitting needed for these small components
 import LoginPage from './pages/auth/LoginPage';
 import RegisterPage from './pages/auth/RegisterPage';
 import ForgotPasswordPage from './pages/auth/ForgotPasswordPage';
 import ResetPasswordPage from './pages/auth/ResetPasswordPage';
 import LandingPage from './pages/LandingPage';
 import CookiesPage from './pages/CookiesPage';
-
-// Protected pages
-import DashboardPage from './pages/dashboard/DashboardPage';
-import TicketDetailPage from './pages/tickets/TicketDetailPage';
-import CreateTicketPage from './pages/tickets/CreateTicketPage';
-import TicketListPage from './pages/tickets/TicketListPage';
-import KnowledgeBasePage from './pages/KnowledgeBasePage';
-import AnalyticsDashboardPage from './pages/AnalyticsDashboardPage';
-import WorkflowAutomationPage from './pages/WorkflowAutomationPage';
-import ProfilePage from './pages/ProfilePage';
-import SearchPage from './pages/SearchPage';
 import NotFoundPage from './pages/NotFoundPage';
-import ReportsPage from './pages/ReportsPage';
 
-// Admin pages
-import UsersPage from './pages/admin/UsersPage';
-import SettingsPage from './pages/admin/SettingsPage';
-import ChatbotWidget from './components/ChatbotWidget';
+// Protected pages - Use code splitting for larger components
+const DashboardPage = lazy(() => import('./pages/dashboard/DashboardPage'));
+const TicketDetailPage = lazy(() => import('./pages/tickets/TicketDetailPage'));
+const CreateTicketPage = lazy(() => import('./pages/tickets/CreateTicketPage'));
+const TicketListPage = lazy(() => import('./pages/tickets/TicketListPage'));
+const KnowledgeBasePage = lazy(() => import('./pages/KnowledgeBasePage'));
+const ArticleDetailPage = lazy(() => import('./pages/ArticleDetailPage'));
+const AnalyticsDashboardPage = lazy(() => import('./pages/AnalyticsDashboardPage'));
+const WorkflowAutomationPage = lazy(() => import('./pages/WorkflowAutomationPage'));
+const ProfilePage = lazy(() => import('./pages/ProfilePage'));
+const SearchPage = lazy(() => import('./pages/SearchPage'));
+const ReportsPage = lazy(() => import('./pages/ReportsPage'));
+
+// Admin pages - Use code splitting for admin pages
+const UsersPage = lazy(() => import('./pages/admin/UsersPage'));
+const SettingsPage = lazy(() => import('./pages/admin/SettingsPage'));
+const ChatbotWidget = lazy(() => import('./components/ChatbotWidget'));
 
 // Constants
 const IS_DEVELOPMENT = isDevelopment();
@@ -97,21 +98,6 @@ const ErrorFallback = ({ error, resetErrorBoundary }: { error: Error, resetError
       Try again
     </Button>
   </Paper>
-);
-
-// Placeholder components for routes with import issues or missing implementations
-const ArticleDetailPage = () => (
-  <Box sx={{ p: 4, textAlign: 'center', maxWidth: 800, mx: 'auto' }}>
-    <Typography variant="h4" gutterBottom>Knowledge Base Article</Typography>
-    <Typography variant="body1" paragraph>
-      This feature is currently under development. When implemented, this will display 
-      the details of knowledge base articles with full content, related articles, 
-      and user feedback options.
-    </Typography>
-    <Button variant="contained" color="primary" onClick={() => window.history.back()}>
-      Go Back
-    </Button>
-  </Box>
 );
 
 // Main App component with router

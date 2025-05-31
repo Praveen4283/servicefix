@@ -101,4 +101,36 @@ router.post(
   slaController.resumeSLA
 );
 
+// Check for missed first responses (admin only)
+router.get(
+  '/check-missed-first-responses',
+  authenticate,
+  authorize([UserRole.ADMIN]),
+  slaController.checkMissedFirstResponses
+);
+
+// Force recalculation of SLA status for a ticket
+router.post(
+  '/recalculate/:ticketId',
+  authenticate,
+  authorize([UserRole.ADMIN, 'manager', UserRole.AGENT]),
+  slaController.recalculateTicketSLA
+);
+
+// Fix SLA breach status for all tickets
+router.post(
+  '/fix-breach-status',
+  authenticate,
+  authorize([UserRole.ADMIN, 'manager']),
+  slaController.fixSLABreachStatus
+);
+
+// Fix SLA breach status for a specific ticket
+router.post(
+  '/fix-breach-status/:ticketId',
+  authenticate,
+  authorize([UserRole.ADMIN, 'manager', UserRole.AGENT]),
+  slaController.fixSLABreachStatus
+);
+
 export default router; 

@@ -1,5 +1,5 @@
 import express from 'express';
-import { body, param, query } from 'express-validator';
+import { z } from 'zod';
 import multer from 'multer';
 import path from 'path';
 
@@ -20,7 +20,7 @@ import {
   addTicketComment,
   updateTicketSLA
 } from '../controllers/ticket.controller';
-import { validateRequest } from '../middleware/validate-request.middleware';
+import { validateZod } from '../middleware/zod-validate.middleware';
 import { authenticate } from '../middleware/auth.middleware';
 
 // --- Multer Configuration ---
@@ -38,6 +38,79 @@ const router = express.Router();
 // Apply authentication middleware to all ticket routes
 router.use(authenticate);
 
+// --- Zod Schema Definitions ---
+const idParamSchema = z.object({
+  params: z.object({
+    id: z.string().regex(/^\d+$/, 'Invalid ID format').transform(Number),
+  }),
+});
+
+const attachmentIdParamSchema = z.object({
+  params: z.object({
+    attachmentId: z.string().regex(/^\d+$/, 'Invalid attachment ID format').transform(Number),
+  }),
+});
+
+const commentSchema = z.object({
+  params: z.object({
+    id: z.string().regex(/^\d+$/, 'Invalid ticket ID format').transform(Number),
+  }),
+  body: z.object({
+    content: z.string().min(1, 'Comment content is required'),
+    isInternal: z.boolean().optional(),
+  }),
+});
+
+const ticketQuerySchema = z.object({
+  query: z.object({
+    page: z.string().regex(/^\d+$/, 'Page must be a positive integer')
+      .transform(Number)
+      .refine(val => val >= 1, 'Page must be a positive integer')
+      .optional(),
+    limit: z.string().regex(/^\d+$/, 'Limit must be a number')
+      .transform(Number)
+      .refine(val => val >= 1 && val <= 100, 'Limit must be between 1 and 100')
+      .optional(),
+    sortBy: z.string().optional(),
+    sortOrder: z.enum(['asc', 'desc']).optional(),
+  }),
+});
+
+const createTicketSchema = z.object({
+  body: z.object({
+    subject: z.string().min(1, 'Subject is required').max(255, 'Subject cannot exceed 255 characters'),
+    description: z.string().min(1, 'Description is required'),
+    requesterId: z.coerce.number().int().positive('Invalid requester ID format'),
+    assigneeId: z.coerce.number().int().positive('Invalid assignee ID format').optional().nullable(),
+    departmentId: z.coerce.number().int().positive('Invalid department ID format').optional().nullable(),
+    priorityId: z.coerce.number().int().positive('Invalid priority ID format'),
+    typeId: z.coerce.number().int().positive('Invalid ticket type ID format').optional().nullable(),
+    dueDate: z.string().datetime('Invalid date format for due date').optional().nullable(),
+    tags: z.preprocess(
+      (val) => typeof val === 'string' ? JSON.parse(val) : val,
+      z.array(z.string().trim().min(1, 'Tag names cannot be empty')).optional().nullable()
+    ),
+  }),
+});
+
+const updateTicketSchema = z.object({
+  params: z.object({
+    id: z.string().regex(/^\d+$/, 'Invalid ticket ID format').transform(Number),
+  }),
+  body: z.object({
+    subject: z.string().max(255, 'Subject cannot exceed 255 characters').optional(),
+    description: z.string().optional(),
+    assigneeId: z.coerce.number().int().positive('Invalid assignee ID format').optional(),
+    departmentId: z.coerce.number().int().positive('Invalid department ID format').optional(),
+    priorityId: z.coerce.number().int().positive('Invalid priority ID format').optional(),
+    statusId: z.coerce.number().int().positive('Invalid status ID format').optional(),
+    typeId: z.coerce.number().int().positive('Invalid ticket type ID format').optional(),
+    dueDate: z.string().datetime('Invalid date format for due date').optional(),
+    tags: z.array(z.coerce.number().int().positive('Invalid tag ID format')).optional(),
+  }),
+});
+// --- End Schema Definitions ---
+
 // --- Routes for fetching dropdown options ---
 router.get('/departments', getAllDepartments);
 router.get('/priorities', getAllPriorities);
@@ -45,14 +118,11 @@ router.get('/types', getAllTypes);
 router.get('/statuses', getAllStatuses);
 // --- End routes for options ---
 
-// --- NEW ROUTES for attachments, comments, and history ---
+// --- Routes for attachments, comments, and history ---
 // Upload attachments to a ticket
 router.post(
   '/:id/attachments',
-  [
-    param('id').isInt({ min: 1 }).withMessage('Invalid ticket ID format'),
-    validateRequest,
-  ],
+  validateZod(idParamSchema),
   upload.array('attachments', 10), // Allow up to 10 files
   uploadTicketAttachments
 );
@@ -60,56 +130,36 @@ router.post(
 // Download an attachment
 router.get(
   '/attachments/download/:attachmentId',
-  [
-    param('attachmentId').isInt({ min: 1 }).withMessage('Invalid attachment ID format'),
-    validateRequest,
-  ],
+  validateZod(attachmentIdParamSchema),
   downloadTicketAttachment
 );
 
 // Get ticket history
 router.get(
   '/:id/history',
-  [
-    param('id').isInt({ min: 1 }).withMessage('Invalid ticket ID format'),
-    validateRequest,
-  ],
+  validateZod(idParamSchema),
   getTicketHistory
 );
 
 // Add comment to ticket (enhanced version)
 router.post(
   '/:id/comments',
-  [
-    param('id').isInt({ min: 1 }).withMessage('Invalid ticket ID format'),
-    body('content').notEmpty().withMessage('Comment content is required'),
-    body('isInternal').optional().isBoolean().withMessage('isInternal must be a boolean'),
-    validateRequest,
-  ],
+  validateZod(commentSchema),
   addTicketComment
 );
-// --- END NEW ROUTES ---
+// --- END Routes ---
 
 // Get all tickets
 router.get(
   '/',
-  [
-    query('page').optional().isInt({ min: 1 }).withMessage('Page must be a positive integer'),
-    query('limit').optional().isInt({ min: 1, max: 100 }).withMessage('Limit must be between 1 and 100'),
-    query('sortBy').optional().isString().withMessage('Sort field must be a string'),
-    query('sortOrder').optional().isIn(['asc', 'desc']).withMessage('Sort order must be asc or desc'),
-    validateRequest,
-  ],
+  validateZod(ticketQuerySchema),
   getTickets
 );
 
 // Get ticket by ID
 router.get(
   '/:id',
-  [
-    param('id').isInt({ min: 1 }).withMessage('Invalid ticket ID format'),
-    validateRequest,
-  ],
+  validateZod(idParamSchema),
   getTicketById
 );
 
@@ -117,101 +167,35 @@ router.get(
 router.post(
   '/',
   upload.array('attachments', 5),
-  [
-    body('subject').notEmpty().withMessage('Subject is required')
-      .isLength({ max: 255 }).withMessage('Subject cannot exceed 255 characters'),
-    body('description').notEmpty().withMessage('Description is required'),
-    body('requesterId')
-      .notEmpty().withMessage('Requester ID is required')
-      .isInt({ min: 1 }).withMessage('Invalid requester ID format'),
-    body('assigneeId')
-      .optional({ nullable: true })
-      .if((value) => value !== '')
-      .isInt({ min: 1 }).withMessage('Invalid assignee ID format'),
-    body('departmentId')
-      .optional({ nullable: true })
-      .if((value) => value !== '')
-      .isInt({ min: 1 }).withMessage('Invalid department ID format'),
-    body('priorityId')
-      .notEmpty().withMessage('Priority ID is required')
-      .isInt({ min: 1 }).withMessage('Invalid priority ID format'),
-    body('typeId')
-      .optional({ nullable: true })
-      .if((value) => value !== '')
-      .isInt({ min: 1 }).withMessage('Invalid ticket type ID format'),
-    body('dueDate')
-      .optional({ nullable: true, checkFalsy: true })
-      .isISO8601().withMessage('Invalid date format for due date'),
-    body('tags')
-      .optional({ nullable: true, checkFalsy: true })
-      .customSanitizer(value => {
-        try {
-          return JSON.parse(value);
-        } catch (e) { 
-          return value;
-        }
-      })
-      .isArray().withMessage('Tags must be an array of strings'),
-    body('tags.*')
-      .optional({ nullable: true, checkFalsy: true })
-      .isString().withMessage('Each tag must be a string')
-      .trim()
-      .notEmpty().withMessage('Tag names cannot be empty'),
-    validateRequest,
-  ],
+  validateZod(createTicketSchema),
   createTicket
 );
 
 // Update a ticket
 router.put(
   '/:id',
-  [
-    param('id').isInt({ min: 1 }).withMessage('Invalid ticket ID format'),
-    body('subject').optional().isString().withMessage('Subject must be a string')
-      .isLength({ max: 255 }).withMessage('Subject cannot exceed 255 characters'),
-    body('description').optional().isString().withMessage('Description must be a string'),
-    body('assigneeId').optional().isInt({ min: 1 }).withMessage('Invalid assignee ID format'),
-    body('departmentId').optional().isInt({ min: 1 }).withMessage('Invalid department ID format'),
-    body('priorityId').optional().isInt({ min: 1 }).withMessage('Invalid priority ID format'),
-    body('statusId').optional().isInt({ min: 1 }).withMessage('Invalid status ID format'),
-    body('typeId').optional().isInt({ min: 1 }).withMessage('Invalid ticket type ID format'),
-    body('dueDate').optional().isISO8601().withMessage('Invalid date format for due date'),
-    body('tags').optional().isArray().withMessage('Tags must be an array'),
-    body('tags.*').optional().isInt({ min: 1 }).withMessage('Invalid tag ID format'),
-    validateRequest,
-  ],
+  validateZod(updateTicketSchema),
   updateTicket
 );
 
 // Add a comment to a ticket
 router.post(
   '/:id/comments',
-  [
-    param('id').isInt({ min: 1 }).withMessage('Invalid ticket ID format'),
-    body('content').notEmpty().withMessage('Comment content is required'),
-    body('isInternal').optional().isBoolean().withMessage('isInternal must be a boolean'),
-    validateRequest,
-  ],
+  validateZod(commentSchema),
   addComment
 );
 
 // Add route for updating SLA after ticket priority changes
 router.post(
   '/:id/update-sla',
-  [
-    param('id').isInt({ min: 1 }).withMessage('Invalid ticket ID format'),
-    validateRequest,
-  ],
+  validateZod(idParamSchema),
   updateTicketSLA
 );
 
 // Delete a ticket
 router.delete(
   '/:id',
-  [
-    param('id').isInt({ min: 1 }).withMessage('Invalid ticket ID format'),
-    validateRequest,
-  ],
+  validateZod(idParamSchema),
   deleteTicket
 );
 

@@ -1556,7 +1556,8 @@ const SettingsPage: React.FC = () => {
       
       console.log('SLA policy data to be saved:', policyData);
       
-      let savedPolicy;
+      // Use the imported SLAPolicy type from slaService
+      let savedPolicy: import('../../services/slaService').SLAPolicy | null = null;
       
       if (existingPolicy) {
         // Update existing policy
@@ -1584,12 +1585,13 @@ const SettingsPage: React.FC = () => {
         
         // Add to local state with null check
         if (savedPolicy) {
-          setSlaPolicies(prevPolicies => [...prevPolicies, savedPolicy]);
+          // Use non-null assertion since we've already checked savedPolicy is not null
+          setSlaPolicies(prevPolicies => [...prevPolicies, savedPolicy as SLAPolicy]);
         } else {
           setNotification({
             open: true,
-            message: 'Policy saved but not reflected in UI. Please refresh.',
-            type: 'warning'
+            message: 'Failed to save SLA policy',
+            type: 'error'
           });
         }
       }
@@ -1651,91 +1653,6 @@ const SettingsPage: React.FC = () => {
       <Typography variant="body2" color="textSecondary" sx={{ mt: 2 }}>
         SLA settings will be saved when you click "Save Ticket Settings"
       </Typography>
-    );
-  };
-
-  // Add a function to display existing SLA policies in a table
-  const renderSLAPoliciesTable = () => {
-    if (!ticketSettings.enableSLA || slaPolicies.length === 0) {
-      return null;
-    }
-    
-    return (
-      <Box sx={{ mt: 3 }}>
-        <Typography variant="subtitle1" fontWeight="bold" sx={{ mb: 2 }}>
-          Existing SLA Policies
-        </Typography>
-        <TableContainer component={Paper} sx={{ borderRadius: 2, overflow: 'hidden' }}>
-          <Table size="small">
-            <TableHead>
-              <TableRow sx={{ backgroundColor: alpha(theme.palette.primary.main, 0.1) }}>
-                <TableCell>Priority</TableCell>
-                <TableCell align="center">First Response</TableCell>
-                <TableCell align="center">Next Response</TableCell>
-                <TableCell align="center">Resolution</TableCell>
-                <TableCell align="center">Business Hours</TableCell>
-              </TableRow>
-            </TableHead>
-            <TableBody>
-              {slaPolicies.map((policy) => {
-                // Find the priority name
-                const priority = priorities.find(p => p.id === policy.ticketPriorityId);
-                return (
-                  <TableRow 
-                    key={policy.id} 
-                    hover
-                    onClick={() => {
-                      setSlaForm({
-                        priorityId: policy.ticketPriorityId,
-                        firstResponseHours: policy.firstResponseHours,
-                        nextResponseHours: policy.nextResponseHours || 0,
-                        resolutionHours: policy.resolutionHours,
-                        businessHoursOnly: policy.businessHoursOnly,
-                        isNew: false
-                      });
-                    }}
-                    sx={{ 
-                      cursor: 'pointer',
-                      '&:hover': {
-                        backgroundColor: alpha(theme.palette.primary.main, 0.05)
-                      },
-                      '&.Mui-selected': {
-                        backgroundColor: alpha(theme.palette.primary.main, 0.1)
-                      }
-                    }}
-                    selected={slaForm.priorityId === policy.ticketPriorityId}
-                  >
-                    <TableCell>
-                      <Box sx={{ display: 'flex', alignItems: 'center' }}>
-                        <Box 
-                          sx={{ 
-                            width: 12, 
-                            height: 12, 
-                            borderRadius: '50%', 
-                            backgroundColor: priority?.color || '#ccc',
-                            mr: 1
-                          }} 
-                        />
-                        {priority?.name || 'Unknown'}
-                      </Box>
-                    </TableCell>
-                    <TableCell align="center">{policy.firstResponseHours} hours</TableCell>
-                    <TableCell align="center">{policy.nextResponseHours || '-'} {policy.nextResponseHours ? 'hours' : ''}</TableCell>
-                    <TableCell align="center">{policy.resolutionHours} hours</TableCell>
-                    <TableCell align="center">
-                      {policy.businessHoursOnly ? (
-                        <CheckIcon color="success" fontSize="small" />
-                      ) : (
-                        <CloseIcon color="error" fontSize="small" />
-                      )}
-                    </TableCell>
-                  </TableRow>
-                );
-              })}
-            </TableBody>
-          </Table>
-        </TableContainer>
-      </Box>
     );
   };
 
@@ -2771,13 +2688,160 @@ const SettingsPage: React.FC = () => {
                             </Box>
                             
                             {renderSLASaveText()}
-                            
-                            {renderSLAPoliciesTable()}
                           </Box>
                         </>
                       )}
                     </CardContent>
                   </EnhancedCard>
+                  </Grid>
+                  <Grid item xs={12} md={6}>
+                    <EnhancedCard
+                      index={3}
+                      elevation={0}
+                      sx={{
+                        height: '100%',
+                        p: 0,
+                        border: `1px solid ${alpha(theme.palette.divider, 0.1)}`,
+                        overflow: 'hidden',
+                        ...gradientAccent(theme)
+                      }}>
+                      <CardHeader
+                        title={
+                          <Typography variant="h6" sx={{ 
+                            fontWeight: 700, 
+                            fontSize: '1.2rem',
+                            color: theme.palette.text.primary,
+                            letterSpacing: '0.5px',
+                            mb: 0.5
+                          }}>
+                            Existing SLA Policies
+                          </Typography>
+                        }
+                        action={
+                          loadingSlaPolicies ? (
+                            <CircularProgress size={24} />
+                          ) : (
+                            <Badge 
+                              badgeContent={slaPolicies.length} 
+                              color="primary"
+                              max={99}
+                              sx={{ '& .MuiBadge-badge': { fontSize: '0.7rem', height: '20px', minWidth: '20px' } }}
+                            >
+                              <ClockIcon />
+                            </Badge>
+                          )
+                        }
+                        sx={{
+                          p: 3,
+                          pb: 2,
+                          background: theme.palette.mode === 'dark' 
+                            ? alpha(theme.palette.background.paper, 0.4)
+                            : alpha(theme.palette.background.paper, 0.7),
+                        }}
+                      />
+                      <Divider />
+                      <CardContent sx={{ p: 3 }}>
+                        {loadingSlaPolicies ? (
+                          <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '300px' }}>
+                            <CircularProgress />
+                          </Box>
+                        ) : !ticketSettings.enableSLA ? (
+                          <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: '200px', flexDirection: 'column' }}>
+                            <WarningIcon color="warning" sx={{ fontSize: 40, mb: 2, opacity: 0.7 }} />
+                            <Typography variant="body1" align="center">
+                              SLA tracking is currently disabled
+                            </Typography>
+                            <Typography variant="body2" color="textSecondary" align="center" sx={{ mt: 1 }}>
+                              Enable SLA tracking to manage policies
+                            </Typography>
+                          </Box>
+                        ) : slaPolicies.length === 0 ? (
+                          <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: '200px', flexDirection: 'column' }}>
+                            <InfoIcon color="info" sx={{ fontSize: 40, mb: 2, opacity: 0.7 }} />
+                            <Typography variant="body1" align="center">
+                              No SLA policies configured
+                            </Typography>
+                            <Typography variant="body2" color="textSecondary" align="center" sx={{ mt: 1 }}>
+                              Select a priority from the left panel to create a policy
+                            </Typography>
+                          </Box>
+                        ) : (
+                          <TableContainer component={Paper} sx={{ borderRadius: 2, overflow: 'hidden', boxShadow: 'none', border: `1px solid ${alpha(theme.palette.divider, 0.1)}` }}>
+                            <Table size="small">
+                              <TableHead>
+                                <TableRow sx={{ backgroundColor: alpha(theme.palette.primary.main, 0.1) }}>
+                                  <TableCell>Priority</TableCell>
+                                  <TableCell align="center">First Response</TableCell>
+                                  <TableCell align="center">Next Response</TableCell>
+                                  <TableCell align="center">Resolution</TableCell>
+                                  <TableCell align="center">Business Hours</TableCell>
+                                </TableRow>
+                              </TableHead>
+                              <TableBody>
+                                {slaPolicies.map((policy) => {
+                                  // Find the priority name
+                                  const priority = priorities.find(p => p.id === policy.ticketPriorityId);
+                                  return (
+                                    <TableRow 
+                                      key={policy.id} 
+                                      hover
+                                      onClick={() => {
+                                        setSlaForm({
+                                          priorityId: policy.ticketPriorityId,
+                                          firstResponseHours: policy.firstResponseHours,
+                                          nextResponseHours: policy.nextResponseHours || 0,
+                                          resolutionHours: policy.resolutionHours,
+                                          businessHoursOnly: policy.businessHoursOnly,
+                                          isNew: false
+                                        });
+                                      }}
+                                      sx={{ 
+                                        cursor: 'pointer',
+                                        '&:hover': {
+                                          backgroundColor: alpha(theme.palette.primary.main, 0.05)
+                                        },
+                                        '&.Mui-selected': {
+                                          backgroundColor: alpha(theme.palette.primary.main, 0.1)
+                                        }
+                                      }}
+                                      selected={slaForm.priorityId === policy.ticketPriorityId}
+                                    >
+                                      <TableCell>
+                                        <Box sx={{ display: 'flex', alignItems: 'center' }}>
+                                          <Box 
+                                            sx={{ 
+                                              width: 12, 
+                                              height: 12, 
+                                              borderRadius: '50%', 
+                                              backgroundColor: priority?.color || '#ccc',
+                                              mr: 1
+                                            }} 
+                                          />
+                                          {priority?.name || 'Unknown'}
+                                        </Box>
+                                      </TableCell>
+                                      <TableCell align="center">{policy.firstResponseHours} hours</TableCell>
+                                      <TableCell align="center">{policy.nextResponseHours || '-'} {policy.nextResponseHours ? 'hours' : ''}</TableCell>
+                                      <TableCell align="center">{policy.resolutionHours} hours</TableCell>
+                                      <TableCell align="center">
+                                        {policy.businessHoursOnly ? (
+                                          <CheckIcon color="success" fontSize="small" />
+                                        ) : (
+                                          <CloseIcon color="error" fontSize="small" />
+                                        )}
+                                      </TableCell>
+                                    </TableRow>
+                                  );
+                                })}
+                              </TableBody>
+                            </Table>
+                          </TableContainer>
+                        )}
+                        <Typography variant="body2" color="textSecondary" sx={{ mt: 2 }}>
+                          Click on a policy in the table to edit its settings. SLA policies define response and resolution time expectations for each priority level.
+                        </Typography>
+                      </CardContent>
+                    </EnhancedCard>
                   </Grid>
                   <Grid item xs={12}>
                     <Box display="flex" justifyContent="flex-end" sx={{ mt: 1 }}>

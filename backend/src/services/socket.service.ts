@@ -1,12 +1,24 @@
 import { Server as HttpServer } from 'http';
 import { Server, Socket } from 'socket.io';
-import jwt from 'jsonwebtoken';
 import { logger } from '../utils/logger';
 import notificationService from './notification.service';
+import authService from './auth.service';
+import { AppError } from '../utils/errorHandler';
 
 interface UserSocket {
   userId: number;
   socketId: string;
+}
+
+interface NotificationPayload {
+  id?: number;
+  title: string;
+  message: string;
+  type: string;
+  link?: string;
+  isRead?: boolean;
+  createdAt?: Date;
+  [key: string]: any;
 }
 
 class SocketService {
@@ -16,11 +28,12 @@ class SocketService {
   /**
    * Initialize Socket.IO server
    * @param httpServer HTTP server instance
+   * @returns Socket.IO server instance
    */
-  initialize(httpServer: HttpServer): void {
+  initialize(httpServer: HttpServer): Server | null {
     if (this.io) {
       logger.warn('Socket.IO server already initialized');
-      return;
+      return this.io;
     }
 
     this.io = new Server(httpServer, {
@@ -39,6 +52,7 @@ class SocketService {
     this.io.on('connection', this.handleConnection.bind(this));
     
     logger.info('Socket.IO server initialized');
+    return this.io;
   }
 
   /**
@@ -53,33 +67,29 @@ class SocketService {
         logger.warn('Socket Auth: No token provided in handshake.auth.token');
         return next(new Error('Authentication error: Token not provided'));
       } else {
-        logger.info(`Socket Auth: Received token of type ${typeof token}`);
-        // Avoid logging the token itself in production environments
-        // if (process.env.NODE_ENV !== 'production') {
-        //   logger.debug(`Socket Auth: Token received: ${token.substring(0, 10)}...`); 
-        // }
+        logger.debug(`Socket Auth: Received token`);
       }
       // --- End Diagnostic Logging ---
       
-      // --- Start Secret Logging ---
-      const secretToUse = process.env.JWT_SECRET || 'fallback_secret';
-      if (!process.env.JWT_SECRET) {
-        logger.warn('[Socket Auth] JWT_SECRET not set, using fallback secret for verification.');
-      } else {
-        logger.info('[Socket Auth] Using JWT_SECRET from environment variables for verification.');
+      try {
+        // Use auth service to verify token
+        const decoded = authService.verifyToken(token);
+        
+        if (!decoded || !decoded.userId) {
+          return next(new Error('Authentication error: Invalid token payload'));
+        }
+        
+        // Attach user data to socket
+        (socket as any).user = { id: decoded.userId };
+        
+        next();
+      } catch (error) {
+        // Handle specific token errors
+        if (error instanceof AppError) {
+          return next(new Error(`Authentication error: ${error.message}`));
+        }
+        throw error; // Re-throw unexpected errors
       }
-      // --- End Secret Logging ---
-
-      const decoded = jwt.verify(token, secretToUse) as { userId: number };
-      
-      if (!decoded || !decoded.userId) {
-        return next(new Error('Authentication error: Invalid token'));
-      }
-      
-      // Attach user data to socket
-      (socket as any).user = { id: decoded.userId };
-      
-      next();
     } catch (error) {
       logger.error('Socket authentication error:', error);
       next(new Error('Authentication error'));
@@ -104,11 +114,12 @@ class SocketService {
     if (!this.connectedUsers.has(userId)) {
       this.connectedUsers.set(userId, []);
     }
+    
     this.connectedUsers.get(userId)?.push(socket.id);
 
     // Join user to their private room
     socket.join(`user:${userId}`);
-    
+
     // Notify client that connection is successful
     socket.emit('connected', { status: 'connected', userId });
 
@@ -134,111 +145,98 @@ class SocketService {
   }
 
   /**
-   * Handle notification sent from client
-   * @param userId ID of the user who sent the notification
-   * @param data Notification data
-   * @param socket Socket instance
+   * Handle client notification
    */
   private handleClientNotification(userId: number, data: any, socket: Socket): void {
-    logger.info(`Received client notification from user ${userId}:`, JSON.stringify(data));
+    logger.info(`Received notification from user ${userId}:`, data);
     
-    try {
-      // Check if this client has already shown this notification
-      const { directlySent, isPersistent, ...notification } = data;
-      
-      // Get notification data in the format our service expects
-      const notificationData = {
-        title: notification.title || 'Notification',
-        message: notification.message,
-        type: notification.type || 'info',
-        link: notification.link,
-        metadata: notification.metadata
-      };
-      
-      // If the client wants this to be persistent, store it in the database
-      if (isPersistent !== false) {
-        notificationService.createInAppNotification(
-          userId.toString(),
-          notificationData
-        ).then(() => {
-          logger.info(`Saved notification for user ${userId} to database`);
-        }).catch(err => {
-          logger.error(`Failed to save notification for user ${userId}:`, err);
-        });
-      }
-      
-      // If the client has already shown this notification, don't send it back
-      if (directlySent) {
-        logger.info(`Skipping re-sending notification to user ${userId} as it was directly sent`);
-        return;
-      }
-      
-      // If needed, broadcast to other clients of this user
-      // (this notification originated from one client but should be seen by all)
-      const socketIds = this.connectedUsers.get(userId) || [];
-      socketIds.forEach(sid => {
-        if (sid !== socket.id) { // Don't send back to originator
-          this.io?.to(sid).emit('notification', notification);
-        }
-      });
-      
-    } catch (error) {
-      logger.error('Error handling client notification:', error);
-      socket.emit('error', { message: 'Failed to process notification' });
-    }
+    // Process notification based on type
+    // Implementation depends on application requirements
   }
 
   /**
-   * Send a notification to a specific user
-   * @param userId ID of the user to send notification to
-   * @param notification Notification data to send
+   * Send notification to a specific user
+   * @param userId User ID
+   * @param notification Notification payload
+   * @returns True if notification was sent
    */
-  sendNotification(userId: number, notification: any): void {
-    if (!this.io) {
-      logger.warn('Cannot send notification: Socket.IO not initialized');
-      return;
-    }
-
-    // Emit to user's room
-    this.io.to(`user:${userId}`).emit('notification', notification);
-    logger.info(`Sent notification to user ${userId}`);
+  sendNotification(userId: number, notification: NotificationPayload): boolean {
+    return this.sendToUser(userId, 'server:notification', notification);
   }
 
   /**
-   * Send a notification to multiple users
-   * @param userIds Array of user IDs to send notification to
-   * @param notification Notification data to send
-   */
-  broadcastNotification(userIds: number[], notification: any): void {
-    if (!this.io) {
-      logger.warn('Cannot broadcast notification: Socket.IO not initialized');
-      return;
-    }
-
-    userIds.forEach(userId => {
-      this.io?.to(`user:${userId}`).emit('notification', notification);
-    });
-
-    logger.info(`Broadcasted notification to ${userIds.length} users`);
-  }
-
-  /**
-   * Check if a user is online (has active socket connections)
-   * @param userId User ID to check
-   * @returns Boolean indicating if user is online
+   * Check if user is online/connected
+   * @param userId User ID
+   * @returns True if user is online
    */
   isUserOnline(userId: number): boolean {
-    const sockets = this.connectedUsers.get(userId) || [];
-    return sockets.length > 0;
+    return this.isUserConnected(userId);
   }
 
   /**
-   * Get list of online users
-   * @returns Array of user IDs that are currently online
+   * Send notification to a specific user
+   * @param userId User ID
+   * @param eventType Event type
+   * @param payload Notification payload
    */
-  getOnlineUsers(): number[] {
+  sendToUser(userId: number, eventType: string, payload: any): boolean {
+    if (!this.io) {
+      logger.error('Socket.IO server not initialized');
+      return false;
+    }
+
+    logger.info(`Sending ${eventType} to user ${userId}`);
+    
+    // Send to user's room
+    this.io.to(`user:${userId}`).emit(eventType, payload);
+    
+    // Check if user has active connections
+    return this.isUserConnected(userId);
+  }
+
+  /**
+   * Send notification to a group of users
+   * @param userIds User IDs
+   * @param eventType Event type
+   * @param payload Notification payload
+   * @returns Map of user IDs to delivery status
+   */
+  sendToUsers(userIds: number[], eventType: string, payload: any): Map<number, boolean> {
+    const results = new Map<number, boolean>();
+    
+    userIds.forEach(userId => {
+      results.set(userId, this.sendToUser(userId, eventType, payload));
+    });
+    
+    return results;
+  }
+
+  /**
+   * Check if a user is connected
+   * @param userId User ID
+   * @returns True if user is connected
+   */
+  isUserConnected(userId: number): boolean {
+    const sockets = this.connectedUsers.get(userId);
+    return !!sockets && sockets.length > 0;
+  }
+
+  /**
+   * Get all connected users
+   * @returns Array of connected user IDs
+   */
+  getConnectedUsers(): number[] {
     return Array.from(this.connectedUsers.keys());
+  }
+
+  /**
+   * Get socket instance
+   * @returns Socket.IO server instance
+   */
+  getIO(): Server | null {
+    return this.io;
   }
 }
 
+// Export singleton instance
 export default new SocketService(); 

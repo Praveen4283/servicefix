@@ -16,6 +16,8 @@ import { logger } from '../utils/logger';
 import { getCustomRepository } from 'typeorm';
 import notificationService from '../services/notification.service';
 import { getPasswordResetEmailTemplate } from '../utils/email';
+import userService from '../services/user.service';
+import { idToNumber, idToString } from '../utils/idUtils';
 
 const router = express.Router();
 
@@ -24,77 +26,28 @@ const router = express.Router();
  * @desc    Get all users (with pagination)
  * @access  Private (Admin)
  */
-router.get('/', authenticate, authorize([UserRole.ADMIN]), async (req, res) => {
+router.get('/', authenticate, authorize([UserRole.ADMIN]), async (req, res, next) => {
   try {
     const page = parseInt(req.query.page as string) || 1;
     const limit = parseInt(req.query.limit as string) || 10;
-    const offset = (page - 1) * limit;
     const searchTerm = req.query.search as string || '';
-    const roleFilter = req.query.role as string;
-
-    const userRepository = getRepository(User);
-
-    // --- Use QueryBuilder for flexible filtering and joins --- 
-    const query = userRepository.createQueryBuilder('user')
-      .leftJoinAndSelect('user.organization', 'organization')
-      .leftJoinAndSelect('user.departmentMember', 'departmentMember')
-      .leftJoinAndSelect('departmentMember.department', 'department')
-      .orderBy('user.createdAt', 'DESC')
-      .skip(offset)
-      .take(limit);
-      
-    // --- Apply Filters --- 
-    if (roleFilter && roleFilter !== 'all') {
-      query.andWhere('user.role = :role', { role: roleFilter });
-    }
+    const role = req.query.role as string;
+    const sortBy = req.query.sortBy as string || 'createdAt';
+    const sortDirection = req.query.sortDirection as 'ASC' | 'DESC' || 'DESC';
     
-    if (searchTerm) {
-      query.andWhere(
-        '(user.firstName ILIKE :search OR user.lastName ILIKE :search OR user.email ILIKE :search)',
-        { search: `%${searchTerm}%` }
-      );
-    }
-    // --- End Apply Filters --- 
-
-    // Get total count and paginated users
-    const [users, totalUsers] = await query.getManyAndCount();
-    
-    console.log("[GET /api/users] Raw users from DB:", JSON.stringify(users, null, 2));
-    
-    // Map backend camelCase to frontend snake_case, including department
-    const formattedUsers = users.map(user => ({
-      id: user.id,
-      first_name: user.firstName,
-      last_name: user.lastName,
-      email: user.email,
-      role: user.role,
-      avatar_url: user.avatarUrl,
-      is_active: user.isActive,
-      last_login_at: user.lastLoginAt,
-      designation: user.designation,
-      created_at: user.createdAt,
-      organization: user.organization,
-      department: user.departmentMember?.department ? {
-         id: user.departmentMember.department.id,
-         name: user.departmentMember.department.name,
-      } : null
-    }));
-
-    console.log("[GET /api/users] Sending formatted users:", JSON.stringify(formattedUsers, null, 2));
-
-    return res.json({
-      users: formattedUsers,
-      pagination: {
-        total: totalUsers,
-        page,
-        limit,
-        totalPages: Math.ceil(totalUsers / limit)
-      }
+    // Use the user service to get paginated users with caching
+    const result = await userService.getUsers({
+      page,
+      limit,
+      searchTerm,
+      role,
+      sortBy,
+      sortDirection
     });
-
+    
+    return res.json(result);
   } catch (error) {
-    console.error('Error fetching users:', error);
-    return res.status(500).json({ message: 'Server error' });
+    next(error);
   }
 });
 
@@ -103,32 +56,14 @@ router.get('/', authenticate, authorize([UserRole.ADMIN]), async (req, res) => {
  * @desc    Get user statistics
  * @access  Private (Admin)
  */
-router.get('/stats', authenticate, authorize([UserRole.ADMIN]), async (req, res) => {
+router.get('/stats', authenticate, authorize([UserRole.ADMIN]), async (req, res, next) => {
   try {
-    const userRepository = getRepository(User);
-
-    const total = await userRepository.count();
-    const active = await userRepository.count({ where: { isActive: true } });
-    const admin_count = await userRepository.count({ where: { role: UserRole.ADMIN } });
-    const agent_count = await userRepository.count({ where: { role: UserRole.AGENT } });
-    const customer_count = await userRepository.count({ where: { role: UserRole.CUSTOMER } });
-
-    return res.json({
-      total,
-      active,
-      admin_count,
-      agent_count,
-      customer_count
-    });
-
+    // Use the user service to get stats with caching
+    const stats = await userService.getUserStats();
+    
+    return res.json(stats);
   } catch (error) {
-    console.error('Error fetching user stats:', error);
-    // Check if it's a TypeORM metadata error specifically
-    if (error instanceof Error && error.constructor.name === 'EntityMetadataNotFoundError') {
-      console.error('EntityMetadataNotFoundError: Ensure all entities are correctly registered in the DataSource.');
-      return res.status(500).json({ message: 'Server configuration error related to entity metadata.' });
-    }
-    return res.status(500).json({ message: 'Failed to fetch user stats', error: error instanceof Error ? error.message : 'Unknown error' });
+    next(error);
   }
 });
 
@@ -137,7 +72,7 @@ router.get('/stats', authenticate, authorize([UserRole.ADMIN]), async (req, res)
  * @desc    Get user by ID
  * @access  Private (Admin or Self)
  */
-router.get('/:id', authenticate, async (req, res) => {
+router.get('/:id', authenticate, async (req, res, next) => {
   try {
     if (req.user.role !== UserRole.ADMIN && req.user.id !== req.params.id) {
       return res.status(403).json({ message: 'Unauthorized' });
@@ -145,58 +80,12 @@ router.get('/:id', authenticate, async (req, res) => {
     
     const userId = req.params.id;
     
-    try {
-      const userRepository = getRepository(User);
-      const preferenceRepository = getRepository(NotificationPreference);
-      
-      const [user, preferences] = await Promise.all([
-        userRepository.findOne({ 
-          where: { id: userId } as any,
-          relations: ['organization'] 
-        }),
-        preferenceRepository.find({ where: { userId: Number(userId) } })
-      ]);
-      
-      if (!user) {
-        return res.status(404).json({ message: 'User not found' });
-      }
-      
-      // Transform backend preferences to frontend format
-      const notificationSettings: Record<string, boolean> = {};
-      preferences.forEach(pref => {
-        // Consider the setting enabled if any channel is enabled
-        notificationSettings[pref.eventType] = pref.emailEnabled || pref.pushEnabled || pref.inAppEnabled;
-      });
-      
-      const userData = {
-        id: user.id,
-        firstName: user.firstName,
-        lastName: user.lastName,
-        email: user.email,
-        role: user.role,
-        avatarUrl: user.avatarUrl,
-        designation: user.designation,
-        phoneNumber: user.phoneNumber,
-        organizationId: user.organizationId,
-        organization: user.organization ? { id: user.organization.id, name: user.organization.name } : null,
-        isActive: user.isActive,
-        lastLoginAt: user.lastLoginAt,
-        notificationSettings: notificationSettings, // Add transformed settings
-        createdAt: user.createdAt,
-        updatedAt: user.updatedAt,
-        timezone: user.timezone,
-        language: user.language
-      };
-      
-      return res.json(userData);
-    } catch (error: any) {
-      console.error('Error fetching user data:', error);
-      return res.status(500).json({ message: 'Failed to fetch user data', error: error.message });
-    }
-
+    // Use the user service to get user by ID with caching
+    const userData = await userService.getUserById(userId);
+    
+    return res.json(userData);
   } catch (error) {
-    console.error('Error fetching user:', error);
-    return res.status(500).json({ message: 'Server error' });
+    next(error);
   }
 });
 
@@ -245,7 +134,7 @@ router.post('/', authenticate, authorize([UserRole.ADMIN]), async (req, res) => 
     user.password = await bcrypt.hash(password, 10); // Hash password
     user.isActive = true;
     // Assign organization ID from the admin making the request
-    user.organizationId = parseInt(adminUser.organizationId, 10); // Parse string ID to number
+    user.organizationId = idToNumber(adminUser.organizationId) || 0;
     
     const newUser = await userRepository.save(user);
     
@@ -287,10 +176,13 @@ router.post('/', authenticate, authorize([UserRole.ADMIN]), async (req, res) => 
  * @desc    Update user
  * @access  Private (Admin or Self)
  */
-router.put('/:id', authenticate, async (req, res) => {
+router.put('/:id', authenticate, async (req, res, next) => {
   try {
-    if (req.user.role !== UserRole.ADMIN && req.user.id !== req.params.id) {
-      return res.status(403).json({ message: 'Unauthorized' });
+    const userId = req.params.id;
+    
+    // Check if user is authorized to update this profile
+    if (req.user.role !== UserRole.ADMIN && req.user.id !== userId) {
+      throw new AppError('You are not authorized to update this user', 403);
     }
     
     const { 
@@ -308,7 +200,6 @@ router.put('/:id', authenticate, async (req, res) => {
       const deptMemberRepository = getRepository(DepartmentMember);
       const departmentRepository = getRepository(Department);
       
-      const userId = req.params.id;
       const user = await userRepository.findOne({ 
         where: { id: userId } as any,
         relations: ['organization'] 
@@ -386,6 +277,10 @@ router.put('/:id', authenticate, async (req, res) => {
            name: updatedDepartment.name
          } : null
       };
+      
+      // After successful update, invalidate user cache
+      userService.invalidateUserCache(userId);
+      
       return res.json(formattedUser);
     } catch (dbError: any) {
       console.error('Database error when updating user:', dbError);
@@ -393,8 +288,7 @@ router.put('/:id', authenticate, async (req, res) => {
     }
 
   } catch (error) {
-    console.error('Error updating user:', error);
-    return res.status(500).json({ message: 'Server error' });
+    next(error);
   }
 });
 

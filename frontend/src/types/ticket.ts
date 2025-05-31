@@ -39,6 +39,7 @@ export interface TicketComment {
   content: string;
   createdAt: string;
   isInternal: boolean;
+  isSystem?: boolean;
   user: User;
 }
 

@@ -1,11 +1,15 @@
 import { Request, Response, NextFunction } from 'express';
+import { AppError } from '../utils/errorHandler';
 import slaService from '../services/sla.service';
-import { SLAPolicy } from '../models/SLAPolicy';
-import { AppDataSource } from '../config/database';
-import { Ticket } from '../models/Ticket';
 import { logger } from '../utils/logger';
+import { AppDataSource } from '../config/database';
+import { SLAPolicy } from '../models/SLAPolicy';
+import { Ticket } from '../models/Ticket';
 import { TicketPriority } from '../models/TicketPriority';
 import { createUTCDate } from '../utils/dateUtils';
+import { query } from '../config/database';
+import { SLAPolicyTicket } from '../models/SLAPolicyTicket';
+import * as slaChecker from '../utils/slaChecker';
 
 class SLAController {
   /**
@@ -483,6 +487,353 @@ class SLAController {
     } catch (error) {
       logger.error('Error resuming SLA:', error);
       res.status(500).json({ error: 'Failed to resume SLA' });
+    }
+  }
+  
+  /**
+   * Check tickets for missed SLA first responses
+   * This handles cases where an agent has responded to a ticket but the SLA system
+   * hasn't marked the first response as completed.
+   */
+  async checkMissedFirstResponses(req: Request, res: Response, next: NextFunction): Promise<Response | void> {
+    try {
+      const { limit = 100 } = req.query;
+      
+      // Only admins can run this check
+      if (req.user.role !== 'admin') {
+        return res.status(403).json({
+          status: 'error',
+          message: 'Only administrators can run SLA system checks'
+        });
+      }
+      
+      // Query tickets that have comments but first response SLA is still not marked
+      const result = await query(`
+        WITH ticket_with_agent_comments AS (
+          SELECT 
+            t.id as ticket_id,
+            MIN(tc.created_at) as first_agent_comment_time
+          FROM tickets t
+          JOIN ticket_comments tc ON t.id = tc.ticket_id
+          JOIN users u ON tc.user_id = u.id
+          WHERE u.role != 'customer' 
+            AND tc.is_internal = false
+            AND tc.is_system = false
+          GROUP BY t.id
+        )
+        SELECT 
+          t.id,
+          twac.first_agent_comment_time,
+          spt.first_response_met,
+          spt.id as sla_policy_ticket_id
+        FROM tickets t
+        JOIN ticket_with_agent_comments twac ON t.id = twac.ticket_id
+        JOIN sla_policy_tickets spt ON t.id = spt.ticket_id
+        WHERE spt.first_response_met IS NULL
+        LIMIT $1
+      `, [limit]);
+      
+      const ticketsProcessed = [];
+      
+      // Process each ticket with missed first response
+      for (const ticket of result.rows) {
+        try {
+          // Mark first response as met based on agent comment time
+          const slaPolicyTicketRepository = AppDataSource.getRepository(SLAPolicyTicket);
+          const slaPolicyTicket = await slaPolicyTicketRepository.findOne({ 
+            where: { id: ticket.sla_policy_ticket_id } as any 
+          });
+          
+          if (slaPolicyTicket) {
+            // Determine if the first agent comment was within SLA
+            const firstAgentCommentTime = new Date(ticket.first_agent_comment_time);
+            const isWithinSLA = firstAgentCommentTime <= slaPolicyTicket.firstResponseDueAt;
+            
+            // Update SLA status
+            slaPolicyTicket.firstResponseMet = isWithinSLA;
+            await slaPolicyTicketRepository.save(slaPolicyTicket);
+            
+            // Update ticket record
+            await query(
+              'UPDATE tickets SET first_response_sla_breached = $1 WHERE id = $2',
+              [!isWithinSLA, ticket.id]
+            );
+            
+            // Add to processed list
+            ticketsProcessed.push({
+              ticketId: ticket.id,
+              firstResponseWithinSLA: isWithinSLA,
+              firstAgentCommentTime
+            });
+            
+            logger.info(`Fixed missed first response SLA for ticket #${ticket.id}. Within SLA: ${isWithinSLA}`);
+          }
+        } catch (ticketError) {
+          logger.error(`Error processing missed first response for ticket #${ticket.id}:`, ticketError);
+        }
+      }
+      
+      return res.json({
+        status: 'success',
+        data: {
+          ticketsProcessed,
+          count: ticketsProcessed.length
+        }
+      });
+    } catch (error) {
+      logger.error('Error in checkMissedFirstResponses:', error);
+      next(error);
+    }
+  }
+  
+  /**
+   * Force recalculation of SLA status for a specific ticket
+   * This is useful to manually fix SLA status issues
+   */
+  async recalculateTicketSLA(req: Request, res: Response, next: NextFunction): Promise<Response | void> {
+    try {
+      const ticketId = parseInt(req.params.ticketId, 10);
+      
+      if (isNaN(ticketId)) {
+        return res.status(400).json({
+          status: 'error',
+          message: 'Invalid ticket ID'
+        });
+      }
+      
+      // Get the ticket
+      const ticketRepository = AppDataSource.getRepository(Ticket);
+      const ticket = await ticketRepository.findOne({
+        where: { id: ticketId }
+      });
+      
+      if (!ticket) {
+        return res.status(404).json({
+          status: 'error',
+          message: 'Ticket not found'
+        });
+      }
+      
+      // Get SLA policy ticket
+      const slaPolicyTicketRepository = AppDataSource.getRepository(SLAPolicyTicket);
+      const slaPolicyTicket = await slaPolicyTicketRepository.findOne({
+        where: { ticketId } as any,
+        relations: ['slaPolicy']
+      });
+      
+      if (!slaPolicyTicket) {
+        // No SLA policy ticket exists, try to create one
+        const newSLAPolicyTicket = await slaService.autoAssignSLAPolicy(ticket);
+        
+        if (!newSLAPolicyTicket) {
+          return res.status(404).json({
+            status: 'error',
+            message: 'No SLA policy found for this ticket'
+          });
+        }
+        
+        return res.status(200).json({
+          status: 'success',
+          message: 'SLA policy assigned to ticket',
+          data: {
+            slaInfo: newSLAPolicyTicket
+          }
+        });
+      }
+      
+      // Check if SLA is paused
+      let isPaused = false;
+      if (slaPolicyTicket.metadata) {
+        try {
+          let metadata;
+          if (typeof slaPolicyTicket.metadata === 'string') {
+            metadata = JSON.parse(slaPolicyTicket.metadata);
+          } else {
+            metadata = slaPolicyTicket.metadata;
+          }
+          
+          if (Array.isArray(metadata.pausePeriods) && metadata.pausePeriods.length > 0) {
+            const lastPausePeriod = metadata.pausePeriods[metadata.pausePeriods.length - 1];
+            if (lastPausePeriod && !lastPausePeriod.endedAt) {
+              isPaused = true;
+            }
+          }
+        } catch (err) {
+          logger.error('Error parsing SLA metadata:', err);
+        }
+      }
+      
+      // Force update breach status
+      const updatedTicket = await slaService.updateTicketSLABreachStatus(ticketId);
+      
+      // Check for ticket comments from agents to mark first response
+      if (slaPolicyTicket.firstResponseMet === undefined) {
+        const result = await query(`
+          SELECT 
+            MIN(tc.created_at) as first_agent_comment_time
+          FROM ticket_comments tc
+          JOIN users u ON tc.user_id = u.id
+          WHERE tc.ticket_id = $1 
+            AND u.role != 'customer'
+            AND tc.is_internal = false
+            AND tc.is_system = false
+        `, [ticketId]);
+        
+        if (result.rows.length > 0 && result.rows[0].first_agent_comment_time) {
+          // Found an agent comment, check if it meets SLA
+          const firstAgentCommentTime = new Date(result.rows[0].first_agent_comment_time);
+          const isWithinSLA = firstAgentCommentTime <= slaPolicyTicket.firstResponseDueAt;
+          
+          // Update SLA status
+          slaPolicyTicket.firstResponseMet = isWithinSLA;
+          await slaPolicyTicketRepository.save(slaPolicyTicket);
+          
+          // Update ticket record
+          await query(
+            'UPDATE tickets SET first_response_sla_breached = $1 WHERE id = $2',
+            [!isWithinSLA, ticketId]
+          );
+          
+          logger.info(`Fixed first response SLA for ticket #${ticketId}. Within SLA: ${isWithinSLA}`);
+        }
+      }
+      
+      // Get fresh SLA status after updates
+      const slaStatus = await slaService.checkSLAStatus(ticket);
+      
+      return res.status(200).json({
+        status: 'success',
+        message: 'SLA status recalculated',
+        data: {
+          ...slaStatus,
+          isPaused,
+          ticket: updatedTicket
+        }
+      });
+    } catch (error) {
+      logger.error(`Error recalculating SLA for ticket ${req.params.ticketId}:`, error);
+      next(error);
+    }
+  }
+  
+  /**
+   * Fix SLA breach status for all tickets or a specific ticket
+   * This is useful when SLA breach statuses are not properly reflected in the database
+   */
+  async fixSLABreachStatus(req: Request, res: Response, next: NextFunction): Promise<Response | void> {
+    try {
+      const { ticketId } = req.params;
+      
+      // If a specific ticket ID is provided, fix just that one
+      if (ticketId) {
+        const id = parseInt(ticketId, 10);
+        if (isNaN(id)) {
+          return res.status(400).json({
+            status: 'error',
+            message: 'Invalid ticket ID'
+          });
+        }
+        
+        // Get the ticket with its SLA info
+        const ticketRepository = AppDataSource.getRepository(Ticket);
+        const ticket = await ticketRepository.findOne({
+          where: { id },
+          relations: ['priority']
+        });
+        
+        if (!ticket) {
+          return res.status(404).json({
+            status: 'error',
+            message: 'Ticket not found'
+          });
+        }
+        
+        // Get SLA policy ticket
+        const slaPolicyTicketRepository = AppDataSource.getRepository(SLAPolicyTicket);
+        const slaPolicyTicket = await slaPolicyTicketRepository.findOne({
+          where: { ticketId: id } as any,
+          relations: ['slaPolicy']
+        });
+        
+        if (!slaPolicyTicket) {
+          return res.status(404).json({
+            status: 'error',
+            message: 'No SLA policy associated with this ticket'
+          });
+        }
+        
+        const now = new Date();
+        const firstResponseDueAt = new Date(slaPolicyTicket.firstResponseDueAt);
+        const resolutionDueAt = new Date(slaPolicyTicket.resolutionDueAt);
+        
+        // Determine if SLAs are breached
+        const isFirstResponseBreached = firstResponseDueAt < now && slaPolicyTicket.firstResponseMet !== true;
+        const isResolutionBreached = resolutionDueAt < now && slaPolicyTicket.resolutionMet !== true;
+        
+        // Update the SLA policy ticket if needed
+        if (isFirstResponseBreached && slaPolicyTicket.firstResponseMet === undefined) {
+          slaPolicyTicket.firstResponseMet = false;
+          await slaPolicyTicketRepository.save(slaPolicyTicket);
+        }
+        
+        if (isResolutionBreached && slaPolicyTicket.resolutionMet === undefined) {
+          slaPolicyTicket.resolutionMet = false;
+          await slaPolicyTicketRepository.save(slaPolicyTicket);
+        }
+        
+        // Update the ticket
+        ticket.firstResponseSlaBreached = isFirstResponseBreached;
+        ticket.resolutionSlaBreached = isResolutionBreached;
+        
+        // Update SLA status if not paused
+        if (ticket.slaStatus !== 'paused') {
+          if (isResolutionBreached) {
+            ticket.slaStatus = 'breached';
+          } else {
+            // Calculate the percentage
+            const ticketCreatedAt = new Date(ticket.createdAt);
+            const totalResolutionMinutes = Math.floor((resolutionDueAt.getTime() - ticketCreatedAt.getTime()) / 60000);
+            const elapsedMinutes = Math.floor((now.getTime() - ticketCreatedAt.getTime()) / 60000);
+            const resolutionPercentage = Math.min(100, Math.floor((elapsedMinutes / totalResolutionMinutes) * 100));
+            
+            if (resolutionPercentage >= 90) {
+              ticket.slaStatus = 'critical';
+            } else if (resolutionPercentage >= 75) {
+              ticket.slaStatus = 'warning';
+            } else {
+              ticket.slaStatus = 'active';
+            }
+          }
+        }
+        
+        await ticketRepository.save(ticket);
+        
+        return res.status(200).json({
+          status: 'success',
+          message: 'SLA breach status fixed',
+          data: {
+            ticketId: id,
+            firstResponseBreached: isFirstResponseBreached,
+            resolutionBreached: isResolutionBreached,
+            slaStatus: ticket.slaStatus
+          }
+        });
+      }
+      
+      // If no ticket ID, fix all tickets with incorrect breach status
+      const limit = parseInt(req.query.limit as string, 10) || 100;
+      const fixedCount = await slaChecker.fixBreachedSLAs(limit);
+      
+      return res.status(200).json({
+        status: 'success',
+        message: `Fixed SLA breach status for ${fixedCount} tickets`,
+        data: {
+          count: fixedCount
+        }
+      });
+    } catch (error) {
+      logger.error('Error fixing SLA breach status:', error);
+      next(error);
     }
   }
 }

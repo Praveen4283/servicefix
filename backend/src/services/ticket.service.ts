@@ -7,6 +7,38 @@ import slaService from './sla.service';
 import { Ticket } from '../models/Ticket';
 import { logger } from '../utils/logger';
 import { AppDataSource } from '../config/database';
+import { Comment } from '../models/Comment';
+import { Attachment } from '../models/Attachment';
+import { User } from '../models/User';
+import { AppError } from '../utils/errorHandler';
+import cacheService from './cache.service';
+
+export interface TicketPaginationOptions {
+  page: number;
+  limit: number;
+  searchTerm?: string;
+  status?: string | string[];
+  priority?: string | string[];
+  assigneeId?: string;
+  requesterId?: string;
+  departmentId?: string;
+  tags?: string | string[];
+  dateFrom?: string;
+  dateTo?: string;
+  sortBy?: string;
+  sortDirection?: 'ASC' | 'DESC';
+}
+
+export interface TicketStats {
+  total: number;
+  open: number;
+  closed: number;
+  resolved: number;
+  pending: number;
+  unassigned: number;
+  overdue: number;
+  highPriority: number;
+}
 
 class TicketService {
   /**
@@ -226,6 +258,367 @@ class TicketService {
     }
     
     return updatedTicket;
+  }
+
+  /**
+   * Get paginated list of tickets with filters
+   */
+  public async getTickets(options: TicketPaginationOptions) {
+    const {
+      page = 1,
+      limit = 10,
+      searchTerm = '',
+      status,
+      priority,
+      assigneeId,
+      requesterId,
+      departmentId,
+      tags,
+      dateFrom,
+      dateTo,
+      sortBy = 'createdAt',
+      sortDirection = 'DESC'
+    } = options;
+    
+    const offset = (page - 1) * limit;
+    
+    // Create a cache key based on query parameters
+    const cacheKeyParts = [
+      `tickets:list:${page}:${limit}`,
+      searchTerm && `search:${searchTerm}`,
+      status && `status:${status}`,
+      priority && `priority:${priority}`,
+      assigneeId && `assignee:${assigneeId}`,
+      requesterId && `requester:${requesterId}`,
+      departmentId && `department:${departmentId}`,
+      tags && `tags:${tags}`,
+      dateFrom && `from:${dateFrom}`,
+      dateTo && `to:${dateTo}`,
+      sortBy && `sort:${sortBy}:${sortDirection}`
+    ].filter(Boolean).join(':');
+    
+    return cacheService.getOrSet(cacheKeyParts, async () => {
+      try {
+        const ticketRepository = getRepository(Ticket);
+        
+        // Build query with QueryBuilder to avoid N+1 queries
+        const query = ticketRepository.createQueryBuilder('ticket')
+          // Join all necessary relations in a single query
+          .leftJoinAndSelect('ticket.requester', 'requester')
+          .leftJoinAndSelect('ticket.assignee', 'assignee')
+          .leftJoinAndSelect('ticket.status', 'status')
+          .leftJoinAndSelect('ticket.priority', 'priority')
+          .leftJoinAndSelect('ticket.department', 'department')
+          .leftJoinAndSelect('ticket.type', 'type')
+          .orderBy(`ticket.${sortBy}`, sortDirection)
+          .skip(offset)
+          .take(limit);
+          
+        // Apply filters
+        if (searchTerm) {
+          query.andWhere(
+            '(ticket.subject ILIKE :search OR ticket.description ILIKE :search OR requester.firstName ILIKE :search OR requester.lastName ILIKE :search)',
+            { search: `%${searchTerm}%` }
+          );
+        }
+        
+        if (status) {
+          if (Array.isArray(status) || status.includes(',')) {
+            const statusArray = Array.isArray(status) ? status : status.split(',');
+            query.andWhere('status.name IN (:...statusArray)', { statusArray });
+          } else {
+            query.andWhere('status.name = :status', { status });
+          }
+        }
+        
+        if (priority) {
+          if (Array.isArray(priority) || priority.includes(',')) {
+            const priorityArray = Array.isArray(priority) ? priority : priority.split(',');
+            query.andWhere('priority.name IN (:...priorityArray)', { priorityArray });
+          } else {
+            query.andWhere('priority.name = :priority', { priority });
+          }
+        }
+        
+        if (assigneeId) {
+          if (assigneeId === 'null' || assigneeId === 'unassigned') {
+            query.andWhere('ticket.assigneeId IS NULL');
+          } else {
+            query.andWhere('ticket.assigneeId = :assigneeId', { assigneeId });
+          }
+        }
+        
+        if (requesterId) {
+          query.andWhere('ticket.requesterId = :requesterId', { requesterId });
+        }
+        
+        if (departmentId) {
+          query.andWhere('ticket.departmentId = :departmentId', { departmentId });
+        }
+        
+        // Filter by date range
+        if (dateFrom) {
+          query.andWhere('ticket.createdAt >= :dateFrom', { dateFrom: new Date(dateFrom) });
+        }
+        
+        if (dateTo) {
+          query.andWhere('ticket.createdAt <= :dateTo', { dateTo: new Date(dateTo) });
+        }
+        
+        // Get total count and paginated tickets
+        const [tickets, totalTickets] = await query.getManyAndCount();
+        
+        // Process tickets to ensure consistent response format
+        const processedTickets = tickets.map(ticket => ({
+          id: ticket.id,
+          subject: ticket.subject,
+          description: ticket.description,
+          status: ticket.status,
+          priority: ticket.priority,
+          requester: {
+            id: ticket.requester?.id,
+            name: ticket.requester ? `${ticket.requester.firstName} ${ticket.requester.lastName}` : 'Unknown',
+            email: ticket.requester?.email
+          },
+          assignee: ticket.assignee ? {
+            id: ticket.assignee.id,
+            name: `${ticket.assignee.firstName} ${ticket.assignee.lastName}`,
+            email: ticket.assignee.email
+          } : null,
+          department: ticket.department,
+          type: ticket.type,
+          createdAt: ticket.createdAt,
+          updatedAt: ticket.updatedAt,
+          dueDate: ticket.dueDate,
+          resolvedAt: ticket.resolvedAt,
+          closedAt: ticket.closedAt,
+          slaStatus: ticket.slaStatus
+        }));
+        
+        return {
+          tickets: processedTickets,
+          pagination: {
+            total: totalTickets,
+            page,
+            limit,
+            totalPages: Math.ceil(totalTickets / limit)
+          }
+        };
+      } catch (err: unknown) {
+        const errorMessage = err instanceof Error ? err.message : String(err);
+        logger.error(`Error fetching tickets: ${errorMessage}`);
+        throw new AppError('Failed to fetch tickets', 500);
+      }
+    }, 60); // Cache for 1 minute
+  }
+  
+  /**
+   * Get ticket by ID with all related data
+   */
+  public async getTicketById(ticketId: string) {
+    const cacheKey = `tickets:${ticketId}`;
+    
+    return cacheService.getOrSet(cacheKey, async () => {
+      try {
+        const ticketRepository = getRepository(Ticket);
+        const commentRepository = getRepository(Comment);
+        const attachmentRepository = getRepository(Attachment);
+        
+        // Fetch ticket with related data
+        const ticket = await ticketRepository.findOne({
+          where: { id: ticketId } as any,
+          relations: [
+            'requester',
+            'assignee',
+            'status',
+            'priority',
+            'department',
+            'type',
+            'organization'
+          ]
+        });
+        
+        if (!ticket) {
+          throw new AppError('Ticket not found', 404);
+        }
+        
+        // Fetch comments and attachments in parallel
+        const [comments, attachments] = await Promise.all([
+          commentRepository.find({
+            where: { ticketId: Number(ticketId) } as any,
+            relations: ['user'],
+            order: { createdAt: 'ASC' }
+          }),
+          attachmentRepository.find({
+            where: { ticketId: Number(ticketId) } as any,
+            relations: ['uploadedBy']
+          })
+        ]);
+        
+        // Process ticket with consistent format
+        return {
+          id: ticket.id,
+          subject: ticket.subject,
+          description: ticket.description,
+          status: ticket.status,
+          priority: ticket.priority,
+          requester: ticket.requester ? {
+            id: ticket.requester.id,
+            name: `${ticket.requester.firstName} ${ticket.requester.lastName}`,
+            email: ticket.requester.email,
+            avatarUrl: ticket.requester.avatarUrl
+          } : null,
+          assignee: ticket.assignee ? {
+            id: ticket.assignee.id,
+            name: `${ticket.assignee.firstName} ${ticket.assignee.lastName}`,
+            email: ticket.assignee.email,
+            avatarUrl: ticket.assignee.avatarUrl
+          } : null,
+          department: ticket.department,
+          type: ticket.type,
+          organization: ticket.organization,
+          createdAt: ticket.createdAt,
+          updatedAt: ticket.updatedAt,
+          dueDate: ticket.dueDate,
+          resolvedAt: ticket.resolvedAt,
+          closedAt: ticket.closedAt,
+          slaStatus: ticket.slaStatus,
+          comments: comments.map(comment => ({
+            id: comment.id,
+            content: comment.content,
+            isInternal: comment.isInternal,
+            isSystem: comment.isSystem,
+            createdAt: comment.createdAt,
+            user: comment.user ? {
+              id: comment.user.id,
+              name: `${comment.user.firstName} ${comment.user.lastName}`,
+              avatarUrl: comment.user.avatarUrl,
+              role: comment.user.role
+            } : null
+          })),
+          attachments: attachments.map(attachment => ({
+            id: attachment.id,
+            fileName: attachment.fileName,
+            filePath: attachment.filePath,
+            fileType: attachment.fileType,
+            fileSize: attachment.fileSize,
+            uploadedBy: attachment.uploadedBy ? {
+              id: attachment.uploadedBy.id,
+              name: `${attachment.uploadedBy.firstName} ${attachment.uploadedBy.lastName}`
+            } : null,
+            createdAt: attachment.createdAt
+          }))
+        };
+      } catch (err: unknown) {
+        if (err instanceof AppError) throw err;
+        
+        const errorMessage = err instanceof Error ? err.message : String(err);
+        logger.error(`Error fetching ticket by ID: ${errorMessage}`);
+        throw new AppError('Failed to fetch ticket data', 500);
+      }
+    }, 60); // Cache for 1 minute
+  }
+  
+  /**
+   * Get ticket statistics
+   */
+  public async getTicketStats() {
+    const cacheKey = 'tickets:stats';
+    
+    return cacheService.getOrSet(cacheKey, async () => {
+      try {
+        const ticketRepository = getRepository(Ticket);
+        const statusQuery = ticketRepository.createQueryBuilder('ticket')
+          .innerJoin('ticket.status', 'status')
+          .leftJoin('ticket.priority', 'priority')
+          .select('status.name', 'statusName')
+          .addSelect('COUNT(ticket.id)', 'count')
+          .groupBy('status.name');
+          
+        const statusCounts = await statusQuery.getRawMany();
+        
+        // Count unassigned tickets using QueryBuilder instead of repository count
+        const unassignedCount = await ticketRepository
+          .createQueryBuilder('ticket')
+          .where('ticket.assigneeId IS NULL')
+          .getCount();
+        
+        // Count overdue tickets using QueryBuilder
+        const overdueCount = await ticketRepository
+          .createQueryBuilder('ticket')
+          .where('ticket.dueDate < :now', { now: new Date() })
+          .andWhere('ticket.resolvedAt IS NULL')
+          .andWhere('ticket.closedAt IS NULL')
+          .getCount();
+        
+        // Count high priority tickets
+        const highPriorityCount = await ticketRepository
+          .createQueryBuilder('ticket')
+          .innerJoin('ticket.priority', 'priority')
+          .where('priority.name IN (:...highPriorities)', { 
+            highPriorities: ['High', 'Urgent', 'Critical']
+          })
+          .getCount();
+        
+        // Calculate total tickets
+        const totalCount = await ticketRepository.count();
+        
+        // Convert status counts to a record for easier access
+        const statusCountMap: Record<string, number> = {};
+        statusCounts.forEach(item => {
+          statusCountMap[item.statusName.toLowerCase()] = parseInt(item.count);
+        });
+        
+        return {
+          total: totalCount,
+          open: statusCountMap.open || 0,
+          closed: statusCountMap.closed || 0,
+          resolved: statusCountMap.resolved || 0,
+          pending: statusCountMap.pending || 0,
+          unassigned: unassignedCount,
+          overdue: overdueCount,
+          highPriority: highPriorityCount
+        };
+      } catch (err: unknown) {
+        const errorMessage = err instanceof Error ? err.message : String(err);
+        logger.error(`Error fetching ticket stats: ${errorMessage}`);
+        throw new AppError('Failed to fetch ticket statistics', 500);
+      }
+    }, 300); // Cache for 5 minutes
+  }
+  
+  /**
+   * Invalidate ticket-related caches when data changes
+   */
+  public invalidateTicketCache(ticketId?: string | number | null) {
+    if (ticketId) {
+      // Invalidate specific ticket cache
+      cacheService.delete(`tickets:${ticketId}`);
+    }
+    
+    // Invalidate list and stats caches
+    cacheService.deleteByPattern('tickets:list:*');
+    cacheService.delete('tickets:stats');
+  }
+
+  /**
+   * Get a status by ID
+   * @param statusId Status ID
+   * @returns Status object or null if not found
+   */
+  public async getStatusById(statusId: number | string): Promise<TicketStatus | null> {
+    try {
+      const statusRepository = getRepository(TicketStatus);
+      const status = await statusRepository.findOne({
+        where: { id: Number(statusId) } as any
+      });
+      
+      return status;
+    } catch (err: unknown) {
+      const errorMessage = err instanceof Error ? err.message : String(err);
+      logger.error(`Error fetching status by ID ${statusId}: ${errorMessage}`);
+      return null;
+    }
   }
 }
 

@@ -15,11 +15,14 @@ import {
   UserDTO, 
   mapUserDTOToUser, 
   mapUserToDTO, 
-  ProfileUpdateDTO,
+  // ProfileUpdateDTO, - Commented out unused import
   mapProfileUpdateToDTO,
   createDataURLFromFile
 } from '../models/UserDTO';
-import { withRetry, createRetryableFunction } from '../utils/apiUtils';
+import { withRetry } from '../utils/apiUtils';
+// import { createRetryableFunction } from '../utils/apiUtils'; - Commented out unused import
+// import { JsonObject, MetadataObject } from '../types/common'; - Commented out unused imports
+import { ProfileUpdateData } from '../models/UserDTO';
 
 // Define response type for consistent response structure
 export interface ApiResponse<T = any> {
@@ -27,6 +30,7 @@ export interface ApiResponse<T = any> {
   data?: T;
   message?: string;
   errors?: Record<string, string[]>;
+  code?: string; // Add code field for error codes like CSRF_ERROR
 }
 
 // Define error type
@@ -34,84 +38,92 @@ export interface ApiError {
   message: string;
   errors?: Record<string, string[]>;
   status?: number;
+  code?: string;
+}
+
+/**
+ * Interface for API user response data with inconsistent property names
+ */
+interface ApiUserResponse {
+  id?: string;
+  _id?: string;
+  email?: string;
+  first_name?: string;
+  firstName?: string;
+  last_name?: string;
+  lastName?: string;
+  role?: string;
+  avatar_url?: string;
+  avatarUrl?: string;
+  phone_number?: string;
+  phoneNumber?: string;
+  phone?: string;
+  designation?: string;
+  job_title?: string;
+  jobTitle?: string;
+  organization_id?: string;
+  organizationId?: string;
+  organization?: {
+    id: string;
+    name: string;
+  };
+  timezone?: string;
+  language?: string;
+  last_login_at?: string;
+  lastLogin?: string;
+  lastLoginAt?: string;
+  notification_settings?: Record<string, { email: boolean; push: boolean; in_app: boolean } | boolean>;
+  notificationSettings?: Record<string, { email: boolean; push: boolean; in_app: boolean } | boolean>;
+  created_at?: string;
+  createdAt?: string;
+  updated_at?: string;
+  updatedAt?: string;
 }
 
 class ApiClient {
   // Changed from private to protected to allow access for backward compatibility exports
   protected client: AxiosInstance;
   private baseURL: string;
+  private csrfToken: string | null = null;
 
   constructor() {
     // Use environment variable for the API URL to make it configurable for different environments
+    // The baseURL already includes /api in the environment variable
     this.baseURL = process.env.REACT_APP_API_URL || 'http://localhost:5000/api';
+    
+    // Add debug for the base URL
+    console.log(`[API Client] Using base URL: ${this.baseURL}`);
     
     // Create axios instance
     this.client = axios.create({
       baseURL: this.baseURL,
-      timeout: 10000
+      timeout: 10000,
+      withCredentials: true // Enable sending cookies with cross-origin requests
     });
 
-    // Add request interceptor for auth token
+    // Add request interceptor for CSRF token
     this.client.interceptors.request.use(
-      (config) => {
-        // Check for tokens with both key names for backward compatibility
-        const authToken = localStorage.getItem('authToken');
-        const legacyToken = localStorage.getItem('token');
-        const token = authToken || legacyToken;
+      async (config) => {
+        // Log the request URL for debugging
+        console.log(`[API Client] Request URL: ${config.url}`);
         
-        if (token && config.headers) {
-          config.headers.Authorization = `Bearer ${token}`;
-        }
-        if (!(config.data instanceof FormData)) {
-          config.headers['Content-Type'] = 'application/json';
-        }
-        return config;
-      },
-      (error) => Promise.reject(error)
-    );
-    
-    // Add special interceptor for ticket assignments
-    this.client.interceptors.request.use(
-      (config) => {
-        // Check if this is a PUT request to update a ticket
-        if (config.method === 'put' && config.url?.includes('/tickets/') && config.data) {
-          // Make a copy of the data to avoid mutating the original
-          const data = { ...config.data };
-          
-          // If assigneeId is present, ensure it's a number or null
-          if ('assigneeId' in data) {
-            console.log('API Client - Original assigneeId:', data.assigneeId, typeof data.assigneeId);
-            
-            if (data.assigneeId === null || data.assigneeId === undefined) {
-              // Keep null/undefined as is
-            } else if (typeof data.assigneeId === 'string') {
-              // Check if this is a UUID format (contains letters)
-              if (/[a-zA-Z]/.test(data.assigneeId)) {
-                console.log('Found UUID format, setting to default numeric ID');
-                // Must be a numeric ID for PostgreSQL bigint column
-                data.assigneeId = 1001; // Default safe ID based on schema
-              } else {
-                // Try to convert string to number
-                const numericId = parseInt(data.assigneeId, 10);
-                if (!isNaN(numericId)) {
-                  data.assigneeId = numericId;
-                } else {
-                  // If it can't be converted, use default
-                  data.assigneeId = 1001;
-                }
+        // Only add CSRF token for non-GET methods
+        if (config.method && ['post', 'put', 'patch', 'delete'].includes(config.method)) {
+          // If we don't have a CSRF token yet, fetch one
+          if (!this.csrfToken) {
+            try {
+              // Skip for authentication endpoints to prevent circular dependencies
+              if (!config.url?.includes('/auth/') || config.url === '/auth/validate') {
+                await this.fetchCsrfToken();
               }
-            } else if (typeof data.assigneeId !== 'number') {
-              // Handle any other non-numeric types
-              data.assigneeId = 1001;
+            } catch (error) {
+              console.error('[API Client] Failed to fetch CSRF token:', error);
             }
-            
-            // For safety, ensure the final value is indeed a number
-            if (data.assigneeId !== null && typeof data.assigneeId !== 'number') {
-              data.assigneeId = 1001;
-            }
-            
-            console.log('API Client - Final processed assigneeId:', data.assigneeId, typeof data.assigneeId);
-            config.data = data;
+          }
+
+          // Add CSRF token to header if available
+          if (this.csrfToken && config.headers) {
+            config.headers['x-csrf-token'] = this.csrfToken;
           }
         }
         
@@ -120,11 +132,100 @@ class ApiClient {
       (error) => Promise.reject(error)
     );
 
-    // Add response interceptor for error handling
+    // No need to add Authorization header as the JWT token is now sent in HttpOnly cookies automatically
+    // The withCredentials: true option in axios config ensures cookies are sent with each request
+
+    // Add response interceptor to handle 401 responses (unauthenticated)
     this.client.interceptors.response.use(
-      this.handleSuccess,
-      this.handleError
+      (response) => response.data,
+      async (error) => {
+        // Handle 401 Unauthorized errors
+        const originalRequest = error.config;
+        
+        // Don't retry auth endpoints to prevent infinite loops
+        if (error.response?.status === 401 && 
+            !originalRequest._retry && 
+            !originalRequest.url?.includes('/auth/login') &&
+            !originalRequest.url?.includes('/auth/refresh-token')) {
+          
+          originalRequest._retry = true;
+          
+          try {
+            console.log('[API Client] Attempting to refresh token for 401 response');
+            
+            // Try to refresh the token - no need to send refresh token as it's in HttpOnly cookie
+            const refreshResponse = await this.post('/auth/refresh-token', {});
+            
+            // If refresh successful, retry the original request
+            if (refreshResponse && refreshResponse.success) {
+              console.log('[API Client] Token refreshed, retrying original request');
+              
+              // Token is now stored in HttpOnly cookie, just retry the request
+              return this.client(originalRequest);
+            } else {
+              // Token refresh failed
+              console.warn('[API Client] Token refresh failed, logging out');
+              this.handleAuthError();
+            }
+          } catch (refreshError) {
+            console.error('[API Client] Error refreshing token:', refreshError);
+            // If refresh fails, handle auth error
+            this.handleAuthError();
+          }
+        }
+        
+        return Promise.reject(error);
+      }
     );
+  }
+
+  /**
+   * Fetch a new CSRF token
+   */
+  private async fetchCsrfToken(): Promise<void> {
+    try {
+      console.log('[API Client] Fetching CSRF token...');
+      
+      // Check if we have a cached token first
+      const cachedToken = localStorage.getItem('csrfToken');
+      const tokenExpiry = localStorage.getItem('csrfTokenExpiry');
+      
+      // Use cached token if it exists and isn't expired
+      if (cachedToken && tokenExpiry && parseInt(tokenExpiry) > Date.now()) {
+        console.log('[API Client] Using cached CSRF token');
+        this.csrfToken = cachedToken;
+        return;
+      }
+      
+      // Otherwise fetch a new token
+      const response = await axios.get(`${this.baseURL}/auth/csrf-token`, {
+        withCredentials: true,
+        timeout: 5000 // 5 second timeout
+      });
+      
+      if (response.data && response.data.csrfToken) {
+        this.csrfToken = response.data.csrfToken;
+        
+        // Cache the token for 10 minutes
+        if (this.csrfToken) {
+          localStorage.setItem('csrfToken', this.csrfToken);
+          localStorage.setItem('csrfTokenExpiry', (Date.now() + 10 * 60 * 1000).toString());
+          
+        console.log('[API Client] CSRF token fetched successfully');
+        }
+      } else {
+        console.error('[API Client] CSRF token response missing token:', response.data);
+      }
+    } catch (error) {
+      console.error('[API Client] Error fetching CSRF token:', error);
+      
+      // Try to use cached token even if expired as fallback
+      const cachedToken = localStorage.getItem('csrfToken');
+      if (cachedToken) {
+        console.log('[API Client] Using expired cached CSRF token as fallback');
+        this.csrfToken = cachedToken;
+      }
+    }
   }
 
   // Handle successful responses
@@ -133,7 +234,7 @@ class ApiClient {
   }
 
   // Handle error responses
-  private handleError = (error: AxiosError<ApiResponse>): Promise<never> => {
+  private handleError = (error: AxiosError<ApiResponse>): Promise<any> => {
     const { response, request, config } = error;
     
     let apiError: ApiError = {
@@ -147,6 +248,7 @@ class ApiClient {
         message: response.data?.message || 'An error occurred',
         errors: response.data?.errors,
         status: response.status,
+        code: response.data?.code
       };
 
       // Handle authentication errors
@@ -159,6 +261,20 @@ class ApiClient {
           // Attempt to refresh the token or log out
           this.handleAuthError();
         }
+      } 
+      // Handle CSRF errors
+      else if (response.status === 403 && response.data?.code === 'CSRF_ERROR') {
+        console.log('[API Client] CSRF token expired, fetching new token and retrying request');
+        // Fetch a new CSRF token and retry the request once
+        return this.fetchCsrfToken().then(() => {
+          if (!config) return Promise.reject(apiError);
+          // Add the new CSRF token to the request
+          if (config.headers && this.csrfToken) {
+            config.headers['x-csrf-token'] = this.csrfToken;
+          }
+          // Retry the request once with the new token
+          return this.client(config);
+        });
       }
     } else if (request) {
       // Request made but no response received (network error)
@@ -173,53 +289,47 @@ class ApiClient {
 
   // Handle authentication errors by attempting to refresh token or logging out
   private handleAuthError = (): void => {
-    const refreshToken = localStorage.getItem('refreshToken');
-    
-    if (refreshToken) {
-      // Try to refresh the token
-      this.post<{ token: string; refreshToken: string }>('/auth/refresh-token', { refreshToken })
-        .then((response) => {
-          // Store token under both names for backward compatibility
-          localStorage.setItem('authToken', response.token);
-          localStorage.setItem('token', response.token);
-          localStorage.setItem('refreshToken', response.refreshToken);
-          window.location.reload(); // Reload the page with the new token
+    try {
+      // No need to retrieve refresh token from localStorage as it's now in HttpOnly cookies
+      console.log('[API Client] Handling auth error');
+      
+      // Call the auth/logout endpoint to clear the cookies server-side
+      this.post('/auth/logout', {})
+        .then(() => {
+          console.log('[API Client] Logged out successfully');
+          this.logout();
         })
-        .catch(() => {
-          // If refresh fails, log out
+        .catch(error => {
+          console.error('[API Client] Error during logout:', error);
           this.logout();
         });
-    } else {
-      // No refresh token available, log out
+    } catch (error) {
+      console.error('[API Client] Error in handleAuthError:', error);
       this.logout();
     }
-  };
+  }
 
-  // Log out user
+  // Logout helper to trigger the auth context logout
   private logout = (): void => {
-    // Clear all token variations for consistency
-    localStorage.removeItem('authToken');
-    localStorage.removeItem('token');
-    localStorage.removeItem('refreshToken');
-    localStorage.removeItem('user');
+    // Dispatch a logout event that AuthContext will listen for
+    const logoutEvent = new CustomEvent('auth:logout');
+    window.dispatchEvent(logoutEvent);
     
     // Redirect to login page
     window.location.href = '/login';
-  };
+  }
 
   // Get request headers including auth token
   private getRequestHeaders(): Record<string, string> {
     const headers: Record<string, string> = {
-      'Content-Type': 'application/json',
+      'Content-Type': 'application/json'
     };
     
-    // Check for tokens with both key names for backward compatibility
-    const authToken = localStorage.getItem('authToken');
-    const legacyToken = localStorage.getItem('token');
-    const token = authToken || legacyToken;
+    // No need to add Authorization header as the JWT token is now sent in HttpOnly cookies
     
-    if (token) {
-      headers.Authorization = `Bearer ${token}`;
+    // Add CSRF token if available
+    if (this.csrfToken) {
+      headers['x-csrf-token'] = this.csrfToken;
     }
     
     return headers;
@@ -244,43 +354,42 @@ class ApiClient {
     return this.client
       .get<ApiResponse<T> | T>(url, { ...config, params })
       .then((response) => {
-        console.log(`[API Client] GET Response Raw Data for ${url}:`, response.data); // Log raw response data
+        console.log(`[API Client] GET Response Raw Data for ${url}:`, response); // Log raw response data
         
-        // Check if response is in expected format with data property
-        if (response.data && typeof response.data === 'object') {
+        // The data property contains the actual response from the server
+        const responseData = response.data;
+        
+        // Check if response is in expected format
+        if (responseData && typeof responseData === 'object') {
           // If it matches our ApiResponse format with status and data
-          if ('status' in response.data && 'data' in response.data) {
-            const apiResponse = response.data as ApiResponse<T>;
-            
-            if (apiResponse.status === 'success') {
-              console.log(`[API Client] GET Success Data for ${url}:`, apiResponse.data);
-              return apiResponse.data;
-            } else {
-              // Throw an error based on the API response message if available
-              const errorMessage = apiResponse.message || 'Request failed';
-              console.error(`[API Client] GET Error Status in Response for ${url}:`, errorMessage);
-              throw new Error(errorMessage);
-            }
+          if ('status' in responseData && responseData.status === 'success' && 'data' in responseData) {
+            console.log(`[API Client] GET Success Data for ${url}:`, responseData.data);
+            return responseData.data as T;
+          }
+          // If it matches our authentication response format with user
+          else if ('status' in responseData && responseData.status === 'success' && 'user' in responseData) {
+            console.log(`[API Client] GET Success Auth Response for ${url}:`, responseData);
+            return responseData as unknown as T;
           }
           // Success response with standardized structure
-          else if ('success' in response.data && 'data' in response.data) {
-            console.log(`[API Client] GET Success Data from success structure for ${url}:`, (response.data as any).data);
-            return (response.data as any).data;
+          else if ('success' in responseData && 'data' in responseData) {
+            console.log(`[API Client] GET Success Data from success structure for ${url}:`, responseData.data);
+            return responseData.data as T;
           }
           // Check if this is a notification preferences endpoint
           else if (url.includes('/notifications/preferences')) {
             // Special handling for notification preferences which may come in various formats
             console.log(`[API Client] Processing notification preferences data for ${url}`);
-            return response.data as T;
+            return responseData as T;
           }
           // Fall back to assume direct data structure when not following ApiResponse
           else {
             console.log(`[API Client] GET Unexpected Response Format for ${url}. Returning raw data.`);
-            return response.data as T;
+            return responseData as T;
           }
         } else {
           // For simple responses (strings, numbers, etc.)
-          return response.data as T;
+          return responseData as T;
         }
       })
       .catch(error => {
@@ -298,18 +407,35 @@ class ApiClient {
     config?: AxiosRequestConfig
   ): Promise<T> {
     return this.client
-      .post<ApiResponse<T>>(url, data, config)
+      .post<ApiResponse<T> | T>(url, data, config)
       .then((response) => {
-        // Check if the response has the expected format
-        if (response.data && 'status' in response.data) {
-          if (response.data.status === 'success') {
-            return response.data.data as T;
-          } else {
-            throw new Error(response.data.message || 'Request failed');
+        // Debug the response structure
+        console.log(`[API Client] POST Response for ${url}:`, response);
+        
+        // For auth endpoints, just return the whole response without further processing
+        if (url.includes('/auth/')) {
+          console.log(`[API Client] Returning auth response for ${url}:`, response);
+          return response as unknown as T;
+        }
+        
+        // For non-auth endpoints, handle the standard structure
+        const responseData = response as any; // Cast to any to avoid type checking errors
+        
+        if (responseData && typeof responseData === 'object') {
+          if ('status' in responseData && responseData.status === 'success') {
+            // If it has data property, return that
+            if ('data' in responseData) {
+              return responseData.data as T;
+            }
+            // Otherwise return the whole response
+            return responseData as unknown as T;
+          } else if ('status' in responseData && responseData.status === 'error') {
+            throw new Error(responseData.message || 'Request failed');
           }
         }
+        
         // Fallback for unexpected response format
-        return response.data as T;
+        return responseData as T;
       });
   }
 
@@ -435,7 +561,7 @@ class ApiClient {
    * @param profileData The profile data including possible avatar file
    * @returns Promise resolving to the updated User object
    */
-  public async updateUserProfile(userId: string, profileData: any): Promise<User> {
+  public async updateUserProfile(userId: string, profileData: ProfileUpdateData): Promise<User> {
     console.log('[ApiClient] updateUserProfile - Received profile data:', JSON.stringify(profileData));
     const profileDTO = mapProfileUpdateToDTO(profileData); // contains { ..., avatar: File | null | undefined }
     console.log('[ApiClient] updateUserProfile - After mapping to DTO:', JSON.stringify({...profileDTO, avatar: profileDTO.avatar ? 'File object' : profileDTO.avatar}));
@@ -478,7 +604,7 @@ class ApiClient {
 
     // Send the PUT request with the potentially updated profileDTO.avatar_url
     console.log('[ApiClient] updateUserProfile - Final DTO being sent to API:', JSON.stringify(profileDTO));
-    return this.put<any>(`/users/${userId}`, profileDTO)
+    return this.put<UserDTO>(`/users/${userId}`, profileDTO)
       .then(response => {
         console.log('[ApiClient] updateUserProfile - Raw API response:', JSON.stringify(response));
         const normalizedResponse = this.normalizeUserResponse(response);
@@ -494,7 +620,7 @@ class ApiClient {
    * @param response The response data from the API
    * @returns A properly formatted UserDTO object
    */
-  private normalizeUserResponse(response: any): UserDTO {
+  private normalizeUserResponse(response: ApiUserResponse): UserDTO {
     console.log('[ApiClient] normalizeUserResponse - Raw input:', JSON.stringify(response));
     
     let organizationData: { id: string; name: string } | undefined = undefined;
@@ -515,8 +641,8 @@ class ApiClient {
     }
     
     const normalized: UserDTO = {
-      id: response.id || response._id,
-      email: response.email,
+      id: response.id || response._id || '',
+      email: response.email || '',
       first_name: response.first_name || response.firstName || '',
       last_name: response.last_name || response.lastName || '',
       role: response.role || 'user',

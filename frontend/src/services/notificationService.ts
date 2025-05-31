@@ -1,6 +1,7 @@
 import apiClient from './apiClient';
 import { Notification } from '../context/NotificationContext';
 import { withRetry } from '../utils/apiUtils';
+import { MetadataObject, JsonObject } from '../types/common';
 
 // Local storage key for notifications
 const NOTIFICATIONS_STORAGE_KEY = 'app_notifications';
@@ -21,7 +22,7 @@ const DEDUPLICATION_WINDOW_MS = 3000; // 3 seconds window for deduplication
 const isDebugMode = process.env.NODE_ENV === 'development';
 
 // Logger function
-const debugLog = (message: string, ...args: any[]) => {
+const debugLog = (message: string, ...args: unknown[]): void => {
   if (isDebugMode) {
     // console.log(message, ...args); // Removed this line
   }
@@ -70,11 +71,36 @@ interface ApiNotification {
   type: string;
   created_at: string;
   createdAt?: string; // Support for camelCase format
-  metadata?: {
-    ticket_id?: string;
-    comment_id?: string;
-    [key: string]: any;
+  metadata?: NotificationMetadata;
+}
+
+/**
+ * Type for notification metadata
+ */
+interface NotificationMetadata {
+  ticket_id?: string;
+  comment_id?: string;
+  [key: string]: string | number | boolean | null | undefined;
+}
+
+/**
+ * Type for notification fetch options
+ */
+interface FetchNotificationsOptions {
+  limit?: number;
+  offset?: number;
+  unreadOnly?: boolean;
+}
+
+/**
+ * Type for API response containing notifications
+ */
+interface ApiNotificationResponse {
+  success?: boolean;
+  data?: {
+    notifications?: ApiNotification[];
   };
+  notifications?: ApiNotification[];
 }
 
 /**
@@ -95,7 +121,7 @@ const notificationService = {
     message: string,
     type: string = 'info',
     link?: string,
-    metadata?: any
+    metadata?: NotificationMetadata
   ): Promise<boolean> => {
     try {
       // Call the backend API to create a notification
@@ -118,7 +144,7 @@ const notificationService = {
    * @param options Query options for fetching notifications
    * @returns Promise that resolves to notifications array
    */
-  fetchNotifications: async (options: { limit?: number; offset?: number; unreadOnly?: boolean } = {}): Promise<Notification[]> => {
+  fetchNotifications: async (options: FetchNotificationsOptions = {}): Promise<Notification[]> => {
     try {
       // Build query string
       const queryParams = new URLSearchParams();
@@ -128,13 +154,13 @@ const notificationService = {
       
       // Fetch notifications from backend with retry capability
       const responseData = await withRetry(
-        () => apiClient.get<any>(`/notifications?${queryParams.toString()}`),
+        () => apiClient.get<ApiNotificationResponse>(`/notifications?${queryParams.toString()}`),
         3, // 3 retries
         1000 // 1 second initial delay
       );
       
       // Extract the notifications array from the response data
-      let apiNotifications;
+      let apiNotifications: ApiNotification[] | undefined;
       
       // Handle different possible response structures
       if (responseData?.data?.notifications) {
@@ -147,7 +173,7 @@ const notificationService = {
         debugLog('Extracted notifications from responseData.notifications:', apiNotifications.length);
       } else if (Array.isArray(responseData)) {
         // API returns notifications array directly
-        apiNotifications = responseData;
+        apiNotifications = responseData as ApiNotification[];
         debugLog('Response was direct array:', apiNotifications.length);
       } else if (responseData?.success && responseData?.data?.notifications) {
         // API returns {success: true, data: {notifications: []}}

@@ -13,6 +13,9 @@ export class TicketComment {
   @Column({ type: 'boolean', name: 'is_internal', default: false })
   isInternal: boolean;
 
+  @Column({ type: 'boolean', name: 'is_system', default: false })
+  isSystem: boolean;
+
   @ManyToOne(() => User, { nullable: false })
   @JoinColumn({ name: 'user_id' })
   user: User;

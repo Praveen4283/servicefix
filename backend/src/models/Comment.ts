@@ -13,6 +13,9 @@ export class Comment {
   @Column({ default: false, name: 'is_internal' })
   isInternal!: boolean;
 
+  @Column({ default: false, name: 'is_system' })
+  isSystem!: boolean;
+
   @ManyToOne(() => User, user => user.comments)
   @JoinColumn({ name: 'user_id' })
   user!: User;

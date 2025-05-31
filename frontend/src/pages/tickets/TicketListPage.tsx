@@ -47,7 +47,7 @@ import {
   TextField,
   InputAdornment,
 } from '@mui/material';
-import { DataGrid, GridColDef, GridValueGetterParams } from '@mui/x-data-grid';
+import { DataGrid, GridColDef, GridValueGetterParams, GridRenderCellParams } from '@mui/x-data-grid';
 import Timeline from '@mui/lab/Timeline';
 import TimelineItem from '@mui/lab/TimelineItem';
 import TimelineSeparator from '@mui/lab/TimelineSeparator';
@@ -590,20 +590,18 @@ const TicketListPage: React.FC = () => {
       field: 'user',
       headerName: 'User',
       width: 200,
-      renderCell: (params) => (
+      renderCell: (params: GridRenderCellParams) => (
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
           <UserAvatar 
             user={{
-              id: params.row.user.id,
-              firstName: params.row.user.firstName,
-              lastName: params.row.user.lastName,
-              avatarUrl: params.row.user.avatar
+              id: params.row.user?.id || 'unknown',
+              firstName: params.row.user?.firstName || '',
+              lastName: params.row.user?.lastName || '',
+              avatarUrl: params.row.user?.avatarUrl
             }}
             size="small"
           />
-          <Typography variant="body2">
-            {params.row.user.firstName} {params.row.user.lastName}
-          </Typography>
+          <Typography variant="body2">{params.row.user?.name || 'Unknown User'}</Typography>
         </Box>
       ),
     },
@@ -612,21 +610,10 @@ const TicketListPage: React.FC = () => {
       headerName: 'Activity',
       flex: 1,
       minWidth: 300,
-      renderCell: (params) => (
+      renderCell: (params: GridRenderCellParams) => (
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
           {getActivityIcon(params.row.type)}
           <Typography variant="body2">{params.row.message}</Typography>
-          <Chip 
-            label={params.row.ticketId}
-            size="small"
-            sx={{ 
-              height: 20, 
-              fontSize: '0.75rem',
-              '& .MuiChip-label': {
-                px: 1
-              }
-            }}
-          />
         </Box>
       ),
     },
@@ -634,7 +621,7 @@ const TicketListPage: React.FC = () => {
       field: 'ticketSubject',
       headerName: 'Ticket',
       width: 250,
-      renderCell: (params) => (
+      renderCell: (params: GridRenderCellParams) => (
         <Typography variant="body2" color="text.secondary" noWrap>
           {params.row.ticketSubject}
         </Typography>
@@ -644,7 +631,7 @@ const TicketListPage: React.FC = () => {
       field: 'timestamp',
       headerName: 'Time',
       width: 150,
-      renderCell: (params) => (
+      renderCell: (params: GridRenderCellParams) => (
         <Typography variant="body2" color="text.secondary">
           {getRelativeTime(params.row.timestamp, userTimeZone)}
         </Typography>

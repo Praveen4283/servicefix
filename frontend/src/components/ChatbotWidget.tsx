@@ -16,22 +16,28 @@ import {
   alpha,
   Tooltip,
   Zoom,
-  Badge
+  Badge,
+  InputAdornment
 } from '@mui/material';
 import { styled } from '@mui/material/styles';
-import SendIcon from '@mui/icons-material/Send';
-import ChatIcon from '@mui/icons-material/Chat';
-import CloseIcon from '@mui/icons-material/Close';
-import SmartToyIcon from '@mui/icons-material/SmartToy';
-import PersonIcon from '@mui/icons-material/Person';
-import ArticleIcon from '@mui/icons-material/Article';
-import ConfirmationNumberIcon from '@mui/icons-material/ConfirmationNumber';
-import KeyboardArrowUpIcon from '@mui/icons-material/KeyboardArrowUp';
-import ContentCopyIcon from '@mui/icons-material/ContentCopy';
-import DoneIcon from '@mui/icons-material/Done';
-import MoreVertIcon from '@mui/icons-material/MoreVert';
-import ThumbUpIcon from '@mui/icons-material/ThumbUp';
-import ThumbDownIcon from '@mui/icons-material/ThumbDown';
+import { 
+  Chat as ChatIcon,
+  Send as SendIcon,
+  SmartToy as SmartToyIcon,
+  Close as CloseIcon,
+  KeyboardArrowUp as KeyboardArrowUpIcon,
+  ContentCopy as ContentCopyIcon,
+  Done as DoneIcon,
+  ThumbUp as ThumbUpIcon,
+  ThumbDown as ThumbDownIcon,
+  Visibility as VisibilityIcon,
+  Article as ArticleIcon,
+  ConfirmationNumber as ConfirmationNumberIcon,
+  Person as PersonIcon,
+  MoreVert as MoreVertIcon
+} from '@mui/icons-material';
+import { useNavigate } from 'react-router-dom';
+import { v4 as uuidv4 } from 'uuid';
 
 // Import ticket service and auth context
 import ticketService, { Ticket, TicketComment, TicketStatus, TicketPriority } from '../services/ticketService';
@@ -39,6 +45,7 @@ import chatbotService from '../services/chatbotService';
 import { useAuth } from '../context/AuthContext';
 import { useNotification } from '../context/NotificationContext';
 import { useTickets } from '../context/TicketContext'; // Import useTickets
+import apiClient from '../services/apiClient';
 
 // Styled components
 const ChatContainer = styled(Paper)(({ theme }) => ({
@@ -186,6 +193,16 @@ type ConversationState =
   | 'getting_comment_text';
   // Add more states as needed (e.g., for editing)
 
+// Add an interface for the pending data structure at the beginning of the file
+interface PendingTicketData {
+  subject?: string;
+  description?: string;
+  departmentId?: number;
+  typeId?: number;
+  tags?: string[];
+  [key: string]: any; // Allow for any additional properties
+}
+
 // Root component
 const ChatbotWidget: React.FC = () => {
   const theme = useTheme();
@@ -223,6 +240,8 @@ const ChatbotWidget: React.FC = () => {
   const [conversationState, setConversationState] = useState<ConversationState>('idle');
   const [pendingData, setPendingData] = useState<any>({});
   const [conversationId, setConversationId] = useState<string | null>(null);
+
+  const navigate = useNavigate();
 
   // Scroll to bottom of messages container
   const scrollToBottom = useCallback(() => {
@@ -534,7 +553,7 @@ const ChatbotWidget: React.FC = () => {
 
       case 'creating_ticket_description':
         // Store description
-        setPendingData(prev => ({ ...prev, description: input }));
+        setPendingData((prev: PendingTicketData) => ({ ...prev, description: input }));
         
         // Ask for department
         if (departments && departments.length > 0) {
@@ -556,7 +575,7 @@ const ChatbotWidget: React.FC = () => {
       case 'getting_department':
         const chosenDept = departments.find(d => d.name.toLowerCase() === input.toLowerCase());
         if (chosenDept) {
-          setPendingData(prev => ({ ...prev, departmentId: chosenDept.id }));
+          setPendingData((prev: PendingTicketData) => ({ ...prev, departmentId: chosenDept.id }));
           // Ask for type
           if (ticketTypes && ticketTypes.length > 0) {
             const typeOptions = ticketTypes.map(t => <li key={t.id}>{t.name}</li>);
@@ -586,7 +605,7 @@ const ChatbotWidget: React.FC = () => {
       case 'getting_ticket_type':
         const chosenType = ticketTypes.find(t => t.name.toLowerCase() === input.toLowerCase());
         if (chosenType) {
-          setPendingData(prev => ({ ...prev, typeId: chosenType.id }));
+          setPendingData((prev: PendingTicketData) => ({ ...prev, typeId: chosenType.id }));
           botResponse = "Great. You can add some tags to help categorize this ticket (optional, comma-separated), or press Enter to skip.";
           setConversationState('getting_tags');
         } else {
@@ -820,19 +839,100 @@ const ChatbotWidget: React.FC = () => {
     }
   };
   
-  // Create a ticket from chat (Placeholder - might be replaced by main flow)
+  // Create a ticket from chat
   const handleCreateTicket = async () => {
-    // This could potentially pre-fill the subject/description fields if called from suggestion
+    try {
+      // First check if user is authenticated - required for ticket creation
+      if (!user) {
+        addMessage("To create a ticket, you need to be logged in. Please log in and try again.", 'bot');
+        return;
+      }
+      
+      // Start the ticket creation flow
     setConversationState('creating_ticket_subject');
-    addMessage("Okay, let's create a ticket. What should the subject be?", 'bot');
+      addMessage("Let's create a support ticket. What should the subject be?", 'bot');
+    } catch (error) {
+      console.error('Error in ticket creation flow:', error);
+      addMessage("I'm sorry, I encountered an error trying to create a ticket. Please try again later or use the 'Create Ticket' page directly.", 'bot');
+    }
   };
   
-  // View knowledge base article (Placeholder)
+  // Complete ticket creation and redirect to ticket detail
+  const completeTicketCreation = async (ticketData: Partial<Ticket>) => {
+    try {
+      // Show processing message
+      addMessage("Creating your ticket...", 'bot');
+      
+      // Prepare ticket data with required fields
+      const createTicketRequest = {
+        subject: ticketData.subject || 'Support request from chat',
+        description: ticketData.description || 'No description provided',
+        priority: ticketData.priority || 'medium',
+        status: 'open',
+        requesterId: user?.id,
+        type: ticketData.type || 'question',
+        tags: ticketData.tags || []
+      };
+      
+      // Call API to create the ticket
+      const response = await apiClient.post<Ticket>('/tickets', createTicketRequest);
+      
+      if (response && response.id) {
+        // Success message with a link to the created ticket
+        addMessage(
+          <Box>
+            <Typography variant="body1">
+              Your ticket has been created successfully!
+            </Typography>
+            <Button 
+              variant="contained" 
+              size="small" 
+              startIcon={<VisibilityIcon />}
+              onClick={() => navigate(`/tickets/${response.id}`)}
+              sx={{ mt: 1 }}
+            >
+              View Ticket #{response.id}
+            </Button>
+          </Box>,
+          'bot'
+        );
+        
+        // Reset conversation state
+        setConversationState('idle');
+      } else {
+        throw new Error('Failed to create ticket - no ticket ID returned');
+      }
+    } catch (error) {
+      console.error('Error creating ticket:', error);
+      addMessage("I'm sorry, there was an error creating your ticket. Please try again or use the 'Create Ticket' page.", 'bot');
+      setConversationState('idle');
+    }
+  };
+  
+  // View knowledge base article (implementing the placeholder)
   const handleViewArticle = (articleId: string, articleTitle: string) => {
-    // In a real app, this would navigate to the knowledge base article
-    addMessage(`Okay, showing article: ${articleTitle} (ID: ${articleId})`, 'bot');
-    // Maybe open link in new tab? window.open(`/knowledge/${articleId}`, '_blank');
-    alert(`Navigating to article: ${articleTitle} (ID: ${articleId})`);
+    // Add a message in the chat showing we're navigating to the article
+    addMessage(`Opening article: "${articleTitle}" for you...`, 'bot');
+    
+    // Create a button that will navigate to the article
+    addMessage(
+      <Box>
+        <Typography variant="body1">
+          Here's the article you requested:
+        </Typography>
+        <Button 
+          variant="contained" 
+          color="primary"
+          size="small" 
+          startIcon={<ArticleIcon />}
+          onClick={() => navigate(`/knowledge/${articleId}`)}
+          sx={{ mt: 1 }}
+        >
+          View Article: {articleTitle}
+        </Button>
+      </Box>,
+      'bot'
+    );
   };
   
   // Copy conversation to clipboard

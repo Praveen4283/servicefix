@@ -33,65 +33,80 @@ interface EmailSettings {
 class NotificationService {
   private emailTransporter: any;
   private emailSettings: EmailSettings | null = null;
+  private isInitialized: boolean = false;
   
   constructor() {
-    // Initialize email transporter with default settings from environment variables
-    // We'll refresh this with database settings when needed
-    this.initializeEmailTransporter();
+    // Use default settings from environment variables initially
+    // We'll load settings from the database when it's available
+    this.emailSettings = {
+      smtpServer: process.env.SMTP_HOST || 'smtp.example.com',
+      smtpPort: parseInt(process.env.SMTP_PORT || '587'),
+      smtpUsername: process.env.SMTP_USER || '',
+      smtpPassword: process.env.SMTP_PASSWORD || '',
+      emailFromName: process.env.EMAIL_FROM_NAME || 'ServiceFix Support',
+      emailReplyTo: process.env.EMAIL_REPLY_TO || 'support@servicefix.com',
+      enableEmailNotifications: process.env.ENABLE_EMAIL_NOTIFICATIONS !== 'false'
+    };
+    
+    // Initialize email transporter with environment variables
+    this.createTransporter();
   }
 
   /**
-   * Initialize or refresh the email transporter with the latest settings
+   * Create the email transporter with current settings
    */
-  async initializeEmailTransporter() {
+  private createTransporter(): void {
     try {
-      // Try to fetch email settings from database
-      try {
-        const result = await query('SELECT settings_data FROM settings WHERE category = $1', ['email']);
-        if (result.rows.length > 0) {
-          this.emailSettings = result.rows[0].settings_data;
-          logger.info('Email settings loaded from database');
-        } else {
-          // If no settings found in database, use environment variables
-          this.emailSettings = {
-            smtpServer: process.env.SMTP_HOST || 'smtp.mailgun.org',
-            smtpPort: parseInt(process.env.SMTP_PORT || '587'),
-            smtpUsername: process.env.SMTP_USER || 'postmaster@sandboxeca4aa11a2a34b0d969c416f32d7686d.mailgun.org',
-            smtpPassword: process.env.SMTP_PASSWORD || 'Raju@4283',
-            emailFromName: process.env.EMAIL_FROM_NAME || 'ServiceFix Support',
-            emailReplyTo: process.env.EMAIL_REPLY_TO || 'support@servicefix.com',
-            enableEmailNotifications: process.env.ENABLE_EMAIL_NOTIFICATIONS !== 'false'
-          };
-          logger.info('Using default email settings from environment variables');
-        }
-      } catch (dbError: any) {
-        // If database query fails (e.g., table doesn't exist yet), use environment variables
-        logger.warn(`Failed to fetch email settings from database: ${dbError.message}. Using environment variables.`);
-        this.emailSettings = {
-          smtpServer: process.env.SMTP_HOST || 'smtp.mailgun.org',
-          smtpPort: parseInt(process.env.SMTP_PORT || '587'),
-          smtpUsername: process.env.SMTP_USER || 'postmaster@sandboxeca4aa11a2a34b0d969c416f32d7686d.mailgun.org',
-          smtpPassword: process.env.SMTP_PASSWORD || 'Raju@4283',
-          emailFromName: process.env.EMAIL_FROM_NAME || 'ServiceFix Support',
-          emailReplyTo: process.env.EMAIL_REPLY_TO || 'support@servicefix.com',
-          enableEmailNotifications: process.env.ENABLE_EMAIL_NOTIFICATIONS !== 'false'
-        };
-      }
-      
-      // Create transporter with current settings
       this.emailTransporter = nodemailer.createTransport({
-        host: this.emailSettings?.smtpServer || process.env.SMTP_HOST || 'smtp.mailgun.org',
-        port: this.emailSettings?.smtpPort || parseInt(process.env.SMTP_PORT || '587'),
+        host: this.emailSettings?.smtpServer,
+        port: this.emailSettings?.smtpPort,
         secure: (this.emailSettings?.smtpPort || 0) === 465,
         auth: {
-          user: this.emailSettings?.smtpUsername || process.env.SMTP_USER || '',
-          pass: this.emailSettings?.smtpPassword || process.env.SMTP_PASSWORD || '',
+          user: this.emailSettings?.smtpUsername,
+          pass: this.emailSettings?.smtpPassword,
         },
       });
 
-      logger.info(`Email transporter initialized with server: ${this.emailSettings?.smtpServer || process.env.SMTP_HOST || 'smtp.mailgun.org'}`);
+      logger.info(`Email transporter initialized with server: ${this.emailSettings?.smtpServer}`);
     } catch (error) {
       logger.error('Error initializing email transporter:', error);
+    }
+  }
+
+  /**
+   * Initialize or refresh the email transporter with the latest settings from database
+   */
+  async initializeEmailTransporter() {
+    if (this.isInitialized) {
+      // Already initialized, just refresh
+      try {
+        await this.loadSettingsFromDatabase();
+      } catch (error) {
+        logger.warn('Error refreshing email settings, using existing settings');
+      }
+      return;
+    }
+    
+    try {
+      // Try to fetch email settings from database
+      await this.loadSettingsFromDatabase();
+      this.isInitialized = true;
+    } catch (dbError: any) {
+      // If database query fails, we already have environment variables as fallback
+      logger.warn(`Failed to fetch email settings from database: ${dbError.message}. Using environment variables.`);
+    }
+  }
+  
+  /**
+   * Load email settings from database
+   */
+  private async loadSettingsFromDatabase(): Promise<void> {
+    const result = await query('SELECT settings_data FROM settings WHERE category = $1', ['email']);
+    if (result.rows.length > 0) {
+      this.emailSettings = result.rows[0].settings_data;
+      logger.info('Email settings loaded from database');
+      // Recreate transporter with new settings
+      this.createTransporter();
     }
   }
   
@@ -288,6 +303,9 @@ class NotificationService {
       // Send real-time update if user is online
       if (socketService.isUserOnline(notification.userId)) {
         socketService.sendNotification(notification.userId, {
+          title: 'Notification Updated',
+          message: 'Notification marked as read',
+          type: 'notification_update',
           action: 'mark_read',
           id: notification.id
         });
@@ -320,6 +338,9 @@ class NotificationService {
       // Send real-time update if user is online
       if (socketService.isUserOnline(parseInt(userId, 10))) {
         socketService.sendNotification(parseInt(userId, 10), {
+          title: 'Notifications Updated',
+          message: 'All notifications marked as read',
+          type: 'notification_update',
           action: 'mark_all_read'
         });
       }

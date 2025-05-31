@@ -1,36 +1,60 @@
 import express from 'express';
-import { body } from 'express-validator';
-import { login, register, forgotPassword, resetPassword, refreshToken, logout, changePassword } from '../controllers/auth.controller';
-import { validateRequest } from '../middleware/validate-request.middleware';
+import { z } from 'zod';
+import { login, register, forgotPassword, resetPassword, refreshToken, logout, changePassword, validate, getCsrfToken } from '../controllers/auth.controller';
+import { validateZod } from '../middleware/zod-validate.middleware';
 import { authenticate } from '../middleware/auth.middleware';
+import ValidationPatterns, { createRequestSchema } from '../utils/validation';
 
 const router = express.Router();
+
+// Zod schemas for validations
+const registerSchema = createRequestSchema({
+  body: z.object({
+    email: ValidationPatterns.email(),
+    password: ValidationPatterns.password(),
+    firstName: z.string().min(1, 'First name is required'),
+    lastName: z.string().min(1, 'Last name is required'),
+  }),
+});
+
+const loginSchema = createRequestSchema({
+  body: z.object({
+    email: ValidationPatterns.email(),
+    password: z.string().min(1, 'Password is required'),
+  }),
+});
+
+const forgotPasswordSchema = createRequestSchema({
+  body: z.object({
+    email: ValidationPatterns.email(),
+  }),
+});
+
+const resetPasswordSchema = createRequestSchema({
+  body: z.object({
+    token: z.string().min(1, 'Token is required'),
+    password: ValidationPatterns.password(),
+  }),
+});
+
+const changePasswordSchema = createRequestSchema({
+  body: z.object({
+    oldPassword: z.string().min(1, 'Current password is required'),
+    newPassword: ValidationPatterns.password(),
+  }),
+});
 
 // Register a new user
 router.post(
   '/register',
-  [
-    body('email').isEmail().withMessage('Enter a valid email'),
-    body('password')
-      .isLength({ min: 8 })
-      .withMessage('Password must be at least 8 characters long')
-      .matches(/^(?=.*\d)(?=.*[a-z])(?=.*[A-Z])(?=.*[!@#$%^&*])/)
-      .withMessage('Password must contain at least one number, one uppercase letter, one lowercase letter, and one special character'),
-    body('firstName').notEmpty().withMessage('First name is required'),
-    body('lastName').notEmpty().withMessage('Last name is required'),
-    validateRequest,
-  ],
+  validateZod(registerSchema),
   register
 );
 
 // Login
 router.post(
   '/login',
-  [
-    body('email').isEmail().withMessage('Enter a valid email'),
-    body('password').notEmpty().withMessage('Password is required'),
-    validateRequest,
-  ],
+  validateZod(loginSchema),
   login
 );
 
@@ -43,25 +67,14 @@ router.post('/logout', logout);
 // Forgot password
 router.post(
   '/forgot-password',
-  [
-    body('email').isEmail().withMessage('Enter a valid email'),
-    validateRequest,
-  ],
+  validateZod(forgotPasswordSchema),
   forgotPassword
 );
 
 // Reset password
 router.post(
   '/reset-password',
-  [
-    body('token').notEmpty().withMessage('Token is required'),
-    body('password')
-      .isLength({ min: 8 })
-      .withMessage('Password must be at least 8 characters long')
-      .matches(/^(?=.*\d)(?=.*[a-z])(?=.*[A-Z])(?=.*[!@#$%^&*])/)
-      .withMessage('Password must contain at least one number, one uppercase letter, one lowercase letter, and one special character'),
-    validateRequest,
-  ],
+  validateZod(resetPasswordSchema),
   resetPassword
 );
 
@@ -69,16 +82,14 @@ router.post(
 router.post(
   '/change-password',
   authenticate,
-  [
-    body('oldPassword').notEmpty().withMessage('Current password is required'),
-    body('newPassword')
-      .isLength({ min: 8 })
-      .withMessage('New password must be at least 8 characters long')
-      .matches(/^(?=.*\d)(?=.*[a-z])(?=.*[A-Z])(?=.*[!@#$%^&*])/)
-      .withMessage('New password must contain at least one number, one uppercase letter, one lowercase letter, and one special character'),
-    validateRequest,
-  ],
+  validateZod(changePasswordSchema),
   changePassword
 );
+
+// Get CSRF token
+router.get('/csrf-token', getCsrfToken);
+
+// Validate authentication status
+router.get('/validate', authenticate, validate);
 
 export default router; 

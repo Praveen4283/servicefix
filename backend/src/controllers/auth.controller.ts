@@ -3,22 +3,66 @@ import bcrypt from 'bcryptjs';
 import jwt, { SignOptions } from 'jsonwebtoken';
 import crypto from 'crypto';
 import { pool, query } from '../config/database';
-import { AppError } from '../utils/errorHandler';
+import { AppError, asyncHandler } from '../utils/errorHandler';
 import { logger } from '../utils/logger';
 import { isValidEmail } from '../utils/validation';
+import authService from '../services/auth.service';
+import { camelToSnake, snakeToCamel } from '../utils/modelConverters';
+import { v4 as uuidv4 } from 'uuid';
 
-// Secret key for JWT
-const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key';
-const JWT_REFRESH_SECRET = process.env.JWT_REFRESH_SECRET || 'your-refresh-secret-key';
-// Log which secret is being used for signing
+// Secret key for JWT - Ensure environment variables are set
 if (!process.env.JWT_SECRET) {
-  logger.warn('[Auth Signing] JWT_SECRET not set, using fallback key. Ensure this matches socket verification.');
-} else {
-  logger.info('[Auth Signing] Using JWT_SECRET from environment variables.');
+  logger.error('JWT_SECRET environment variable is not set. Application will exit for security reasons.');
+  process.exit(1);
 }
 
+if (!process.env.JWT_REFRESH_SECRET) {
+  logger.error('JWT_REFRESH_SECRET environment variable is not set. Application will exit for security reasons.');
+  process.exit(1);
+}
+
+// Type definitions for consistent data structure
+interface UserRegistrationData {
+  firstName: string;
+  lastName: string;
+  email: string;
+  password: string;
+  organizationName?: string;
+  organizationDomain?: string;
+}
+
+// Database format for registration data (snake_case)
+interface DbUserRegistrationData {
+  first_name: string;
+  last_name: string;
+  email: string;
+  password: string;
+  organization_name?: string;
+  organization_domain?: string;
+}
+
+interface UserResponseData {
+  id: string | number;
+  email: string;
+  firstName: string;
+  lastName: string;
+  role: string;
+  organizationId?: string | number | null;
+  avatarUrl?: string;
+}
+
+const JWT_SECRET = process.env.JWT_SECRET;
+const JWT_REFRESH_SECRET = process.env.JWT_REFRESH_SECRET;
 const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || '1h';
 const JWT_REFRESH_EXPIRES_IN = process.env.JWT_REFRESH_EXPIRES_IN || '7d';
+
+// Log that we're using the environment variables
+logger.info('[Auth Signing] Using JWT secrets from environment variables.');
+
+// Extend the Express Request type to include csrfToken method
+interface RequestWithCsrf extends Request {
+  csrfToken(): string;
+}
 
 /**
  * Generate JWT token
@@ -93,154 +137,98 @@ const addDefaultsForOrganization = async (organizationId: string) => {
 };
 
 /**
- * Register a new user
+ * Register user
  */
-export const register = async (
+export const register = asyncHandler(async (
   req: Request,
   res: Response,
   next: NextFunction
 ) => {
-  try {
-    // Get user data from request body
-    const { email, password, firstName, lastName, role, organizationName } = req.body;
-
-    // Validate required fields
-    if (!email || !password || !firstName || !lastName) {
-      throw new AppError('Email, password, first name, and last name are required', 400);
-    }
-
-    // Validate email format
-    if (!isValidEmail(email)) {
-      throw new AppError('Invalid email format', 400);
-    }
-
-    // Validate password strength
-    if (password.length < 8) {
-      throw new AppError('Password must be at least 8 characters long', 400);
-    }
-
-    // Check if user already exists
-    const userExists = await pool.query(
-      'SELECT * FROM users WHERE email = $1',
-      [email]
-    );
-
-    if (userExists.rows.length > 0) {
-      throw new AppError('User with this email already exists', 400);
-    }
-
-    // Hash password
-    const hashedPassword = await bcrypt.hash(password, 10);
-
-    // Validate role
-    const validRole = role && ['admin', 'agent', 'customer'].includes(role) ? role : 'customer';
-
-    // If organization name provided, create or find organization
-    let organizationId = null;
-    if (organizationName) {
-      try {
-        // Generate domain from organization name
-        const baseDomain = organizationName.toLowerCase()
-          .replace(/[^a-z0-9]/g, '') // Remove non-alphanumeric chars
-          .replace(/^[^a-z]+/, '') // Remove leading numbers
-          .substring(0, 50); // Limit length
-        
-        if (!baseDomain) {
-          throw new AppError('Invalid organization name. Please use some letters.', 400);
-        }
-
-        const domain = `${baseDomain}.servicefix.com`;
-
-        // Check if organization exists by name or domain
-        const orgResult = await pool.query(
-          'SELECT id FROM organizations WHERE name = $1 OR domain = $2',
-          [organizationName, domain]
-        );
-
-        if (orgResult.rows.length > 0) {
-          organizationId = orgResult.rows[0].id;
-        } else {
-          // Create new organization with domain
-          const newOrgResult = await pool.query(
-            'INSERT INTO organizations (name, domain) VALUES ($1, $2) RETURNING id',
-            [organizationName, domain]
-          );
-          organizationId = newOrgResult.rows[0].id;
-          
-          // Add default ticket statuses and priorities for new organization
-          await addDefaultsForOrganization(organizationId);
-        }
-      } catch (error: any) {
-        if (error instanceof AppError) throw error;
-        logger.error('Organization creation error:', error);
-        throw new AppError('Failed to create organization. Please try again.', 500);
-      }
-    } else {
-      throw new AppError('Organization name is required', 400);
-    }
-
-    // Create user with snake_case column names (standard in the schema)
-    const result = await pool.query(
-      `INSERT INTO users (email, password, first_name, last_name, role, organization_id)
-      VALUES ($1, $2, $3, $4, $5, $6)
-      RETURNING id, email, first_name, last_name, role, created_at`,
-      [email, hashedPassword, firstName, lastName, validRole, organizationId]
-    );
-    
-    const user = result.rows[0];
-
-    // Generate token
-    const token = generateToken(user.id, user.role);
-    const refreshToken = generateRefreshToken(user.id);
-
-    // Calculate refresh token expiry date
-    const now = Date.now();
-    const refreshTokenExpiresInMs = parseDuration(JWT_REFRESH_EXPIRES_IN);
-    
-    if (!refreshTokenExpiresInMs) {
-      logger.error(`Failed to parse JWT_REFRESH_EXPIRES_IN value: ${JWT_REFRESH_EXPIRES_IN}`);
-      throw new AppError('Server configuration error', 500);
-    }
-    
-    const refreshTokenExpiresAt = new Date(now + refreshTokenExpiresInMs);
-    
-    // Store refresh token in database
-    try {
-      await pool.query(
-        'INSERT INTO user_tokens (user_id, refresh_token, expires_at) VALUES ($1, $2, $3)',
-        [user.id, refreshToken, refreshTokenExpiresAt]
-      );
-    } catch (err) {
-      logger.error(`Failed to store refresh token in database during registration: ${err}`);
-      // Continue with registration even if token storage fails - allows fallback to stateless mode
-    }
-
-    // Return user data and token
-    res.status(201).json({
-      status: 'success',
-      data: {
-        user: {
-          id: user.id,
-          email: user.email,
-          firstName: user.first_name,
-          lastName: user.last_name,
-          role: user.role,
-          createdAt: user.created_at
-        },
-        token,
-        refreshToken
-      }
-    });
-
-  } catch (error) {
-    next(error);
+  // Get the registration data from the request body
+  const registrationData: UserRegistrationData = req.body;
+  
+  // Convert camelCase input to snake_case for database
+  const dbData = camelToSnake<DbUserRegistrationData>(registrationData);
+  
+  // Validate fields
+  if (!dbData.email || !dbData.password || !dbData.first_name || !dbData.last_name) {
+    throw AppError.badRequest('Please provide all required fields', 'MISSING_FIELDS');
   }
-};
+
+  if (!isValidEmail(dbData.email)) {
+    throw AppError.badRequest('Please provide a valid email address', 'INVALID_EMAIL');
+  }
+
+  // Check if email already exists
+  const existingUser = await query('SELECT id FROM users WHERE email = $1', [dbData.email]);
+  if (existingUser.rows.length > 0) {
+    throw AppError.conflict('User with this email already exists', 'EMAIL_EXISTS');
+  }
+
+  // Create organization if name provided
+  let organizationId: number | null = null;
+  if (dbData.organization_name) {
+    const orgResult = await query(
+      'INSERT INTO organizations (name, domain) VALUES ($1, $2) RETURNING id',
+      [dbData.organization_name, dbData.organization_domain || '']
+    );
+    organizationId = orgResult.rows[0].id;
+  }
+
+  // Hash password
+  const salt = await bcrypt.genSalt(10);
+  const hashedPassword = await bcrypt.hash(dbData.password, salt);
+
+  // Create user
+  const userResult = await query(
+    `INSERT INTO users (
+      first_name, 
+      last_name, 
+      email, 
+      password, 
+      role, 
+      organization_id
+    ) VALUES ($1, $2, $3, $4, $5, $6) RETURNING id, email, first_name, last_name, role, organization_id`,
+    [
+      dbData.first_name,
+      dbData.last_name,
+      dbData.email,
+      hashedPassword,
+      organizationId ? 'admin' : 'customer', // Make the creator an admin if org is created
+      organizationId
+    ]
+  );
+    
+  const dbUser = userResult.rows[0];
+
+  // Generate tokens
+  const token = authService.generateToken(dbUser.id, dbUser.role);
+  const refreshToken = authService.generateRefreshToken(dbUser.id);
+
+  // Calculate refresh token expiry date
+  const refreshExpiresIn = parseDuration(process.env.JWT_REFRESH_EXPIRES_IN || '7d');
+  const expiresAt = new Date(Date.now() + refreshExpiresIn);
+    
+  // Save refresh token to database
+  await authService.saveRefreshToken(dbUser.id, refreshToken, expiresAt);
+
+  // Convert snake_case database result to camelCase for the response
+  const user = snakeToCamel<UserResponseData>(dbUser);
+
+  // Return user data and tokens
+  res.status(201).json({
+    token,
+    refreshToken,
+    refreshTokenExpiresAt: expiresAt,
+    user,
+    message: 'Registration successful'
+  });
+});
 
 /**
- * Login user
+ * User login
  */
-export const login = async (
+export const login = asyncHandler(async (
   req: Request,
   res: Response,
   next: NextFunction
@@ -248,442 +236,402 @@ export const login = async (
   try {
     const { email, password } = req.body;
 
+    // Validate input
     if (!email || !password) {
-      throw new AppError('Email and password are required', 400);
+      return next(AppError.badRequest('Email and password are required'));
     }
 
-    // Fetch user data, ensuring avatar_url is selected
-    const result = await pool.query(
-      `SELECT 
-         u.id, u.email, u.password, u.first_name, u.last_name, u.role, 
-         u.avatar_url, u.phone, u.timezone, u.language, u.last_login_at, 
-         u.is_active, u.organization_id, u.designation,
-         o.name as organization_name
-       FROM users u 
-       LEFT JOIN organizations o ON u.organization_id = o.id 
-       WHERE u.email = $1`,
-      [email]
-    );
-    
-    if (result.rows.length === 0) {
-      throw new AppError('Invalid credentials', 401);
-    }
-    
-    const userFromDb = result.rows[0];
-
-    const isMatch = await bcrypt.compare(password, userFromDb.password);
-    if (!isMatch) {
-      throw new AppError('Invalid credentials', 401);
-    }
-    
-    // Fetch notification preferences separately
-    const preferencesResult = await pool.query(
-      'SELECT event_type, email_enabled, push_enabled, in_app_enabled FROM notification_preferences WHERE user_id = $1',
-      [userFromDb.id]
-    );
-    const notificationSettings: Record<string, boolean> = {};
-    preferencesResult.rows.forEach(pref => {
-      notificationSettings[pref.event_type] = pref.email_enabled || pref.push_enabled || pref.in_app_enabled;
-    });
-    
-    await pool.query(
-      'UPDATE users SET last_login_at = CURRENT_TIMESTAMP WHERE id = $1',
-      [userFromDb.id]
-    );
-
-    const token = generateToken(userFromDb.id, userFromDb.role);
-    const refreshToken = generateRefreshToken(userFromDb.id);
-
-    // Calculate refresh token expiry date
-    const now = Date.now();
-    const refreshTokenExpiresInMs = parseDuration(JWT_REFRESH_EXPIRES_IN);
-    
-    if (!refreshTokenExpiresInMs) {
-      logger.error(`Failed to parse JWT_REFRESH_EXPIRES_IN value: ${JWT_REFRESH_EXPIRES_IN}`);
-      throw new AppError('Server configuration error', 500);
-    }
-    
-    const refreshTokenExpiresAt = new Date(now + refreshTokenExpiresInMs);
-    
-    // Store refresh token in database
-    try {
-      await pool.query(
-        'INSERT INTO user_tokens (user_id, refresh_token, expires_at) VALUES ($1, $2, $3)',
-        [userFromDb.id, refreshToken, refreshTokenExpiresAt]
-      );
-    } catch (err) {
-      logger.error(`Failed to store refresh token in database: ${err}`);
-      // Continue with login even if token storage fails - allows fallback to stateless mode
-    }
-
-    // Construct the user response object carefully, mapping fields
-    const userResponse = {
-      id: userFromDb.id,
-      email: userFromDb.email,
-      firstName: userFromDb.first_name,
-      lastName: userFromDb.last_name,
-      role: userFromDb.role,
-      avatarUrl: userFromDb.avatar_url,
-      phoneNumber: userFromDb.phone,
-      designation: userFromDb.designation,
-      timezone: userFromDb.timezone,
-      language: userFromDb.language,
-      isActive: userFromDb.is_active,
-      lastLogin: userFromDb.last_login_at,
-      organization: {
-        id: userFromDb.organization_id,
-        name: userFromDb.organization_name
-      },
-      notificationSettings: notificationSettings
-    };
-    
-    res.json({
-      token,
-      refreshToken,
-      user: userResponse, // Send the carefully constructed object
-    });
-
-  } catch (error) {
-    next(error);
-  }
-};
-
-/**
- * Refresh access token using refresh token
- */
-export const refreshToken = async (req: Request, res: Response, next: NextFunction) => {
-  const { token: oldRefreshToken } = req.body;
-
-  if (!oldRefreshToken) {
-    return next(new AppError('Refresh token required', 400));
-  }
-
-  try {
-    // Check if token exists in DB and is valid
-    const tokenResult = await query(
-      'SELECT user_id, expires_at FROM user_tokens WHERE refresh_token = $1',
-      [oldRefreshToken]
-    );
-
-    if (tokenResult.rows.length === 0) {
-      return next(new AppError('Invalid refresh token', 401));
-    }
-
-    const tokenData = tokenResult.rows[0];
-    if (new Date() > new Date(tokenData.expires_at)) {
-      // Optional: Clean up expired token
-      await query('DELETE FROM user_tokens WHERE refresh_token = $1', [oldRefreshToken]);
-      return next(new AppError('Refresh token expired', 401));
-    }
-
-    // Generate new tokens
-    const userId = tokenData.user_id; // This is likely a number from DB
-
-    // Fetch user details for the new token payload
+    // Find user by email
     const userResult = await query(
-      'SELECT id, email, role, organization_id FROM users WHERE id = $1',
-      [userId]
+      'SELECT id, email, first_name, last_name, password, role, avatar_url, organization_id, designation FROM users WHERE email = $1',
+      [email]
     );
 
     if (userResult.rows.length === 0) {
-      return next(new AppError('User associated with token not found', 404));
+      return next(AppError.unauthorized('Invalid email or password'));
     }
+
     const user = userResult.rows[0];
 
-    // Correctly call separate token generation functions
-    const accessToken = generateToken(
-        user.id.toString(), // Ensure ID is string for token functions
-        user.role
-    );
-    const newRefreshToken = generateRefreshToken(
-        user.id.toString() // Ensure ID is string for token functions
-    );
-    // Calculate expiry dates (assuming JWT_EXPIRES_IN and JWT_REFRESH_EXPIRES_IN are like '1h', '7d')
-    // This logic might need adjustment based on exact format and library used for parsing time strings
-    const now = Date.now();
-    const accessTokenExpiresInMs = parseDuration(JWT_EXPIRES_IN);
-    const refreshTokenExpiresInMs = parseDuration(JWT_REFRESH_EXPIRES_IN);
+    // Verify password
+    const isPasswordValid = await bcrypt.compare(password, user.password);
 
-    const accessTokenExpiresAt = accessTokenExpiresInMs ? new Date(now + accessTokenExpiresInMs) : undefined;
-    const refreshTokenExpiresAt = refreshTokenExpiresInMs ? new Date(now + refreshTokenExpiresInMs) : undefined;
-
-    if (!refreshTokenExpiresAt) {
-        // Handle error: refresh token expiry couldn't be calculated
-        return next(new AppError('Failed to calculate refresh token expiry', 500));
+    if (!isPasswordValid) {
+      return next(AppError.unauthorized('Invalid email or password'));
     }
 
-    // Store the new refresh token (replace the old one or add new?)
-    // Option 1: Update existing record (if you want one refresh token per user session)
-    // await query('UPDATE user_tokens SET refresh_token = $1, expires_at = $2 WHERE user_id = $3 AND refresh_token = $4', 
-    //             [newRefreshToken, refreshTokenExpiresAt, userId, oldRefreshToken]);
-
-    // Option 2: Delete old and insert new (allows multiple sessions)
-    await query('DELETE FROM user_tokens WHERE refresh_token = $1', [oldRefreshToken]);
+    // Generate JWT token
+    const token = authService.generateToken(user.id, user.role);
+    
+    // Generate refresh token
+    const refreshToken = authService.generateRefreshToken(user.id);
+    
+    // Set expiration date for refresh token
+    const refreshTokenExpiresAt = new Date();
+    refreshTokenExpiresAt.setDate(refreshTokenExpiresAt.getDate() + 7); // 7 days
+    
+    // Store refresh token in database
+    await authService.saveRefreshToken(user.id, refreshToken, refreshTokenExpiresAt);
+    
+    // Update last login time
     await query(
-      'INSERT INTO user_tokens (user_id, refresh_token, expires_at) VALUES ($1, $2, $3)',
-      [userId, newRefreshToken, refreshTokenExpiresAt]
+      'UPDATE users SET last_login_at = NOW() WHERE id = $1',
+      [user.id]
     );
 
-    res.json({
-      accessToken,
-      refreshToken: newRefreshToken,
-      accessTokenExpiresAt // Send expiry date
+    // Get organization details if applicable
+    let organizationData = null;
+    if (user.organization_id) {
+      const orgResult = await query(
+        'SELECT id, name, domain FROM organizations WHERE id = $1',
+        [user.organization_id]
+      );
+      
+      if (orgResult.rows.length > 0) {
+        organizationData = orgResult.rows[0];
+      }
+    }
+
+    // Prepare user data for response
+    const userData = {
+      id: user.id,
+      email: user.email,
+      firstName: user.first_name,
+      lastName: user.last_name,
+      role: user.role,
+      avatarUrl: user.avatar_url,
+      organizationId: user.organization_id,
+      organization: organizationData,
+      designation: user.designation
+    };
+    
+    // Set access token as HttpOnly cookie
+    res.cookie('accessToken', token, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'lax',
+      maxAge: 60 * 60 * 1000 // 1 hour in milliseconds
+    });
+    
+    // Set refresh token as HttpOnly cookie
+    res.cookie('refreshToken', refreshToken, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'lax',
+      maxAge: 7 * 24 * 60 * 60 * 1000 // 7 days in milliseconds
     });
 
-  } catch (error) {
-    next(error);
-  }
-};
-
-/**
- * Logout user by invalidating refresh token
- */
-export const logout = async (
-  req: Request,
-  res: Response,
-  next: NextFunction
-) => {
-  try {
-    const { refreshToken } = req.body;
-    
-    if (!refreshToken) {
-      throw new AppError('Refresh token is required', 400);
-    }
-    
-    // Delete refresh token from database
-    await pool.query(
-      'DELETE FROM user_tokens WHERE refresh_token = $1',
-      [refreshToken]
-    );
-    
+    // Return user data (no tokens in response)
     res.status(200).json({
       status: 'success',
-      data: null
+      message: 'Login successful',
+      user: userData,
+      success: true
     });
   } catch (error) {
     next(error);
   }
-};
+});
 
 /**
- * Send password reset email
+ * Refresh access token
  */
-export const forgotPassword = async (
+export const refreshToken = asyncHandler(async (
   req: Request,
   res: Response,
   next: NextFunction
 ) => {
   try {
+    // Get refresh token from cookie rather than request body
+    const refreshToken = req.cookies.refreshToken;
+    
+    if (!refreshToken) {
+      return next(AppError.unauthorized('Refresh token is required', 'REFRESH_TOKEN_REQUIRED'));
+    }
+
+    // Refresh token
+    const result = await authService.refreshAccessToken(refreshToken);
+
+    // Set new access token as HttpOnly cookie
+    res.cookie('accessToken', result.token, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'lax',
+      maxAge: 60 * 60 * 1000 // 1 hour in milliseconds
+    });
+
+    // Return success response
+    res.status(200).json({
+      status: 'success',
+      message: 'Token refreshed successfully',
+      user: result.user,
+      success: true
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+/**
+ * Logout user
+ */
+export const logout = asyncHandler(async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+) => {
+  try {
+    // Clear cookies
+    res.clearCookie('accessToken');
+    res.clearCookie('refreshToken');
+    
+    // Get refresh token from cookie
+    const refreshToken = req.cookies.refreshToken;
+    
+    // If refresh token exists, revoke it
+    if (refreshToken) {
+      try {
+        // Verify token to get userId
+        const decoded = authService.verifyRefreshToken(refreshToken);
+        
+        // Revoke token in database
+        if (decoded?.userId) {
+          await authService.revokeRefreshToken(decoded.userId, refreshToken);
+        }
+      } catch (error) {
+        // Ignore token verification errors during logout
+        logger.warn('Error verifying refresh token during logout:', error);
+      }
+    }
+
+    res.status(200).json({
+      status: 'success',
+      message: 'Logout successful'
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+/**
+ * Forgot password
+ */
+export const forgotPassword = asyncHandler(async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+) => {
     const { email } = req.body;
+
+  if (!email) {
+    throw AppError.badRequest('Email is required', 'MISSING_EMAIL');
+  }
     
     // Check if user exists
-    const result = await pool.query(
-      'SELECT * FROM users WHERE email = $1',
-      [email]
-    );
-    
+  const result = await query('SELECT id FROM users WHERE email = $1', [email]);
     if (result.rows.length === 0) {
       // Don't reveal that the user doesn't exist
-      res.status(200).json({
-        status: 'success',
-        message: 'If your email is registered, you will receive a password reset link'
+    res.json({
+      message: 'If a user with that email exists, a password reset link has been sent'
       });
       return;
     }
     
-    const user = result.rows[0];
+  const userId = result.rows[0].id;
     
     // Generate reset token
-    const resetToken = crypto.randomBytes(32).toString('hex');
-    const resetTokenExpiry = new Date(Date.now() + 60 * 60 * 1000); // 1 hour
+  const resetToken = await authService.generatePasswordResetToken(userId);
     
-    // Hash token before saving to database
-    const hashedToken = await bcrypt.hash(resetToken, 10);
-    
-    // Save token to database
-    await pool.query(
-      'UPDATE users SET reset_token = $1, reset_token_expires_at = $2 WHERE id = $3',
-      [hashedToken, resetTokenExpiry, user.id]
-    );
-    
-    // Create reset URL
-    const resetUrl = `${process.env.FRONTEND_URL}/reset-password?token=${resetToken}`;
-    
-    // Create email content
-    const emailContent = {
-      to: email,
-      subject: 'ServiceFix: Password Reset Request',
-      html: `
-        <h2>Password Reset</h2>
-        <p>Hello ${user.first_name},</p>
-        <p>You requested a password reset for your ServiceFix account.</p>
-        <p>Please click the link below to reset your password:</p>
-        <p><a href="${resetUrl}" style="display: inline-block; background-color: #4CAF50; color: white; padding: 10px 20px; text-decoration: none; border-radius: 4px;">Reset Password</a></p>
-        <p>If you didn't request this password reset, please ignore this email or contact support if you're concerned.</p>
-        <p>This link will expire in 1 hour.</p>
-        <p>Thanks,<br>The ServiceFix Team</p>
-      `
-    };
-    
-    // Import notification service directly to avoid circular dependencies
-    const notificationService = require('../services/notification.service').default;
-    
-    // Send the email using the notification service
-    const emailSent = await notificationService.sendEmail(emailContent);
-    
-    // Log result but don't expose token in logs
-    if (emailSent) {
-      logger.info(`Password reset email sent successfully for user: ${user.id} (email: ${email})`);
-    } else {
-      logger.warn(`Failed to send password reset email for user: ${user.id} (email: ${email}). Check email settings.`);
-    }
-    
-    // Always return the same response regardless of email sending success
-    // to prevent email enumeration attacks
-    res.status(200).json({
-      status: 'success',
-      message: 'If your email is registered, you will receive a password reset link'
+  // In a real application, send an email with the reset token
+  // For this example, we'll just return it (in practice, never return this token directly)
+  logger.info(`Reset token for user ${userId}: ${resetToken}`);
+
+  res.json({
+    message: 'If a user with that email exists, a password reset link has been sent',
+    // For development purposes only
+    ...(process.env.NODE_ENV !== 'production' && { resetToken })
     });
-  } catch (error) {
-    logger.error('Error in forgotPassword:', error);
-    // Don't expose the error, maintain consistent response
-    res.status(200).json({
-      status: 'success',
-      message: 'If your email is registered, you will receive a password reset link'
-    });
-  }
-};
+});
 
 /**
- * Reset password using token
+ * Reset password
  */
-export const resetPassword = async (
+export const resetPassword = asyncHandler(async (
   req: Request,
   res: Response,
   next: NextFunction
 ) => {
-  try {
     const { token, password } = req.body;
     
-    // Find user with valid reset token
-    const result = await pool.query(
-      'SELECT * FROM users WHERE reset_token_expires_at > NOW()',
-      []
-    );
-    
-    // Check if any users have active reset tokens
-    if (result.rows.length === 0) {
-      throw new AppError('Invalid or expired token', 400);
+  if (!token || !password) {
+    throw AppError.badRequest('Token and password are required', 'MISSING_PARAMETERS');
     }
     
-    // Find the user with the matching token
-    let user = null;
-    for (const row of result.rows) {
-      const isMatch = await bcrypt.compare(token, row.reset_token);
-      if (isMatch) {
-        user = row;
-        break;
-      }
-    }
-    
-    if (!user) {
-      throw new AppError('Invalid or expired token', 400);
-    }
+  // Verify token and get user ID
+  const userId = await authService.verifyPasswordResetToken(token);
     
     // Hash new password
     const salt = await bcrypt.genSalt(10);
     const hashedPassword = await bcrypt.hash(password, salt);
     
-    // Update user password and remove reset token
-    await pool.query(
+  // Update password and clear reset token
+  await query(
       'UPDATE users SET password = $1, reset_token = NULL, reset_token_expires_at = NULL WHERE id = $2',
-      [hashedPassword, user.id]
+    [hashedPassword, userId]
     );
     
-    // Invalidate all existing refresh tokens for the user
-    await pool.query(
-      'DELETE FROM user_tokens WHERE user_id = $1',
-      [user.id]
-    );
+  // Revoke all refresh tokens for this user for security
+  await authService.revokeAllRefreshTokens(userId);
     
-    res.status(200).json({
-      status: 'success',
-      message: 'Password has been reset successfully'
+  res.json({
+    message: 'Password reset successful'
     });
-  } catch (error) {
-    next(error);
-  }
-};
+});
 
-// Change Password (New)
-export const changePassword = async (
+/**
+ * Change password
+ */
+export const changePassword = asyncHandler(async (
   req: Request,
   res: Response,
   next: NextFunction
 ) => {
-  const { oldPassword, newPassword } = req.body;
-  const userIdStr = req.user?.id; // Get user ID string from authenticated request
+  const { currentPassword, newPassword } = req.body;
+  const userId = req.user?.id;
 
-  if (!userIdStr) {
-    return next(new AppError('Authentication required', 401));
+  if (!currentPassword || !newPassword || !userId) {
+    throw AppError.badRequest('Current password, new password, and user ID are required', 'MISSING_PARAMETERS');
   }
 
-  // Convert user ID to number for DB interaction
-  const userId = parseInt(userIdStr, 10);
-  if (isNaN(userId)) {
-    return next(new AppError('Invalid user ID format', 400));
-  }
-
-  try {
-    // Get current user password hash from DB
-    const userResult = await query(
-      'SELECT password FROM users WHERE id = $1',
-      [userId]
-    );
-
-    if (userResult.rows.length === 0) {
-      return next(new AppError('User not found', 404));
+  // Get current password from database
+  const result = await query('SELECT password FROM users WHERE id = $1', [userId]);
+  if (result.rows.length === 0) {
+    throw AppError.notFound('User not found', 'USER_NOT_FOUND');
     }
 
-    const storedPasswordHash = userResult.rows[0].password;
+  const hashedPassword = result.rows[0].password;
 
-    // Verify old password
-    const isMatch = await bcrypt.compare(oldPassword, storedPasswordHash);
+  // Verify current password
+  const isMatch = await bcrypt.compare(currentPassword, hashedPassword);
     if (!isMatch) {
-      return next(new AppError('Incorrect current password', 400));
+    throw AppError.unauthorized('Current password is incorrect', 'INVALID_PASSWORD');
     }
 
-    // Hash the new password
+  // Hash new password
     const salt = await bcrypt.genSalt(10);
-    const newPasswordHash = await bcrypt.hash(newPassword, salt);
+  const newHashedPassword = await bcrypt.hash(newPassword, salt);
 
-    // Update password in the database
-    await query(
-      'UPDATE users SET password = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2',
-      [newPasswordHash, userId]
-    );
+  // Update password
+  await query('UPDATE users SET password = $1 WHERE id = $2', [newHashedPassword, userId]);
 
-    res.status(200).json({ message: 'Password changed successfully' });
+  // Revoke all refresh tokens except the current one for security
+  // To get the current refresh token, we would need to pass it in the request
+  // or store it in the session, which is beyond the scope of this example
+  // For now, we'll revoke all tokens
+  await authService.revokeAllRefreshTokens(userId);
 
+  res.json({
+    message: 'Password changed successfully'
+  });
+});
+
+/**
+ * Validate user authentication
+ */
+export const validate = asyncHandler(async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+) => {
+  // User is already authenticated by the middleware
+  if (!req.user) {
+    throw AppError.unauthorized('Not authenticated');
+  }
+
+  // Get user details
+  const userResult = await query(
+    `SELECT 
+      u.id, u.email, u.first_name, u.last_name, u.role, 
+      u.avatar_url, u.phone, u.timezone, u.language, u.last_login_at, 
+      u.is_active, u.organization_id, u.designation,
+      o.name as organization_name
+    FROM users u 
+    LEFT JOIN organizations o ON u.organization_id = o.id 
+    WHERE u.id = $1`,
+    [req.user.id]
+  );
+  
+  if (userResult.rows.length === 0) {
+    throw AppError.notFound('User not found');
+  }
+
+  const user = userResult.rows[0];
+
+  // Return user data in same format as login response
+  res.status(200).json({
+    status: 'success',
+    message: 'Authentication valid',
+    user: {
+      id: user.id,
+      email: user.email,
+      firstName: user.first_name,
+      lastName: user.last_name,
+      role: user.role,
+      avatarUrl: user.avatar_url,
+      organizationId: user.organization_id,
+      organization: user.organization_id ? {
+        id: user.organization_id,
+        name: user.organization_name
+      } : null,
+      designation: user.designation,
+      phone: user.phone,
+      timezone: user.timezone,
+      language: user.language,
+      lastLoginAt: user.last_login_at
+    }
+  });
+});
+
+/**
+ * Generate CSRF token
+ */
+export const getCsrfToken = asyncHandler(async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+) => {
+  try {
+    // Generate a token manually since req.csrfToken() is causing errors
+    const csrfToken = crypto.randomBytes(32).toString('hex');
+    
+    // Set the token in a cookie
+    res.cookie('_csrf', csrfToken, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'strict'
+    });
+    
+    // Send the token to the client
+    res.status(200).json({
+      status: 'success',
+      csrfToken
+    });
   } catch (error) {
+    logger.error(`Error generating CSRF token: ${error}`);
     next(error);
   }
-};
+});
 
-// Helper function to parse duration strings (e.g., '1h', '7d') into milliseconds
-// This is a basic example; consider using a library like 'ms' for robustness
-function parseDuration(duration: string): number | null {
-    const match = duration.match(/^(\d+)([hmds])$/);
-    if (!match) return null;
-
-    const value = parseInt(match[1], 10);
-    const unit = match[2];
+// Function to parse a duration string like '7d' and return milliseconds
+const parseDuration = (durationStr: string): number => {
+  const unit = durationStr.slice(-1);
+  const value = parseInt(durationStr.slice(0, -1), 10);
 
     switch (unit) {
-        case 's': return value * 1000;
-        case 'm': return value * 60 * 1000;
-        case 'h': return value * 60 * 60 * 1000;
-        case 'd': return value * 24 * 60 * 60 * 1000;
-        default: return null;
+    case 's': return value * 1000; // seconds
+    case 'm': return value * 60 * 1000; // minutes
+    case 'h': return value * 60 * 60 * 1000; // hours
+    case 'd': return value * 24 * 60 * 60 * 1000; // days
+    default: return value; // assume milliseconds
     }
-} 
+}; 

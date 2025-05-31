@@ -1,4 +1,4 @@
-import { pool } from '../config/database';
+import { pool, AppDataSource } from '../config/database';
 import { logger } from './logger';
 
 /**
@@ -24,7 +24,8 @@ const REQUIRED_TABLES = [
   'sla_policy_tickets',
   'settings',
   'business_hours',
-  'holidays'
+  'holidays',
+  'schema_version'
 ];
 
 /**
@@ -86,20 +87,53 @@ const REQUIRED_INDEXES = [
 ];
 
 /**
- * Ensures all required database objects exist
- * If any critical component is missing, attempts to create it
+ * Database schema validator
+ * Checks that all required tables and columns exist in the database
  */
-export async function validateDatabaseSchema(): Promise<boolean> {
+export const validateDatabaseSchema = async (): Promise<boolean> => {
   try {
     logger.info('Starting database schema validation...');
+    
+    // Ensure AppDataSource is initialized
+    if (!AppDataSource.isInitialized) {
+      logger.error('Cannot validate schema: Database connection not initialized');
+      return false;
+    }
     
     // Check if critical tables exist
     const missingTables = await checkMissingTables(REQUIRED_TABLES);
     if (missingTables.length > 0) {
       logger.warn(`Missing tables detected: ${missingTables.join(', ')}`);
-      logger.warn('Schema appears to be incomplete. Run initialize_database.js to restore schema.');
-      await ensureSettingsTable(); // At minimum, ensure settings table exists
-      return false;
+      
+      // If schema_version is the only missing table, create it
+      if (missingTables.length === 1 && missingTables[0] === 'schema_version') {
+        logger.info('Creating schema_version table...');
+        
+        try {
+          await AppDataSource.query(`
+            CREATE TABLE IF NOT EXISTS "schema_version" (
+              "version" VARCHAR(255) PRIMARY KEY,
+              "description" TEXT NOT NULL,
+              "applied_at" TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+              "applied_by" VARCHAR(255) DEFAULT CURRENT_USER
+            );
+            
+            -- Insert initial version
+            INSERT INTO "schema_version" ("version", "description") 
+            VALUES ('init', 'Initial schema version created by validator')
+            ON CONFLICT (version) DO NOTHING;
+          `);
+          
+          logger.info('Schema version table created successfully');
+        } catch (error) {
+          logger.error('Failed to create schema_version table:', error);
+          return false;
+        }
+      } else {
+        logger.warn('Schema appears to be incomplete. Run initialize_database.js to restore schema.');
+        await ensureSettingsTable(); // At minimum, ensure settings table exists
+        return false;
+      }
     }
     
     // Check if critical functions exist
@@ -126,41 +160,91 @@ export async function validateDatabaseSchema(): Promise<boolean> {
     // Ensure settings table and default email settings exist
     await ensureSettingsTable();
     
-    logger.info('Database schema validation completed');
+    // Check critical columns in key tables
+    const criticalColumns = [
+      { table: 'users', columns: ['id', 'email', 'password', 'role', 'organization_id'] },
+      { table: 'organizations', columns: ['id', 'name', 'domain'] },
+      { table: 'tickets', columns: ['id', 'subject', 'description', 'requester_id', 'status_id', 'organization_id'] },
+      { table: 'ticket_statuses', columns: ['id', 'name', 'organization_id', 'is_default', 'is_resolved'] },
+      { table: 'user_tokens', columns: ['id', 'user_id', 'refresh_token', 'expires_at'] },
+      { table: 'schema_version', columns: ['version', 'applied_at'] }
+    ];
+
+    for (const { table, columns } of criticalColumns) {
+      for (const column of columns) {
+        const columnResult = await AppDataSource.query(
+          `SELECT EXISTS (
+            SELECT FROM information_schema.columns 
+            WHERE table_schema = 'public' 
+            AND table_name = $1 
+            AND column_name = $2
+          )`,
+          [table, column]
+        );
+
+        if (!columnResult[0].exists) {
+          logger.error(`Required column '${column}' does not exist in table '${table}'`);
+          return false;
+        }
+      }
+    }
+
+    // Check if schema_version table has at least one entry
+    const versionResult = await AppDataSource.query(
+      `SELECT COUNT(*) FROM schema_version`
+    );
+
+    if (parseInt(versionResult[0].count, 10) === 0) {
+      logger.warn(`Schema version table exists but has no entries`);
+      
+      // Insert an initial record if the table is empty
+      await AppDataSource.query(`
+        INSERT INTO schema_version (version, description)
+        VALUES ('init', 'Initial schema version created by validator')
+        ON CONFLICT (version) DO NOTHING;
+      `);
+    }
+    
+    logger.info('Database schema validation completed successfully');
     return true;
   } catch (error: any) {
     logger.error('Error validating database schema:', error);
     return false;
   }
-}
+};
 
 /**
  * Checks which tables are missing from the required list
  */
 async function checkMissingTables(requiredTables: string[]): Promise<string[]> {
-  const result = await pool.query(`
-    SELECT table_name 
-    FROM information_schema.tables 
-    WHERE table_schema = 'public' 
-    AND table_type = 'BASE TABLE'
-  `);
-  
-  const existingTables = result.rows.map(row => row.table_name);
-  return requiredTables.filter(table => !existingTables.includes(table));
+  try {
+    const result = await AppDataSource.query(`
+      SELECT table_name 
+      FROM information_schema.tables 
+      WHERE table_schema = 'public' 
+      AND table_type = 'BASE TABLE'
+    `);
+    
+    const existingTables = result.map((row: { table_name: string }) => row.table_name);
+    return requiredTables.filter(table => !existingTables.includes(table));
+  } catch (error) {
+    logger.error('Error checking tables:', error);
+    return [...requiredTables]; // Return all as missing if query fails
+  }
 }
 
 /**
  * Checks which functions are missing from the required list
  */
 async function checkMissingFunctions(requiredFunctions: string[]): Promise<string[]> {
-  const result = await pool.query(`
+  const result = await AppDataSource.query(`
     SELECT routine_name 
     FROM information_schema.routines 
     WHERE routine_schema = 'public' 
     AND routine_type = 'FUNCTION'
   `);
   
-  const existingFunctions = result.rows.map(row => row.routine_name);
+  const existingFunctions = result.map((row: { routine_name: string }) => row.routine_name);
   return requiredFunctions.filter(func => !existingFunctions.includes(func));
 }
 
@@ -168,13 +252,13 @@ async function checkMissingFunctions(requiredFunctions: string[]): Promise<strin
  * Checks which triggers are missing from the required list
  */
 async function checkMissingTriggers(requiredTriggers: string[]): Promise<string[]> {
-  const result = await pool.query(`
+  const result = await AppDataSource.query(`
     SELECT trigger_name 
     FROM information_schema.triggers 
     WHERE trigger_schema = 'public'
   `);
   
-  const existingTriggers = result.rows.map(row => row.trigger_name);
+  const existingTriggers = result.map((row: { trigger_name: string }) => row.trigger_name);
   return requiredTriggers.filter(trigger => !existingTriggers.includes(trigger));
 }
 
@@ -182,13 +266,13 @@ async function checkMissingTriggers(requiredTriggers: string[]): Promise<string[
  * Checks which indexes are missing from the required list
  */
 async function checkMissingIndexes(requiredIndexes: string[]): Promise<string[]> {
-  const result = await pool.query(`
+  const result = await AppDataSource.query(`
     SELECT indexname 
     FROM pg_indexes 
     WHERE schemaname = 'public'
   `);
   
-  const existingIndexes = result.rows.map(row => row.indexname);
+  const existingIndexes = result.map((row: { indexname: string }) => row.indexname);
   return requiredIndexes.filter(index => !existingIndexes.includes(index));
 }
 
@@ -202,7 +286,7 @@ async function ensureSettingsTable(): Promise<boolean> {
     logger.info('Checking if settings table exists...');
     
     // First, check if the settings table exists
-    const tableCheck = await pool.query(`
+    const tableCheck = await AppDataSource.query(`
       SELECT EXISTS (
         SELECT FROM information_schema.tables 
         WHERE table_schema = 'public' 
@@ -210,13 +294,11 @@ async function ensureSettingsTable(): Promise<boolean> {
       );
     `);
     
-    const tableExists = tableCheck.rows[0].exists;
-    
-    if (!tableExists) {
-      logger.info('Settings table does not exist, creating it...');
+    if (!tableCheck[0].exists) {
+      logger.warn('Settings table does not exist. Creating it now...');
       
       // Create the settings table
-      await pool.query(`
+      await AppDataSource.query(`
         CREATE TABLE IF NOT EXISTS settings (
           id SERIAL PRIMARY KEY,
           category VARCHAR(50) NOT NULL,
@@ -235,20 +317,18 @@ async function ensureSettingsTable(): Promise<boolean> {
     }
     
     // Check if default email settings exist
-    const emailSettings = await pool.query(`
+    const emailSettings = await AppDataSource.query(`
       SELECT EXISTS (
         SELECT FROM settings 
         WHERE category = 'email'
       );
     `);
     
-    const emailSettingsExist = emailSettings.rows[0].exists;
-    
-    if (!emailSettingsExist) {
-      logger.info('Adding default email settings...');
+    if (!emailSettings[0].exists) {
+      logger.warn('Default email settings do not exist. Creating them now...');
       
       // Add default email settings
-      await pool.query(`
+      await AppDataSource.query(`
         INSERT INTO settings (category, settings_data) 
         VALUES (
           'email', 
@@ -268,3 +348,57 @@ async function ensureSettingsTable(): Promise<boolean> {
     return false;
   }
 }
+
+/**
+ * Get the current schema version from the database
+ */
+export const getCurrentSchemaVersion = async (): Promise<string | null> => {
+  try {
+    // Check if schema_version table exists
+    const tableResult = await AppDataSource.query(
+      `SELECT EXISTS (
+        SELECT FROM information_schema.tables 
+        WHERE table_schema = 'public' 
+        AND table_name = 'schema_version'
+      )`
+    );
+
+    if (!tableResult[0].exists) {
+      return null;
+    }
+
+    // Get the latest version
+    const versionResult = await AppDataSource.query(
+      `SELECT version FROM schema_version ORDER BY applied_at DESC LIMIT 1`
+    );
+
+    if (versionResult.length === 0) {
+      return null;
+    }
+
+    return versionResult[0].version;
+  } catch (error) {
+    logger.error('Error getting current schema version:', error);
+    return null;
+  }
+};
+
+/**
+ * Check if a specific migration has been applied
+ */
+export const isMigrationApplied = async (version: string): Promise<boolean> => {
+  try {
+    const result = await AppDataSource.query(
+      `SELECT EXISTS (
+        SELECT FROM schema_version 
+        WHERE version = $1
+      )`,
+      [version]
+    );
+
+    return result.rows[0].exists;
+  } catch (error) {
+    logger.error(`Error checking if migration ${version} is applied:`, error);
+    return false;
+  }
+};

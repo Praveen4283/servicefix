@@ -3,20 +3,18 @@ import { pool, query } from '../config/database';
 import { AppError } from '../utils/errorHandler';
 import { logger } from '../utils/logger';
 import { v4 as uuidv4 } from 'uuid';
-import ticketService from '../services/ticket.service'; // Import the ticket service
-import fs from 'fs'; // Import fs for cleanup
+import ticketService from '../services/ticket.service';
+import fs from 'fs';
 import { Multer } from 'multer';
-import { uploadFile } from '../utils/supabase';
-import { createClient } from '@supabase/supabase-js';
+import { supabase, uploadFile } from '../utils/supabase';
 import path from 'path';
 import slaService from '../services/sla.service';
 import { isPendingStatus, isInProgressStatus, logStatusChange } from '../utils/ticketUtils';
+import { Ticket } from '../models/Ticket';
+import { idToString, idToNumber } from '../utils/idUtils';
 
 // Initialize Supabase client for direct operations
-const supabaseUrl = process.env.SUPABASE_URL || '';
-const supabaseKey = process.env.SUPABASE_KEY || '';
 const bucketName = process.env.SUPABASE_BUCKET || 'ticket-attachments';
-const supabaseClient = createClient(supabaseUrl, supabaseKey);
 
 /**
  * Get all tickets with pagination, filtering, and sorting
@@ -28,280 +26,55 @@ export const getTickets = async (
 ) => {
   try {
     const {
-      page = 1,
-      limit = 10,
+      page = '1',
+      limit = '10',
       status,
-      isOpen,
       priority,
-      requester,
       assignee,
-      type,
+      requester,
       department,
-      search,
+      search: searchTerm,
       tags,
       dateFrom,
       dateTo,
-      sortBy = 'created_at',
+      sortBy = 'createdAt',
       sortOrder = 'desc',
     } = req.query as { [key: string]: string | undefined };
 
-    const offset = (Number(page) - 1) * Number(limit);
-    const params: any[] = [];
-    let whereClauses: string[] = [];
-    
-    // Organization filter based on user role
-    if (req.user.role !== 'admin') {
-      params.push(req.user.organizationId);
-      whereClauses.push(`t.organization_id = $${params.length}`);
+    // Apply user role-based filters
+    let requesterId = requester;
+    let assigneeId = assignee;
       
       if (req.user.role === 'customer') {
-        params.push(req.user.id);
-        whereClauses.push(`t.requester_id = $${params.length}`);
-      }
+      // Customers can only see their own tickets
+      requesterId = idToString(req.user.id);
+    } else if (req.user.role === 'agent' && !assigneeId) {
+      // Agents default to seeing their assigned tickets
+      assigneeId = idToString(req.user.id);
     }
 
-    if (status) {
-      const statusNames = (status as string).split(',').map(s => s.trim());
-      if (statusNames.length > 0) {
-        const statusPlaceholders = statusNames.map((_, i) => `$${params.length + i + 1}`).join(',');
-        params.push(...statusNames);
-        whereClauses.push(`ts.name ILIKE ANY(ARRAY[${statusPlaceholders}])`);
-      }
-    }
-    
-    if (isOpen === 'true') {
-      whereClauses.push(`ts.is_resolved = FALSE`);
-    }
-    
-    if (priority) {
-      const priorityNames = (priority as string).split(',').map(p => p.trim());
-      if (priorityNames.length > 0) {
-        const priorityPlaceholders = priorityNames.map((_, i) => `$${params.length + i + 1}`).join(',');
-        params.push(...priorityNames);
-        whereClauses.push(`tp.name ILIKE ANY(ARRAY[${priorityPlaceholders}])`); 
-      }
-    }
-    
-    if (requester) {
-      params.push(requester);
-      whereClauses.push(`t.requester_id = $${params.length}`);
-    }
-    
-    const assigneeFilterValue = assignee || (req.user.role === 'agent' ? req.user.id : undefined);
-    if (assigneeFilterValue) {
-        params.push(assigneeFilterValue);
-        whereClauses.push(`t.assignee_id = $${params.length}`);
-    }
-    
-    if (type) {
-      params.push(type as string);
-      whereClauses.push(`tt.name ILIKE $${params.length}`);
-    }
-    
-    if (department) {
-      params.push(department);
-      whereClauses.push(`d.name ILIKE $${params.length}`);
-    }
-    
-    if (search) {
-      params.push(`%${search}%`);
-      const searchParamIndex = params.length;
-      whereClauses.push(`(t.subject ILIKE $${searchParamIndex} OR t.description ILIKE $${searchParamIndex} OR CAST(t.id AS TEXT) ILIKE $${searchParamIndex})`);
-    }
-
-    if (tags) {
-      const tagNames = (tags as string).split(',').map(t => t.trim().toLowerCase());
-      if (tagNames.length > 0) {
-        const tagPlaceholders = tagNames.map((_, i) => `$${params.length + i + 1}`).join(',');
-        params.push(...tagNames);
-        whereClauses.push(`EXISTS (SELECT 1 FROM ticket_tags ttg JOIN tags tag ON ttg.tag_id = tag.id WHERE ttg.ticket_id = t.id AND LOWER(tag.name) = ANY(ARRAY[${tagPlaceholders}]))`);
-      }
-    }
-
-    if (dateFrom) {
-      params.push(dateFrom as string);
-      whereClauses.push(`t.created_at >= $${params.length}`);
-    }
-    if (dateTo) {
-      params.push(dateTo as string);
-      whereClauses.push(`t.created_at <= $${params.length}`);
-    }
-    
-    const whereClauseString = whereClauses.length > 0 ? `WHERE ${whereClauses.join(' AND ')}` : '';
-    
-    const validSortBy = ['id', 'subject', 'created_at', 'updated_at', 'due_date', 'status_name', 'priority_name'];
-    const safeSortBy = validSortBy.includes(sortBy as string) ? sortBy : 'created_at';
-    const safeSortOrder = (sortOrder as string).toLowerCase() === 'asc' ? 'ASC' : 'DESC';
-
-    let orderByClause = `ORDER BY t.${safeSortBy} ${safeSortOrder}`;
-    if (safeSortBy === 'status_name') {
-      orderByClause = `ORDER BY ts.name ${safeSortOrder}`;
-    }
-    if (safeSortBy === 'priority_name') {
-      orderByClause = `ORDER BY tp.name ${safeSortOrder}`;
-    }
-
-    const ticketsQuery = `
-      SELECT 
-        t.id, 
-        t.subject, 
-        t.description,
-        t.created_at,
-        t.updated_at,
-        t.resolved_at,
-        t.closed_at,
-        t.due_date,
-        t.sentiment_score,
-        t.ai_summary,
-        t.source,
-        t.is_spam,
-        t.sla_status,
-        json_build_object(
-          'id', req.id,
-          'email', req.email,
-          'firstName', req.first_name,
-          'lastName', req.last_name
-        ) as requester,
-        CASE WHEN t.assignee_id IS NOT NULL THEN
-          json_build_object(
-            'id', asn.id,
-            'email', asn.email,
-            'firstName', asn.first_name,
-            'lastName', asn.last_name
-          )
-        ELSE NULL END as assignee,
-        json_build_object(
-          'id', ts.id,
-          'name', ts.name,
-          'color', ts.color
-        ) as status,
-        CASE WHEN t.priority_id IS NOT NULL THEN
-          json_build_object(
-            'id', tp.id,
-            'name', tp.name,
-            'color', tp.color
-          )
-        ELSE NULL END as priority,
-        CASE WHEN t.department_id IS NOT NULL THEN
-          json_build_object(
-            'id', d.id,
-            'name', d.name
-          )
-        ELSE NULL END as department,
-        CASE WHEN t.type_id IS NOT NULL THEN
-          json_build_object(
-            'id', tt.id,
-            'name', tt.name
-          )
-        ELSE NULL END as type,
-        (SELECT json_agg(json_build_object(
-          'id', tag.id,
-          'name', tag.name,
-          'color', tag.color
-        )) FROM ticket_tags ttg
-        JOIN tags tag ON ttg.tag_id = tag.id
-        WHERE ttg.ticket_id = t.id) as tags,
-        (SELECT COUNT(*) FROM ticket_comments tc WHERE tc.ticket_id = t.id) as comment_count,
-        (
-          SELECT json_build_object(
-            'id', spt.id,
-            'firstResponseDueAt', spt.first_response_due_at,
-            'nextResponseDueAt', spt.next_response_due_at,
-            'resolutionDueAt', spt.resolution_due_at,
-            'firstResponseMet', spt.first_response_met,
-            'nextResponseMet', spt.next_response_met,
-            'resolutionMet', spt.resolution_met,
-            'slaPolicy', json_build_object(
-              'id', sp.id,
-              'name', sp.name,
-              'firstResponseHours', sp.first_response_hours,
-              'nextResponseHours', sp.next_response_hours,
-              'resolutionHours', sp.resolution_hours,
-              'businessHoursOnly', sp.business_hours_only
-            )
-          )
-          FROM sla_policy_tickets spt
-          JOIN sla_policies sp ON spt.sla_policy_id = sp.id
-          WHERE spt.ticket_id = t.id
-        ) as sla_info
-      FROM tickets t
-      JOIN users req ON t.requester_id = req.id
-      LEFT JOIN users asn ON t.assignee_id = asn.id
-      JOIN ticket_statuses ts ON t.status_id = ts.id
-      LEFT JOIN ticket_priorities tp ON t.priority_id = tp.id
-      LEFT JOIN departments d ON t.department_id = d.id
-      LEFT JOIN ticket_types tt ON t.type_id = tt.id
-      ${whereClauseString}
-      ${orderByClause}
-      LIMIT $${params.length + 1} OFFSET $${params.length + 2}
-    `;
-    
-    const queryParamsForTickets = [...params, Number(limit), offset];
-    
-    const countQuery = `
-      SELECT COUNT(DISTINCT t.id) FROM tickets t
-      JOIN users req ON t.requester_id = req.id
-      LEFT JOIN users asn ON t.assignee_id = asn.id
-      JOIN ticket_statuses ts ON t.status_id = ts.id
-      LEFT JOIN ticket_priorities tp ON t.priority_id = tp.id
-      LEFT JOIN departments d ON t.department_id = d.id
-      LEFT JOIN ticket_types tt ON t.type_id = tt.id
-      ${whereClauseString}
-    `;
-    
-    const queryParamsForCount = params; // No limit/offset for count
-        
-    logger.debug('[getTickets] Tickets Query:', ticketsQuery);
-    logger.debug('[getTickets] Tickets Params:', JSON.stringify(queryParamsForTickets));
-    logger.debug('[getTickets] Count Query:', countQuery);
-    logger.debug('[getTickets] Count Params:', JSON.stringify(queryParamsForCount));
-
-    const [ticketsResult, countResult] = await Promise.all([
-      pool.query(ticketsQuery, queryParamsForTickets),
-      pool.query(countQuery, queryParamsForCount)
-    ]);
-    
-    const tickets = ticketsResult.rows;
-    const totalCount = parseInt(countResult.rows[0].count);
-    const totalPages = Math.ceil(totalCount / Number(limit));
-    
-    // Map to ensure frontend gets consistent field names (e.g., priority.name, status.name)
-    const formattedTickets = tickets.map(ticket => ({
-      ...ticket,
-      id: ticket.id.toString(), // Ensure ID is string
-      status: ticket.status, // Use full status object
-      priority: ticket.priority, // Use full priority object
-      tags: ticket.tags || [], // Ensure tags is an array
-      requester: ticket.requester,
-      assignee: ticket.assignee,
-      department: ticket.department,
-      type: ticket.type,
-      comment_count: parseInt(ticket.comment_count || '0', 10),
-      created_at: ticket.created_at,
-      updated_at: ticket.updated_at,
-      due_date: ticket.due_date,
-      subject: ticket.subject,
-      description: ticket.description,
-      resolved_at: ticket.resolved_at,
-      closed_at: ticket.closed_at,
-      sentiment_score: ticket.sentiment_score,
-      ai_summary: ticket.ai_summary,
-      source: ticket.source,
-      is_spam: ticket.is_spam,
-      sla_status: ticket.sla_status,
-      sla_info: ticket.sla_info
-    })); 
+    // Use the ticket service to get paginated tickets with caching
+    const result = await ticketService.getTickets({
+      page: parseInt(page),
+      limit: parseInt(limit),
+      searchTerm,
+      status: status as string | string[],
+      priority: priority as string | string[],
+      assigneeId,
+      requesterId,
+      departmentId: department,
+      tags: tags as string | string[],
+      dateFrom,
+      dateTo,
+      sortBy,
+      sortDirection: (sortOrder?.toUpperCase() as 'ASC' | 'DESC') || 'DESC'
+    });
 
     res.status(200).json({
       status: 'success',
       data: {
-        tickets: formattedTickets,
-        pagination: {
-          page: Number(page),
-          limit: Number(limit),
-          total: totalCount,
-          totalPages,
-        },
+        tickets: result.tickets,
+        pagination: result.pagination
       },
     });
   } catch (error) {
@@ -317,216 +90,45 @@ export const getTicketById = async (
   req: Request,
   res: Response,
   next: NextFunction
-) => {
+): Promise<void> => {
   try {
     const { id } = req.params;
     
-    // Improved query to include SLA policy information
-    const ticketQuery = `
-      SELECT 
-        t.id, 
-        t.subject, 
-        t.description,
-        t.created_at,
-        t.updated_at,
-        t.resolved_at,
-        t.closed_at,
-        t.due_date,
-        t.sentiment_score,
-        t.ai_summary,
-        t.source,
-        t.is_spam,
-        t.sla_status,
-        json_build_object(
-          'id', req.id,
-          'email', req.email,
-          'firstName', req.first_name,
-          'lastName', req.last_name
-        ) as requester,
-        CASE WHEN t.assignee_id IS NOT NULL THEN
-          json_build_object(
-            'id', asn.id,
-            'email', asn.email,
-            'firstName', asn.first_name,
-            'lastName', asn.last_name
-          )
-        ELSE NULL END as assignee,
-        json_build_object(
-          'id', ts.id,
-          'name', ts.name,
-          'color', ts.color
-        ) as status,
-        CASE WHEN t.priority_id IS NOT NULL THEN
-          json_build_object(
-            'id', tp.id,
-            'name', tp.name,
-            'color', tp.color
-          )
-        ELSE NULL END as priority,
-        CASE WHEN t.department_id IS NOT NULL THEN
-          json_build_object(
-            'id', d.id,
-            'name', d.name
-          )
-        ELSE NULL END as department,
-        CASE WHEN t.type_id IS NOT NULL THEN
-          json_build_object(
-            'id', tt.id,
-            'name', tt.name
-          )
-        ELSE NULL END as type,
-        (SELECT json_agg(json_build_object(
-          'id', tag.id,
-          'name', tag.name,
-          'color', tag.color
-        )) FROM ticket_tags ttg
-        JOIN tags tag ON ttg.tag_id = tag.id
-        WHERE ttg.ticket_id = t.id) as tags,
-        t.organization_id
-      FROM tickets t
-      JOIN users req ON t.requester_id = req.id
-      LEFT JOIN users asn ON t.assignee_id = asn.id
-      JOIN ticket_statuses ts ON t.status_id = ts.id
-      LEFT JOIN ticket_priorities tp ON t.priority_id = tp.id
-      LEFT JOIN departments d ON t.department_id = d.id
-      LEFT JOIN ticket_types tt ON t.type_id = tt.id
-      WHERE t.id = $1
-    `;
-    
-    // Get comments
-    const commentsQuery = `
-      SELECT 
-        tc.id,
-        tc.content,
-        tc.is_internal,
-        tc.is_system,
-        tc.sentiment_score,
-        tc.created_at,
-        tc.updated_at,
-        json_build_object(
-          'id', u.id,
-          'email', u.email,
-          'firstName', u.first_name,
-          'lastName', u.last_name,
-          'avatar', u.avatar_url
-        ) as user,
-        (SELECT json_agg(json_build_object(
-          'id', ta.id,
-          'fileName', ta.file_name,
-          'filePath', ta.file_path,
-          'fileType', ta.file_type,
-          'fileSize', ta.file_size
-        )) FROM ticket_attachments ta
-        WHERE ta.comment_id = tc.id) as attachments
-      FROM ticket_comments tc
-      JOIN users u ON tc.user_id = u.id
-      WHERE tc.ticket_id = $1
-      ORDER BY tc.created_at ASC
-    `;
-    
-    // Get ticket history
-    const historyQuery = `
-      SELECT 
-        th.id,
-        th.field_name,
-        th.old_value,
-        th.new_value,
-        th.created_at,
-        json_build_object(
-          'id', u.id,
-          'email', u.email,
-          'firstName', u.first_name,
-          'lastName', u.last_name
-        ) as user
-      FROM ticket_history th
-      LEFT JOIN users u ON th.user_id = u.id
-      WHERE th.ticket_id = $1
-      ORDER BY th.created_at DESC
-    `;
-    
-    // Get ticket-level attachments (comment_id is NULL)
-    const attachmentsQuery = `
-      SELECT 
-        id,
-        file_name as "originalName", -- Match frontend expectation
-        file_path as "filePath",
-        file_type as "mimeType",
-        file_size as "size",
-        created_at as "createdAt"
-      FROM ticket_attachments
-      WHERE ticket_id = $1 AND comment_id IS NULL
-      ORDER BY created_at ASC
-    `;
-    
-    // Also get SLA information for the ticket
-    const slaQuery = `
-      SELECT 
-        spt.id,
-        spt.ticket_id,
-        spt.sla_policy_id,
-        spt.first_response_due_at,
-        spt.next_response_due_at,
-        spt.resolution_due_at,
-        spt.first_response_met,
-        spt.next_response_met,
-        spt.resolution_met,
-        spt.metadata,
-        json_build_object(
-          'id', sp.id,
-          'name', sp.name,
-          'description', sp.description,
-          'organizationId', sp.organization_id,
-          'ticketPriorityId', sp.ticket_priority_id,
-          'firstResponseHours', sp.first_response_hours,
-          'nextResponseHours', sp.next_response_hours,
-          'resolutionHours', sp.resolution_hours,
-          'businessHoursOnly', sp.business_hours_only
-        ) as policy
-      FROM sla_policy_tickets spt
-      JOIN sla_policies sp ON spt.sla_policy_id = sp.id
-      WHERE spt.ticket_id = $1
-    `;
-    
-    // Execute all queries in parallel
-    const [ticketResult, commentsResult, historyResult, attachmentsResult, slaResult] = await Promise.all([
-      query(ticketQuery, [id]),
-      query(commentsQuery, [id]),
-      query(historyQuery, [id]),
-      query(attachmentsQuery, [id]),
-      query(slaQuery, [id])
-    ]);
-
-    const comments = commentsResult.rows;
-    const history = historyResult.rows;
-    const attachments = attachmentsResult.rows;
-    const slaInfo = slaResult.rows.length > 0 ? slaResult.rows[0] : null;
-    
-    // Check if ticket exists
-    if (ticketResult.rows.length === 0) {
-      throw new AppError('Ticket not found', 404);
-    }
-    
-    const ticket = ticketResult.rows[0];
+    // Use the ticket service to get ticket by ID with caching
+    const ticket = await ticketService.getTicketById(id);
     
     // Check if user has access to this ticket
-    if (req.user.role !== 'admin' && ticket.organization_id !== req.user.organizationId) {
+    const ticketOrgId = ticket.organization?.id;
+    const userOrgId = idToNumber(req.user.organizationId);
+    if (req.user.role !== 'admin' && 
+        ticketOrgId && userOrgId && 
+        ticketOrgId !== userOrgId) {
       throw new AppError('You do not have permission to access this ticket', 403);
     }
     
-    // Return ticket with comments, history, attachments, and SLA info
+    // Customers can only view their own tickets
+    const requesterId = ticket.requester?.id;
+    const userId = idToNumber(req.user.id) || 0;
+    if (req.user.role === 'customer' && 
+        requesterId && userId && 
+        requesterId !== userId) {
+      throw new AppError('You can only view tickets you created', 403);
+    }
+    
+    // Invalidate cache and fetch fresh data if needed
+    const refresh = req.query.refresh;
+    const shouldRefreshData = refresh === 'true';
+    if (shouldRefreshData) {
+      ticketService.invalidateTicketCache(id);
+      return getTicketById(req, res, next);
+    }
+    
     res.status(200).json({
       status: 'success',
-      data: {
-        ticket: {
-          ...ticket,
-          comments,
-          history,
-          attachments,
-          slaInfo // Include SLA information in the response
-        },
-      },
+      data: { ticket }
     });
   } catch (error) {
+    logger.error('[getTicketById] Error:', error);
     next(error);
   }
 };
@@ -558,10 +160,10 @@ export const createTicket = async (
     // Revert back to Express.Multer.File
     const files = req.files as Express.Multer.File[];
 
-    const actualRequesterId = requesterId || req.user.id;
+    const actualRequesterId = requesterId || idToString(req.user.id);
     const statusResult = await query(
       'SELECT id FROM ticket_statuses WHERE is_default = true AND organization_id = $1 LIMIT 1',
-      [req.user.organizationId]
+      [idToString(req.user.organizationId) || null]
     );
 
     if (statusResult.rows.length === 0) {
@@ -622,7 +224,7 @@ export const createTicket = async (
           priorityId || null,
           statusId,
           typeId || null,
-          req.user.organizationId,
+          idToString(req.user.organizationId) || null,
           dueDate || null, // Due date will be set by the trigger
           sentimentScore,
           aiSummary,
@@ -635,7 +237,7 @@ export const createTicket = async (
       // --- Handle Tags --- 
       const tagIds: number[] = [];
       if (tags && Array.isArray(tags) && tags.length > 0) {
-        const organizationId = req.user.organizationId;
+        const organizationId = idToString(req.user.organizationId) || null;
         if (!organizationId) {
           logger.warn(`Organization ID missing for user ${actualRequesterId}, cannot process tags for ticket ${newTicketId}`);
         } else {
@@ -789,7 +391,7 @@ export const createTicket = async (
             const slaPolicyResult = await query(
               `SELECT id FROM sla_policies 
                WHERE organization_id = $1 AND ticket_priority_id = $2`,
-              [req.user.organizationId, priorityId]
+              [idToString(req.user.organizationId) || null, priorityId]
             );
             
             let slaPolicyId: number | null = null;
@@ -820,7 +422,7 @@ export const createTicket = async (
                   [
                     `${priority.name} Priority SLA`,
                     `Default SLA policy for ${priority.name} priority tickets`,
-                    req.user.organizationId,
+                    idToString(req.user.organizationId) || null,
                     priorityId,
                     Math.max(1, Math.floor(slaHours / 4)),
                     Math.max(2, Math.floor(slaHours / 2)),
@@ -950,11 +552,7 @@ export const updateTicket = async (
   req: Request,
   res: Response,
   next: NextFunction
-) => {
-  console.log('[updateTicket] Received PUT request');
-  console.log('[updateTicket] req.params:', JSON.stringify(req.params));
-  console.log('[updateTicket] req.body:', JSON.stringify(req.body, null, 2));
-  
+): Promise<void> => {
   try {
     const { id } = req.params;
     const {
@@ -969,374 +567,82 @@ export const updateTicket = async (
       tags,
     } = req.body;
     
-    console.log('[updateTicket] Extracted assigneeId:', assigneeId, typeof assigneeId);
-    console.log('[updateTicket] req.user.id:', req.user?.id, typeof req.user?.id); // Log user ID
-    
-    // Get ticket to check access and track changes
-    const ticketResult = await query(
-      'SELECT * FROM tickets WHERE id = $1',
-      [id]
-    );
-    
-    if (ticketResult.rows.length === 0) {
-      throw new AppError('Ticket not found', 404);
+    if (!id) {
+      throw new AppError('Ticket ID is required', 400);
     }
     
-    const ticket = ticketResult.rows[0];
+    // Get ticket to check access
+    const ticket = await ticketService.getTicketById(id.toString());
     
     // Check if user has access to update this ticket
-    if (req.user.role !== 'admin' && ticket.organization_id !== req.user.organizationId) {
+    const ticketOrgId = ticket.organization?.id;
+    const userOrgId = idToNumber(req.user.organizationId);
+    if (req.user.role !== 'admin' && ticketOrgId && 
+        userOrgId && ticketOrgId !== userOrgId) {
       throw new AppError('You do not have permission to update this ticket', 403);
     }
     
     // Customers can only update their own tickets
-    if (
-      req.user.role === 'customer' && 
-      ticket.requester_id !== req.user.id
-    ) {
+    const requesterId = ticket.requester?.id; 
+    const userId = idToNumber(req.user.id) || 0;
+    if (req.user.role === 'customer' && 
+        requesterId && userId && 
+        requesterId !== userId) {
       throw new AppError('You can only update tickets you created', 403);
     }
     
-    // Store the old status ID for comparison
-    const oldStatusId = ticket.status_id;
+    // Store the old status for comparison
+    const oldStatusId = ticket.status?.id;
     
-    // Start transaction
-    const client = await pool.connect();
-    try {
-      await client.query('BEGIN');
-      
-      // Track changes for history
-      const changes: { field: string; oldValue: any; newValue: any }[] = [];
-      
-      // Build update query
-      const updateFields: string[] = [];
-      const values: any[] = [];
-      let paramCount = 1;
-      
-      if (subject !== undefined && subject !== ticket.subject) {
-        updateFields.push(`subject = $${paramCount}`);
-        values.push(subject);
-        changes.push({ field: 'subject', oldValue: ticket.subject, newValue: subject });
-        paramCount++;
-      }
-      
-      if (description !== undefined && description !== ticket.description) {
-        updateFields.push(`description = $${paramCount}`);
-        values.push(description);
-        changes.push({ field: 'description', oldValue: ticket.description, newValue: description });
-        paramCount++;
-        
-        // Re-process with AI if description changed
-        if (process.env.OPENAI_API_KEY) {
-          try {
-            // OpenAI is no longer used
-            // Set default values for sentiment and summary
-            const sentimentScore = 0;
-            
-            updateFields.push(`sentiment_score = $${paramCount}`);
-            values.push(sentimentScore);
-            paramCount++;
-            
-            // Generate summary if description is long
-            if (description.length > 100) {
-              const aiSummary = "AI summary not available";
-              
-              updateFields.push(`ai_summary = $${paramCount}`);
-              values.push(aiSummary);
-              paramCount++;
-            }
-          } catch (error) {
-            // Log AI error but continue with ticket update
-            logger.error('Error processing ticket update with AI', error);
-          }
-        }
-      }
-      
-      if (assigneeId !== undefined && assigneeId !== ticket.assignee_id) {
-        updateFields.push(`assignee_id = $${paramCount}`);
-        values.push(assigneeId || null);
-        changes.push({ field: 'assignee', oldValue: ticket.assignee_id, newValue: assigneeId });
-        paramCount++;
-      }
-      
-      if (departmentId !== undefined && departmentId !== ticket.department_id) {
-        updateFields.push(`department_id = $${paramCount}`);
-        values.push(departmentId || null);
-        changes.push({ field: 'department', oldValue: ticket.department_id, newValue: departmentId });
-        paramCount++;
-      }
-      
-      if (priorityId !== undefined && priorityId !== ticket.priority_id) {
-        updateFields.push(`priority_id = $${paramCount}`);
-        values.push(priorityId || null);
-        changes.push({ field: 'priority', oldValue: ticket.priority_id, newValue: priorityId });
-        paramCount++;
-      }
-      
-      if (typeId !== undefined && typeId !== ticket.type_id) {
-        updateFields.push(`type_id = $${paramCount}`);
-        values.push(typeId || null);
-        changes.push({ field: 'type', oldValue: ticket.type_id, newValue: typeId });
-        paramCount++;
-      }
-      
-      if (dueDate !== undefined && dueDate !== ticket.due_date) {
-        updateFields.push(`due_date = $${paramCount}`);
-        values.push(dueDate || null);
-        changes.push({ field: 'dueDate', oldValue: ticket.due_date, newValue: dueDate });
-        paramCount++;
-      }
-      
-      // Handle status change separately to update resolved/closed timestamps
-      if (statusId !== undefined && statusId !== ticket.status_id) {
-        updateFields.push(`status_id = $${paramCount}`);
-        values.push(statusId);
-        changes.push({ field: 'status', oldValue: ticket.status_id, newValue: statusId });
-        paramCount++;
-        
-        // Check if new status is resolved or closed
-        const statusResult = await client.query(
-          'SELECT is_resolved FROM ticket_statuses WHERE id = $1',
-          [statusId]
-        );
-        
-        if (statusResult.rows.length > 0) {
-          const { is_resolved } = statusResult.rows[0];
-          
-          if (is_resolved) {
-            // If ticket was not previously resolved, set resolved_at
-            if (!ticket.resolved_at) {
-              updateFields.push(`resolved_at = $${paramCount}`);
-              values.push(new Date());
-              paramCount++;
-            }
-            
-            // Check if this status means closed (e.g., "Closed" vs "Resolved")
-            if (statusId !== ticket.status_id) {
-              updateFields.push(`closed_at = $${paramCount}`);
-              values.push(new Date());
-              paramCount++;
-            }
-          }
-        }
-      }
-      
-      // Update ticket if there are changes
-      if (updateFields.length > 0) {
-        values.push(id);
-        
-        // Log the values array right before the query
-        console.log('[updateTicket] Values array before query:', JSON.stringify(values));
-        console.log('[updateTicket] updateFields:', updateFields.join(', '));
-        
-        const updateQuery = `
-          UPDATE tickets
-          SET ${updateFields.join(', ')}, updated_at = NOW()
-          WHERE id = $${values.length}
-        `;
-        
-        console.log('[updateTicket] Executing update query:', updateQuery);
-        await client.query(updateQuery, values);
-        
-        // Add changes to history
-        for (const change of changes) {
-          let oldValueLabel = change.oldValue;
-          let newValueLabel = change.newValue;
-          
-          // For relations, get the name instead of the ID
-          if (['status', 'priority', 'type', 'department', 'assignee'].includes(change.field)) {
-            if (change.field === 'assignee') {
-              if (change.oldValue) {
-                const oldUserResult = await client.query(
-                  'SELECT first_name, last_name FROM users WHERE id = $1',
-                  [change.oldValue]
-                );
-                if (oldUserResult.rows.length > 0) {
-                  const user = oldUserResult.rows[0];
-                  oldValueLabel = `${user.first_name} ${user.last_name}`;
-                }
-              } else {
-                oldValueLabel = 'Unassigned';
-              }
-              
-              if (change.newValue) {
-                const newUserResult = await client.query(
-                  'SELECT first_name, last_name, email FROM users WHERE id = $1', // Select email as well
-                  [change.newValue]
-                );
-                if (newUserResult.rows.length > 0) {
-                  const user = newUserResult.rows[0];
-                  // Update the label to include name and email
-                  newValueLabel = `${user.first_name} ${user.last_name} (${user.email})`; 
-                }
-              } else {
-                newValueLabel = 'Unassigned';
-              }
-            } else {
-              // Get name for other relations
-              let tableName = '';
-              if (change.field === 'department') {
-                tableName = 'departments';
-              } else if (change.field === 'status') {
-                tableName = 'ticket_statuses'; // Correct table name for status
-              } else if (change.field === 'priority') {
-                tableName = 'ticket_priorities'; // Correct table name for priority
-              } else {
-                // Default logic for type (ticket_types is correct)
-                tableName = `ticket_${change.field}s`; 
-              }
-              
-              if (change.oldValue) {
-                const oldResult = await client.query(
-                  `SELECT name FROM ${tableName} WHERE id = $1`,
-                  [change.oldValue]
-                );
-                if (oldResult.rows.length > 0) {
-                  oldValueLabel = oldResult.rows[0].name;
-                }
-              } else {
-                oldValueLabel = 'None';
-              }
-              
-              if (change.newValue) {
-                const newResult = await client.query(
-                  `SELECT name FROM ${tableName} WHERE id = $1`,
-                  [change.newValue]
-                );
-                if (newResult.rows.length > 0) {
-                  newValueLabel = newResult.rows[0].name;
-                }
-              } else {
-                newValueLabel = 'None';
-              }
-            }
-          }
-          
-          // Ensure IDs are numbers for the history table
-          const numericTicketId = parseInt(id, 10);
-          const numericUserId = parseInt(req.user.id, 10);
-          
-          // Log before inserting into history
-          console.log(`[updateTicket] Inserting history: ticketId=${numericTicketId}, userId=${numericUserId}, field=${change.field}, old=${oldValueLabel}, new=${newValueLabel}`);
+    // Create update data object
+    const updateData: Partial<Ticket> = {};
+    
+    if (subject !== undefined) updateData.subject = subject;
+    if (description !== undefined) updateData.description = description;
+    if (assigneeId !== undefined) updateData.assigneeId = assigneeId || null;
+    if (departmentId !== undefined) updateData.departmentId = departmentId || null;
+    if (priorityId !== undefined) updateData.priorityId = priorityId || null;
+    if (statusId !== undefined) updateData.statusId = statusId || null;
+    if (typeId !== undefined) updateData.typeId = typeId || null;
+    if (dueDate !== undefined) updateData.dueDate = dueDate ? new Date(dueDate) : undefined;
 
-          await client.query(
-            `INSERT INTO ticket_history (
-              ticket_id,
-              user_id,
-              field_name,
-              old_value,
-              new_value
-            ) VALUES ($1, $2, $3, $4, $5)`,
-            [
-              numericTicketId, // Use numeric ticket ID
-              numericUserId,   // Use numeric user ID
-              change.field,
-              oldValueLabel,
-              newValueLabel,
-            ]
-          );
-        }
-      }
+    // Update ticket using the service
+    const updatedTicket = await ticketService.updateTicket(parseInt(id), updateData);
+    
+    // After update: Check if status changed for special handling
+    if (statusId && statusId !== oldStatusId) {
+      // Get the new and old status names
+      const newStatusPromise = statusId ? ticketService.getStatusById(statusId) : Promise.resolve(null);
+      const oldStatusPromise = oldStatusId ? ticketService.getStatusById(oldStatusId) : Promise.resolve(null);
       
-      // Update tags if provided
-      if (tags !== undefined) {
-        // Delete existing tags
-        await client.query(
-          'DELETE FROM ticket_tags WHERE ticket_id = $1',
-          [id]
-        );
-        
-        // Add new tags (assuming tags are passed as an array of *numeric IDs*)
-        if (Array.isArray(tags) && tags.length > 0) {
-          const numericTagIds = tags.map(tag => typeof tag === 'string' ? parseInt(tag, 10) : tag).filter(tag => typeof tag === 'number');
-          if (numericTagIds.length > 0) {
-            const tagValuesPlaceholders = numericTagIds.map((_, index) => `($1, $${index + 2})`).join(',');
-            const ticketTagQuery = `INSERT INTO ticket_tags (ticket_id, tag_id) VALUES ${tagValuesPlaceholders}`;
-            await client.query(ticketTagQuery, [id, ...numericTagIds]);
-          }
-        }
-      }
+      const [newStatus, oldStatus] = await Promise.all([newStatusPromise, oldStatusPromise]);
       
-      // After updating the ticket and before saving - Check if status changed
-      if (req.body.statusId && req.body.statusId !== oldStatusId) {
-        // Get the new status name to check for specific status types
-        const newStatus = await query(
-          'SELECT name FROM ticket_statuses WHERE id = $1',
-          [req.body.statusId]
-        );
-        const oldStatus = await query(
-          'SELECT name FROM ticket_statuses WHERE id = $1',
-          [oldStatusId]
-        );
-        
-        if (newStatus.rows.length > 0 && oldStatus.rows.length > 0) {
+      if (newStatus && oldStatus) {
           // Log the status change
-          logStatusChange(Number(id), oldStatus.rows[0].name, newStatus.rows[0].name);
-          
-          // If changing to a pending status - pause SLA
-          if (isPendingStatus(newStatus.rows[0].name) && !isPendingStatus(oldStatus.rows[0].name)) {
-            await slaService.pauseSLA(Number(id));
-            logger.info(`SLA paused for ticket #${id} due to status change to ${newStatus.rows[0].name}`);
-          } 
-          // If changing from a pending to an in-progress status - resume SLA
-          else if (isInProgressStatus(newStatus.rows[0].name) && isPendingStatus(oldStatus.rows[0].name)) {
-            await slaService.resumeSLA(Number(id));
-            logger.info(`SLA resumed for ticket #${id} due to status change to ${newStatus.rows[0].name}`);
-          }
-        }
-      }
-      
-      // If priority changed, re-assign SLA policy and update due date
-      if (priorityId && priorityId !== ticket.priority_id) {
-        // Get the updated ticket - we don't need to update priority_id again as it was done in the main update
-        const updatedTicket = await client.query(
-          'SELECT * FROM tickets WHERE id = $1',
-          [id]
-        );
+        logStatusChange(parseInt(id), oldStatus.name, newStatus.name);
         
-        if (updatedTicket.rows.length > 0) {
-          try {
-            // Auto-assign SLA based on the new priority
-            const slaPolicyTicket = await slaService.autoAssignSLAPolicy(updatedTicket.rows[0]);
-            logger.info(`SLA policy re-assigned for ticket #${id} due to priority change`);
-            
-            // If we got an SLA policy ticket, update the due_date in the tickets table
-            if (slaPolicyTicket) {
-              // Use the resolution due date as the ticket due date
-              const dueDate = slaPolicyTicket.resolutionDueAt;
-              
-              await client.query(
-                'UPDATE tickets SET due_date = $1 WHERE id = $2',
-                [dueDate, id]
-              );
-              
-              logger.info(`Due date updated for ticket #${id} to ${dueDate} based on new SLA policy`);
-            } else {
-              logger.warn(`No SLA policy found for ticket #${id} with priority ${priorityId}`);
-            }
-          } catch (error) {
-            logger.error(`Error updating SLA for ticket #${id}:`, error);
-            // Continue with the transaction even if SLA update fails
-          }
+        // Handle resolved status
+        if (newStatus.isResolved && !oldStatus.isResolved) {
+          // Mark ticket as resolved
+          const resolveData: Partial<Ticket> = {
+            resolvedAt: new Date()
+          };
+          await ticketService.updateTicket(parseInt(id), resolveData);
         }
       }
-      
-      // Commit transaction
-      await client.query('COMMIT');
-      
+    }
+    
+    // Invalidate cache for this ticket
+    ticketService.invalidateTicketCache(id.toString());
+    
+    // Return the updated ticket
       res.status(200).json({
         status: 'success',
-        data: {
           message: 'Ticket updated successfully',
-        },
+      data: { ticket: updatedTicket }
       });
     } catch (error) {
-      await client.query('ROLLBACK');
-      throw error;
-    } finally {
-      client.release();
-    }
-  } catch (error) {
+    logger.error('[updateTicket] Error:', error);
     next(error);
   }
 };
@@ -1366,14 +672,14 @@ export const addComment = async (
     const ticket = ticketResult.rows[0];
     
     // Check permissions
-    if (req.user.role !== 'admin' && ticket.organization_id !== req.user.organizationId) {
+    if (req.user.role !== 'admin' && ticket.organization_id !== idToString(req.user.organizationId)) {
       throw new AppError('You do not have permission to access this ticket', 403);
     }
     
     // Customers can only add comments to their own tickets
     if (
       req.user.role === 'customer' && 
-      ticket.requester_id !== req.user.id
+      ticket.requester_id !== idToString(req.user.id)
     ) {
       throw new AppError('You can only add comments to tickets you created', 403);
     }
@@ -1407,7 +713,7 @@ export const addComment = async (
       RETURNING id, created_at`,
       [
         id,
-        req.user.id,
+        idToString(req.user.id),
         content,
         isInternal,
         sentimentScore,
@@ -1457,7 +763,7 @@ export const deleteTicket = async (
     // Only admin or agent from same organization can delete tickets
     if (
       req.user.role !== 'admin' && 
-      (ticket.organization_id !== req.user.organizationId || req.user.role !== 'agent')
+      (ticket.organization_id !== idToString(req.user.organizationId) || req.user.role !== 'agent')
     ) {
       throw new AppError('You do not have permission to delete this ticket', 403);
     }
@@ -1482,7 +788,7 @@ export const getAllDepartments = async (
   next: NextFunction
 ) => {
   try {
-    const departments = await ticketService.getDepartments(req.user.organizationId);
+    const departments = await ticketService.getDepartments(idToString(req.user.organizationId) || null);
     res.status(200).json({ status: 'success', data: { departments } });
   } catch (error) {
     next(error);
@@ -1495,7 +801,7 @@ export const getAllPriorities = async (
   next: NextFunction
 ) => {
   try {
-    const priorities = await ticketService.getPriorities(req.user.organizationId);
+    const priorities = await ticketService.getPriorities(idToString(req.user.organizationId) || null);
     res.status(200).json({ status: 'success', data: { priorities } });
   } catch (error) {
     next(error);
@@ -1508,7 +814,7 @@ export const getAllTypes = async (
   next: NextFunction
 ) => {
   try {
-    const ticketTypes = await ticketService.getTypes(req.user.organizationId);
+    const ticketTypes = await ticketService.getTypes(idToString(req.user.organizationId) || null);
     res.status(200).json({ status: 'success', data: { ticketTypes } });
   } catch (error) {
     next(error);
@@ -1521,7 +827,7 @@ export const getAllStatuses = async (
   next: NextFunction
 ) => {
   try {
-    const statuses = await ticketService.getStatuses(req.user.organizationId);
+    const statuses = await ticketService.getStatuses(idToString(req.user.organizationId) || null);
     res.status(200).json({ status: 'success', data: { statuses } });
   } catch (error) {
     next(error);
@@ -1562,14 +868,14 @@ export const uploadTicketAttachments = async (
     const ticket = ticketResult.rows[0];
     
     // Check if user has access to this ticket
-    if (req.user.role !== 'admin' && ticket.organization_id !== req.user.organizationId) {
+    if (req.user.role !== 'admin' && ticket.organization_id !== idToString(req.user.organizationId)) {
       throw new AppError('You do not have permission to upload attachments to this ticket', 403);
     }
     
     // Customers can only add attachments to their own tickets
     if (
       req.user.role === 'customer' && 
-      ticket.requester_id !== req.user.id
+      ticket.requester_id !== idToString(req.user.id)
     ) {
       throw new AppError('You can only add attachments to tickets you created', 403);
     }
@@ -1595,7 +901,12 @@ export const uploadTicketAttachments = async (
             publicUrl = await uploadFile(file, 'tickets', parseInt(id));
           } else {
             // Upload directly with supabaseClient
-            const { data, error } = await supabaseClient.storage
+            if (!supabase) {
+              logger.error('Supabase client is not initialized');
+              throw new AppError('Storage service not available', 500);
+            }
+            
+            const { data, error } = await supabase.storage
               .from(bucketName)
               .upload(fileName, file.buffer, {
                 contentType: file.mimetype,
@@ -1608,7 +919,7 @@ export const uploadTicketAttachments = async (
             }
             
             // Get the public URL
-            const { data: urlData } = supabaseClient.storage
+            const { data: urlData } = supabase.storage
               .from(bucketName)
               .getPublicUrl(fileName);
               
@@ -1627,7 +938,7 @@ export const uploadTicketAttachments = async (
               fileName, // Store the path in Supabase
               file.mimetype, 
               file.size, 
-              req.user.id
+              idToString(req.user.id)
             ]
           );
           
@@ -1647,7 +958,7 @@ export const uploadTicketAttachments = async (
             `INSERT INTO ticket_history 
              (ticket_id, user_id, field_name, new_value) 
              VALUES ($1, $2, $3, $4)`,
-            [id, req.user.id, 'attachment_added', file.originalname]
+            [id, idToString(req.user.id), 'attachment_added', file.originalname]
           );
         } catch (fileError) {
           logger.error(`Error processing file ${file.originalname}:`, fileError);
@@ -1711,7 +1022,7 @@ export const downloadTicketAttachment = async (
     // Check if user has access to this attachment
     if (
       req.user.role !== 'admin' && 
-      attachment.organization_id !== req.user.organizationId
+      attachment.organization_id !== idToString(req.user.organizationId)
     ) {
       throw new AppError('You do not have permission to download this attachment', 403);
     }
@@ -1719,14 +1030,19 @@ export const downloadTicketAttachment = async (
     // Customers can only download attachments from their own tickets
     if (
       req.user.role === 'customer' && 
-      attachment.requester_id !== req.user.id
+      attachment.requester_id !== idToString(req.user.id)
     ) {
       throw new AppError('You can only download attachments from tickets you created', 403);
     }
     
     try {
       // Generate signed URL from Supabase
-      const { data, error } = await supabaseClient.storage
+      if (!supabase) {
+        logger.error('Supabase client is not initialized');
+        throw new AppError('Storage service not available', 500);
+      }
+      
+      const { data, error } = await supabase.storage
         .from(bucketName)
         .createSignedUrl(attachment.file_path, 300); // URL valid for 5 minutes
       
@@ -1745,7 +1061,7 @@ export const downloadTicketAttachment = async (
         status: 'success',
         data: {
           downloadUrl: data.signedUrl,
-          filename: attachment.original_name
+          filename: attachment.file_name
         }
       });
     } catch (supabaseError) {
@@ -1753,7 +1069,12 @@ export const downloadTicketAttachment = async (
       
       // Fallback - try to get a public URL if file is public
       try {
-        const { data } = supabaseClient.storage
+          if (!supabase) {
+            logger.error('Supabase client is not initialized');
+            throw new AppError('Storage service not available', 500);
+          }
+          
+          const { data } = supabase.storage
           .from(bucketName)
           .getPublicUrl(attachment.file_path);
           
@@ -1762,7 +1083,7 @@ export const downloadTicketAttachment = async (
             status: 'success',
             data: {
               downloadUrl: data.publicUrl,
-              filename: attachment.original_name
+              filename: attachment.file_name
             }
           });
         } else {
@@ -1802,14 +1123,14 @@ export const getTicketHistory = async (
     const ticket = ticketResult.rows[0];
     
     // Check if user has access to this ticket
-    if (req.user.role !== 'admin' && ticket.organization_id !== req.user.organizationId) {
+    if (req.user.role !== 'admin' && ticket.organization_id !== idToString(req.user.organizationId)) {
       throw new AppError('You do not have permission to view this ticket history', 403);
     }
     
     // Customers can only view history of their own tickets
     if (
       req.user.role === 'customer' && 
-      ticket.requester_id !== req.user.id
+      ticket.requester_id !== idToString(req.user.id)
     ) {
       throw new AppError('You can only view history of tickets you created', 403);
     }
@@ -1896,14 +1217,14 @@ export const addTicketComment = async (
     const ticket = ticketResult.rows[0];
     
     // Check permissions
-    if (req.user.role !== 'admin' && ticket.organization_id !== req.user.organizationId) {
+    if (req.user.role !== 'admin' && ticket.organization_id !== idToString(req.user.organizationId)) {
       throw new AppError('You do not have permission to access this ticket', 403);
     }
     
     // Customers can only add comments to their own tickets
     if (
       req.user.role === 'customer' && 
-      ticket.requester_id !== req.user.id
+      ticket.requester_id !== idToString(req.user.id)
     ) {
       throw new AppError('You can only add comments to tickets you created', 403);
     }
@@ -1933,7 +1254,7 @@ export const addTicketComment = async (
         RETURNING id, created_at`,
         [
           id,
-          req.user.id,
+          idToString(req.user.id),
           content,
           isInternal,
           sentimentScore,
@@ -1978,6 +1299,29 @@ export const addTicketComment = async (
       // Commit transaction
       await client.query('COMMIT');
       
+      // If user is not a customer (agent, admin, or manager), process SLA first response
+      if (req.user.role !== 'customer' && !isInternal) {
+        // Process SLA first response outside the transaction to avoid blocking
+        try {
+          const ticketId = parseInt(id, 10);
+          const userId = idToNumber(req.user.id) || 0;
+          
+          // Only trigger first response for public (non-internal) comments
+          await slaService.processFirstResponse(ticketId, userId);
+          logger.info(`SLA first response processed for ticket #${id} by user ${req.user.id}`);
+          
+          // Immediately update SLA breach status and sla_status in the tickets table
+          const ticketToUpdate = await slaService.getTicketById(ticketId);
+          if (ticketToUpdate) {
+            await slaService.updateTicketSLABreachStatus(ticketId);
+            logger.info(`SLA status updated for ticket #${id} after first response.`);
+          }
+        } catch (slaError) {
+          logger.error(`Error processing SLA first response or updating status for ticket #${id}:`, slaError);
+          // Don't block the comment creation if SLA processing fails
+        }
+      }
+      
       // Return the created comment with user info for frontend
       res.status(201).json({
         status: 'success',
@@ -1997,14 +1341,14 @@ export const addTicketComment = async (
           }
         },
       });
-    } catch (error) {
+    } catch (err) {
       await client.query('ROLLBACK');
-      throw error;
+      throw err;
     } finally {
       client.release();
     }
-  } catch (error) {
-    next(error);
+  } catch (err) {
+    next(err);
   }
 };
 

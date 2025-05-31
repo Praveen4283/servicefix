@@ -1,113 +1,103 @@
 import { Request, Response, NextFunction } from 'express';
-import jwt from 'jsonwebtoken';
 import { query } from '../config/database';
-import { AppError } from '../utils/errorHandler';
-import * as Multer from 'multer'; // Import multer types
+import { AppError, asyncHandler } from '../utils/errorHandler';
+import { logger } from '../utils/logger';
+import authService from '../services/auth.service';
 
-// JWT secret from environment variables
-const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key';
+// Update the User interface to include all required properties
+export interface User {
+  id: string | number;
+  email: string;
+  firstName: string;
+  lastName: string;
+  role: string;
+  avatarUrl?: string;
+  organizationId?: string | number | null;
+  designation?: string;
+}
 
-// Extend Express Request interface to include user
+// Extend the Express Request interface
 declare global {
   namespace Express {
     interface Request {
-      user: {
-        id: string;
-        role: string;
-        organizationId: string | null; // Allow null for organizationId
-      };
-      files?: { [fieldname: string]: Multer.File[] } | Multer.File[] | undefined;
+      user: User;
     }
   }
 }
 
 /**
  * Authentication middleware
- * Verifies JWT token from Authorization header
+ * @param req Request object
+ * @param res Response object
+ * @param next Next function
  */
-export const authenticate = async (
+export const authenticate = asyncHandler(async (
   req: Request,
   res: Response,
   next: NextFunction
 ) => {
+  // Get token from cookie
+  const token = req.cookies.accessToken;
+  
+  // No token found
+  if (!token) {
+    return next(AppError.unauthorized('Authentication required', 'AUTH_REQUIRED'));
+  }
+  
   try {
-    // Get token from Authorization header
-    const authHeader = req.headers.authorization;
-    if (!authHeader || !authHeader.startsWith('Bearer ')) {
-      throw new AppError('Authentication required', 401);
-    }
-
-    const token = authHeader.split(' ')[1];
-    if (!token) {
-      throw new AppError('Authentication required', 401);
-    }
-
     // Verify token
-    let decoded: any;
-    try {
-      decoded = jwt.verify(token, JWT_SECRET);
-    } catch (error) {
-      throw new AppError('Invalid or expired token', 401);
-    }
-
-    // Ensure userId from token is treated as a string for consistency
-    const userIdFromToken = String(decoded.userId);
-    if (!userIdFromToken) {
-        throw new AppError('Invalid token payload: userId missing', 401);
-    }
-
-    // Get user from database
+    const decoded = authService.verifyToken(token);
+    
+    // Get user data
     const userResult = await query(
-      // Use numeric conversion in query if DB expects number, or keep as string if DB expects string/varchar
-      // Assuming BIGINT, we need to convert userIdFromToken back to number for the query
-      'SELECT id, role, organization_id FROM users WHERE id = $1',
-      [parseInt(userIdFromToken, 10)] // Convert to number for DB query
+      `SELECT id, email, first_name, last_name, role, 
+      avatar_url, organization_id, designation
+      FROM users WHERE id = $1`,
+      [decoded.userId]
     );
-
+    
     if (userResult.rows.length === 0) {
-      throw new AppError('User not found', 404);
+      return next(AppError.unauthorized('User not found', 'USER_NOT_FOUND'));
     }
-
+    
     const user = userResult.rows[0];
-
-    // Check if user is active
-    const activeResult = await query(
-      'SELECT is_active FROM users WHERE id = $1',
-      [user.id] // user.id is already a number from the DB
-    );
-
-    if (activeResult.rows.length === 0 || !activeResult.rows[0].is_active) {
-      throw new AppError('User account is inactive', 403);
-    }
-
-    // Add user data to request (keep req.user.id as string)
+    
+    // Add user data to request object
     req.user = {
-      id: userIdFromToken, // Use the string version consistent with other parts
+      id: user.id,
+      email: user.email,
+      firstName: user.first_name,
+      lastName: user.last_name,
       role: user.role,
-      // Ensure null is passed if organization_id is null in DB, otherwise convert to string
-      organizationId: user.organization_id === null ? null : String(user.organization_id),
+      avatarUrl: user.avatar_url,
+      organizationId: user.organization_id,
+      designation: user.designation
     };
-
+    
     next();
   } catch (error) {
-    next(error);
+    // Check if the error is a token expiration error
+    if (error instanceof AppError && error.errorCode === 'TOKEN_EXPIRED') {
+      return next(AppError.unauthorized('Session expired, please log in again', 'SESSION_EXPIRED'));
+    }
+    
+    return next(AppError.unauthorized('Invalid or expired token', 'INVALID_TOKEN'));
   }
-};
+});
 
 /**
- * Role-based authorization middleware
- * Restricts access to specific roles
+ * Authorization middleware
+ * Checks if user has required role
+ * @param roles Allowed roles
  */
 export const authorize = (roles: string[]) => {
   return (req: Request, res: Response, next: NextFunction) => {
     if (!req.user) {
-      return next(new AppError('Authentication required', 401));
+      throw AppError.unauthorized('Authentication required');
     }
 
     if (!roles.includes(req.user.role)) {
-      return next(
-        new AppError('You do not have permission to perform this action', 403)
-      );
+      throw AppError.forbidden('You do not have permission to access this resource');
     }
 
     next();

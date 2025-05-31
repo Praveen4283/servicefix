@@ -42,7 +42,7 @@ import {
   Grow,
   Zoom,
 } from '@mui/material';
-import { DataGrid, GridColDef, GridValueGetterParams } from '@mui/x-data-grid';
+import { DataGrid, GridColDef, GridValueGetterParams, GridRenderCellParams } from '@mui/x-data-grid';
 import Timeline from '@mui/lab/Timeline';
 import TimelineItem from '@mui/lab/TimelineItem';
 import TimelineSeparator from '@mui/lab/TimelineSeparator';
@@ -489,20 +489,18 @@ const DashboardPage: React.FC = () => {
       field: 'user',
       headerName: 'User',
       width: 200,
-      renderCell: (params) => (
+      renderCell: (params: GridRenderCellParams) => (
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
           <UserAvatar 
             user={{
-              id: params.row.user.id,
-              firstName: params.row.user.firstName,
-              lastName: params.row.user.lastName,
-              avatarUrl: params.row.user.avatar
+              id: params.row.user?.id || 'unknown',
+              firstName: params.row.user?.firstName || '',
+              lastName: params.row.user?.lastName || '',
+              avatarUrl: params.row.user?.avatarUrl
             }}
             size="small"
           />
-          <Typography variant="body2">
-            {params.row.user.firstName} {params.row.user.lastName}
-          </Typography>
+          <Typography variant="body2">{params.row.user?.name || 'Unknown User'}</Typography>
         </Box>
       ),
     },
@@ -511,7 +509,7 @@ const DashboardPage: React.FC = () => {
       headerName: 'Activity',
       flex: 1,
       minWidth: 300,
-      renderCell: (params) => (
+      renderCell: (params: GridRenderCellParams) => (
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
           {getActivityIcon(params.row.type)}
           <Typography variant="body2">{params.row.message}</Typography>
@@ -533,7 +531,7 @@ const DashboardPage: React.FC = () => {
       field: 'ticketSubject',
       headerName: 'Ticket',
       width: 250,
-      renderCell: (params) => (
+      renderCell: (params: GridRenderCellParams) => (
         <Typography variant="body2" color="text.secondary" noWrap>
           {params.row.ticketSubject}
         </Typography>
@@ -543,7 +541,7 @@ const DashboardPage: React.FC = () => {
       field: 'timestamp',
       headerName: 'Time',
       width: 150,
-      renderCell: (params) => (
+      renderCell: (params: GridRenderCellParams) => (
         <Typography variant="body2" color="text.secondary">
           {getRelativeTime(params.row.timestamp, userTimeZone)}
         </Typography>
@@ -557,7 +555,7 @@ const DashboardPage: React.FC = () => {
       field: 'id',
       headerName: 'Ticket ID',
       width: 100,
-      renderCell: (params) => (
+      renderCell: (params: GridRenderCellParams) => (
         <Typography variant="body2" sx={{ color: theme.palette.primary.main, '&:hover': { textDecoration: 'underline' } }}>
           {params.row.id}
         </Typography>
@@ -568,7 +566,7 @@ const DashboardPage: React.FC = () => {
       headerName: 'Subject',
       flex: 1,
       minWidth: 200,
-      renderCell: (params) => (
+      renderCell: (params: GridRenderCellParams) => (
         <Typography variant="body2">
           {params.row.subject}
         </Typography>
@@ -578,7 +576,7 @@ const DashboardPage: React.FC = () => {
       field: 'status',
       headerName: 'Status',
       width: 120,
-      renderCell: (params) => {
+      renderCell: (params: GridRenderCellParams) => {
         // Don't render until statuses are loaded
         if (!statuses || statuses.length === 0) {
           return <Skeleton variant="text" width={80} height={24} animation="wave" />;
@@ -603,7 +601,7 @@ const DashboardPage: React.FC = () => {
       field: 'priority',
       headerName: 'Priority',
       width: 120,
-      renderCell: (params) => {
+      renderCell: (params: GridRenderCellParams) => {
         // Don't render until priorities are loaded
         if (!priorities || priorities.length === 0) {
           return <Skeleton variant="text" width={80} height={24} animation="wave" />;
@@ -628,7 +626,7 @@ const DashboardPage: React.FC = () => {
       field: 'createdAt',
       headerName: 'Created',
       width: 180,
-      renderCell: (params) => (
+      renderCell: (params: GridRenderCellParams) => (
         <Box>
           <Typography variant="body2">
             {formatDate(params.row.createdAt, userTimeZone)}
@@ -638,18 +636,18 @@ const DashboardPage: React.FC = () => {
           </Typography>
         </Box>
       ),
-      valueGetter: (params) => params.row.createdAt || '',
+      valueGetter: (params: GridRenderCellParams) => params.row.createdAt || '',
     },
     {
       field: 'actions',
       headerName: 'Actions',
       width: 80,
       align: 'center',
-      renderCell: (params) => (
+      renderCell: (params: GridRenderCellParams) => (
         <Tooltip title="View Ticket">
           <IconButton
             size="small"
-            onClick={(e) => {
+            onClick={(e: React.MouseEvent) => {
               e.stopPropagation();
               navigate(`/tickets/${params.row.id}`);
             }}
@@ -691,15 +689,15 @@ const DashboardPage: React.FC = () => {
       const total = tickets.length;
       
       // Open stats: count tickets with status new, open, in progress, or pending
-      const open = tickets.filter(ticket => 
+      const open = tickets.filter((ticket: Ticket) => 
         typeof ticket.status === 'object' && 
         ticket.status !== null && 
         'name' in ticket.status && 
-        ['new', 'open', 'in progress', 'pending'].includes(ticket.status.name.toLowerCase())
+        !(['resolved', 'closed'].includes(ticket.status.name?.toLowerCase() || ''))
       ).length;
       
       // Pending stats: count tickets with status in progress or pending
-      const pending = tickets.filter(ticket => 
+      const pending = tickets.filter((ticket: Ticket) => 
         typeof ticket.status === 'object' && 
         ticket.status !== null && 
         'name' in ticket.status && 
@@ -707,7 +705,7 @@ const DashboardPage: React.FC = () => {
       ).length;
       
       // Resolved stats: count tickets with status resolved or closed
-      const resolved = tickets.filter(ticket => 
+      const resolved = tickets.filter((ticket: Ticket) => 
         typeof ticket.status === 'object' && 
         ticket.status !== null && 
         'name' in ticket.status && 
@@ -933,15 +931,15 @@ const DashboardPage: React.FC = () => {
         const total = normalizedTickets.length;
         
         // Open stats: count tickets with status new, open, in progress, or pending
-        const open = normalizedTickets.filter(ticket => 
+        const open = normalizedTickets.filter((ticket: Ticket) => 
           typeof ticket.status === 'object' && 
           ticket.status !== null && 
           'name' in ticket.status && 
-          ['new', 'open', 'in progress', 'pending'].includes(ticket.status.name.toLowerCase())
+          !(['resolved', 'closed'].includes(ticket.status.name?.toLowerCase() || ''))
         ).length;
         
         // Pending stats: count tickets with status in progress or pending
-        const pending = normalizedTickets.filter(ticket => 
+        const pending = normalizedTickets.filter((ticket: Ticket) => 
           typeof ticket.status === 'object' && 
           ticket.status !== null && 
           'name' in ticket.status && 
@@ -949,7 +947,7 @@ const DashboardPage: React.FC = () => {
         ).length;
         
         // Resolved stats: count tickets with status resolved or closed
-        const resolved = normalizedTickets.filter(ticket => 
+        const resolved = normalizedTickets.filter((ticket: Ticket) => 
           typeof ticket.status === 'object' && 
           ticket.status !== null && 
           'name' in ticket.status && 
