@@ -360,87 +360,102 @@ const ProfilePage: React.FC = () => {
 
   // Effect to populate form once user data is loaded
   useEffect(() => {
-    if (user) {
-      // Create a unique key based on user data for debugging
-      const userDataKey = JSON.stringify({
-        firstName: user.firstName,
-        lastName: user.lastName,
-        email: user.email,
-        phoneNumber: user.phoneNumber,
-        designation: user.designation,
-        timezone: user.timezone,
-        language: user.language
-      });
-      
-      console.log('[ProfilePage useEffect] User data changed:', userDataKey);
-      console.log('[ProfilePage useEffect] User timezone before resetForm:', user?.timezone);
-      console.log('[ProfilePage useEffect] Phone number before resetForm:', user?.phoneNumber);
-      
-      // Convert old notification format to new format if needed
-      const convertedNotificationSettings = { ...profileFormik.initialValues.notificationSettings };
-      
-      if (user.notificationSettings) {
-        // Handle both old and new notification format
-        Object.entries(user.notificationSettings).forEach(([key, value]) => {
-          if (typeof value === 'boolean') {
-            // Old format - just enabled flag
-            if (convertedNotificationSettings[key]) {
-              convertedNotificationSettings[key].enabled = value;
-            }
-          } else if (typeof value === 'object') {
-            // New format - with channels
-            // Check if value has the correct structure
-            const isNewFormat = value !== null && 
-              typeof value === 'object' && 
-              'enabled' in value && 
-              'channels' in value && 
-              typeof value.enabled === 'boolean' && 
-              typeof value.channels === 'object';
-            
-            if (isNewFormat) {
-              // Already in the correct format
-              const typedValue = value as NotificationSetting;
-              convertedNotificationSettings[key] = typedValue;
-            } else {
-              // Old format with direct channel keys - transform to new structure
-              const legacyValue = value as LegacyNotificationSetting;
-              convertedNotificationSettings[key] = {
-                enabled: true, // Default to enabled
-                channels: {
-                  email: legacyValue.email || false,
-                  inApp: legacyValue.in_app || false, // Note: API might use in_app instead of inApp
-                  push: legacyValue.push || false
-                }
-              };
-            }
-          }
+    const loadProfileData = async () => {
+      if (user) {
+        // Create a unique key based on user data for debugging
+        const userDataKey = JSON.stringify({
+          firstName: user.firstName,
+          lastName: user.lastName,
+          email: user.email,
+          phoneNumber: user.phoneNumber,
+          designation: user.designation,
+          timezone: user.timezone,
+          language: user.language
         });
+        
+        console.log('[ProfilePage useEffect] User data changed:', userDataKey);
+        console.log('[ProfilePage useEffect] User timezone before resetForm:', user?.timezone);
+        console.log('[ProfilePage useEffect] Phone number before resetForm:', user?.phoneNumber);
+        
+        // If user data is incomplete (missing timezone, etc.), refresh it first
+        if (user.id && (!user.timezone || !user.language)) {
+          console.log('[ProfilePage useEffect] User data incomplete, refreshing from API');
+          try {
+            await refreshUserData();
+            return; // The useEffect will run again with the refreshed data
+          } catch (error) {
+            console.error('[ProfilePage useEffect] Error refreshing incomplete user data:', error);
+          }
+        }
+        
+        // Convert old notification format to new format if needed
+        const convertedNotificationSettings = { ...profileFormik.initialValues.notificationSettings };
+        
+        if (user.notificationSettings) {
+          // Handle both old and new notification format
+          Object.entries(user.notificationSettings).forEach(([key, value]) => {
+            if (typeof value === 'boolean') {
+              // Old format - just enabled flag
+              if (convertedNotificationSettings[key]) {
+                convertedNotificationSettings[key].enabled = value;
+              }
+            } else if (typeof value === 'object') {
+              // New format - with channels
+              // Check if value has the correct structure
+              const isNewFormat = value !== null && 
+                typeof value === 'object' && 
+                'enabled' in value && 
+                'channels' in value && 
+                typeof value.enabled === 'boolean' && 
+                typeof value.channels === 'object';
+              
+              if (isNewFormat) {
+                // Already in the correct format
+                const typedValue = value as NotificationSetting;
+                convertedNotificationSettings[key] = typedValue;
+              } else {
+                // Old format with direct channel keys - transform to new structure
+                const legacyValue = value as LegacyNotificationSetting;
+                convertedNotificationSettings[key] = {
+                  enabled: true, // Default to enabled
+                  channels: {
+                    email: legacyValue.email || false,
+                    inApp: legacyValue.in_app || false, // Note: API might use in_app instead of inApp
+                    push: legacyValue.push || false
+                  }
+                };
+              }
+            }
+          });
+        }
+        
+        // Reset the form with the latest user data
+        const newValues = {
+          firstName: user.firstName || '',
+          lastName: user.lastName || '',
+          email: user.email || '',
+          phoneNumber: user.phoneNumber || '',
+          designation: user.designation || '',
+          timezone: user.timezone || 'UTC',
+          language: user.language || 'en',
+          notificationSettings: convertedNotificationSettings
+        };
+        
+        console.log('[ProfilePage useEffect] Resetting form with values:', JSON.stringify(newValues));
+        
+        // Reset the form with new values
+        profileFormik.resetForm({
+          values: newValues
+        });
+        
+        // Reset avatar removal flag when user data changes
+        setRemoveCurrentAvatar(false); 
       }
-      
-      // Reset the form with the latest user data
-      const newValues = {
-        firstName: user.firstName || '',
-        lastName: user.lastName || '',
-        email: user.email || '',
-        phoneNumber: user.phoneNumber || '',
-        designation: user.designation || '',
-        timezone: user.timezone || 'UTC',
-        language: user.language || 'en',
-        notificationSettings: convertedNotificationSettings
-      };
-      
-      console.log('[ProfilePage useEffect] Resetting form with values:', JSON.stringify(newValues));
-      
-      // Reset the form with new values
-      profileFormik.resetForm({
-        values: newValues
-      });
-      
-      // Reset avatar removal flag when user data changes
-      setRemoveCurrentAvatar(false); 
-    }
+    };
+    
+    loadProfileData();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [user, JSON.stringify(user)]); // Run when user object changes OR when user data content changes
+  }, [user?.id, refreshUserData]); // Changed dependency to just user.id and refreshUserData
 
   // Change Password form validation hook
   const { 
@@ -626,6 +641,17 @@ const ProfilePage: React.FC = () => {
     );
   };
 
+  // Add a function to close the profile menu (to be called when component mounts)
+  useEffect(() => {
+    // Dispatch a custom event that the layout component can listen for
+    const closeProfileMenuEvent = new CustomEvent('closeProfileMenu');
+    window.dispatchEvent(closeProfileMenuEvent);
+    
+    return () => {
+      // Clean up any listeners if needed
+    };
+  }, []);
+
   if (!user) {
     return (
       <Box sx={{ width: '100%', display: 'flex', justifyContent: 'center', alignItems: 'center', height: '50vh' }}>
@@ -810,7 +836,7 @@ const ProfilePage: React.FC = () => {
                 </Typography>
               )}
               
-              {user?.lastLogin ? (
+              {user?.lastLoginAt || user?.lastLogin || user?.last_login_at ? (
                 <Box mt={2} textAlign="center">
                   <Typography variant="caption" color="textSecondary">
                     Last Login
@@ -820,8 +846,15 @@ const ProfilePage: React.FC = () => {
                       try {
                         // Determine timezone, fallback to UTC if not set on user
                         const userTimeZone = user?.timezone || 'UTC'; 
-                        // Use formatInTimeZone for correct display
-                        return formatInTimeZone(new Date(user.lastLogin), userTimeZone, 'MMM dd, yyyy p');
+                        const loginDateString = user.lastLoginAt || user.lastLogin || user.last_login_at;
+                        // Only create Date if we have a valid login date
+                        if (loginDateString) {
+                          const loginDate = new Date(loginDateString);
+                          // Use formatInTimeZone for correct display
+                          return formatInTimeZone(loginDate, userTimeZone, 'MMM dd, yyyy p');
+                        } else {
+                          return "No login date available";
+                        }
                       } catch (error) {
                         console.error('Error formatting last login date:', error);
                         return 'Invalid Date'; // Show error if formatting fails

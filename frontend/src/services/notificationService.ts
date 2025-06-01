@@ -124,7 +124,23 @@ const notificationService = {
     metadata?: NotificationMetadata
   ): Promise<boolean> => {
     try {
-      // Call the backend API to create a notification
+      // Call the backend API to create a notification with retry capability
+      const result = await withRetry(
+        async () => {
+          try {
+            // Always try to fetch a fresh CSRF token first to ensure we have a valid one
+            console.log('[NotificationService] Fetching fresh CSRF token before creating notification');
+            try {
+              await apiClient.get('/auth/csrf-token');
+            } catch (tokenError) {
+              console.error('[NotificationService] Failed to fetch CSRF token:', tokenError);
+              // Continue anyway, the request might still work with existing token
+            }
+            
+            // Small delay to ensure cookie is set
+            await new Promise(resolve => setTimeout(resolve, 100));
+            
+            // Then create the notification
       await apiClient.post('/notifications', {
         title,
         message,
@@ -133,8 +149,43 @@ const notificationService = {
         metadata
       });
       return true;
+          } catch (error: any) {
+            // Check for CSRF error
+            if (error?.status === 403 && error?.code === 'CSRF_ERROR') {
+              console.log('[NotificationService] CSRF error, will retry with new token');
+              // Clear token so it will be refreshed on retry
+              localStorage.removeItem('csrfToken');
+              localStorage.removeItem('csrfTokenExpiry');
+              
+              // Wait a bit longer before retry to ensure cookies are properly set
+              await new Promise(resolve => setTimeout(resolve, 300));
+              
+              throw error; // Rethrow to trigger retry
+            }
+            
+            // For other errors, log and continue
+            console.error('[NotificationService] Error creating notification:', error);
+            
+            // Store failed notification for retry later
+            storeFailedNotification({
+              title,
+              message,
+              type,
+              link,
+              metadata,
+              timestamp: Date.now()
+            });
+            
+            throw error; // Rethrow to trigger retry
+          }
+        },
+        3, // 3 retries
+        500 // 500ms initial delay
+      );
+      
+      return result === true;
     } catch (error) {
-      console.error('Failed to create backend notification:', error);
+      console.error('Failed to create backend notification after retries:', error);
       return false;
     }
   },
@@ -537,11 +588,75 @@ const notificationService = {
   
   /**
    * Retry sending failed notifications
-   * @returns Promise that resolves when operation completes
+   * @returns Promise that resolves when retry attempt is complete
    */
   retryFailedNotifications: async (): Promise<void> => {
-    console.warn('Skipping retryFailedNotifications as batching is removed.');
-    return Promise.resolve();
+    try {
+      const failedNotifications = getFailedNotificationsFromStorage();
+      if (failedNotifications.length === 0) return;
+      
+      console.log(`[NotificationService] Attempting to resend ${failedNotifications.length} failed notifications`);
+      
+      // Try to get a fresh CSRF token first with multiple attempts
+      let csrfSuccess = false;
+      for (let i = 0; i < 3 && !csrfSuccess; i++) {
+        try {
+          await apiClient.get('/auth/csrf-token');
+          csrfSuccess = true;
+          console.log('[NotificationService] Successfully refreshed CSRF token for retries');
+          // Wait for cookie to be set
+          await new Promise(resolve => setTimeout(resolve, 300));
+        } catch (error) {
+          console.error('[NotificationService] Failed to refresh CSRF token for retries:', error);
+          // Wait before trying again
+          await new Promise(resolve => setTimeout(resolve, 500));
+        }
+      }
+      
+      if (!csrfSuccess) {
+        console.error('[NotificationService] Could not refresh CSRF token after multiple attempts, aborting retries');
+        return;
+      }
+      
+      const successfulRetries: number[] = [];
+      
+      // Try to send each failed notification with a small delay between them
+      for (let i = 0; i < failedNotifications.length; i++) {
+        try {
+          // Add a small delay between requests to avoid overwhelming the server
+          if (i > 0) {
+            await new Promise(resolve => setTimeout(resolve, 200));
+          }
+          
+          const notification = failedNotifications[i];
+          const success = await notificationService.createBackendNotification(
+            notification.title || 'Notification',
+            notification.message,
+            notification.type,
+            notification.link,
+            notification.metadata
+          );
+          
+          if (success) {
+            successfulRetries.push(i);
+            console.log(`[NotificationService] Successfully resent notification ${i+1}/${failedNotifications.length}`);
+          }
+        } catch (error) {
+          console.error(`[NotificationService] Failed to retry notification ${i+1}/${failedNotifications.length}:`, error);
+        }
+      }
+      
+      // Remove successful retries from storage
+      if (successfulRetries.length > 0) {
+        const remainingNotifications = failedNotifications.filter((_, index) => 
+          !successfulRetries.includes(index)
+        );
+        saveFailedNotificationsToStorage(remainingNotifications);
+        console.log(`[NotificationService] Successfully resent ${successfulRetries.length}/${failedNotifications.length} notifications`);
+      }
+    } catch (error) {
+      console.error('[NotificationService] Error during retry of failed notifications:', error);
+    }
   },
   
   /**
@@ -702,5 +817,64 @@ let cleanupInterval: NodeJS.Timeout | null = null;
 setTimeout(() => {
   notificationService.startStorageCleanup();
 }, 10000); // Delay by 10 seconds after module loads
+
+// Helper functions for failed notifications storage
+function storeFailedNotification(notification: {
+  title?: string;
+  message: string;
+  type: string;
+  link?: string;
+  metadata?: any;
+  timestamp: number;
+}): void {
+  try {
+    const failedNotifications = getFailedNotificationsFromStorage();
+    failedNotifications.push(notification);
+    
+    // Keep only the latest 50 failed notifications
+    if (failedNotifications.length > 50) {
+      failedNotifications.splice(0, failedNotifications.length - 50);
+    }
+    
+    saveFailedNotificationsToStorage(failedNotifications);
+  } catch (error) {
+    console.error('Error storing failed notification:', error);
+  }
+}
+
+function getFailedNotificationsFromStorage(): Array<{
+  title?: string;
+  message: string;
+  type: string;
+  link?: string;
+  metadata?: any;
+  timestamp: number;
+}> {
+  try {
+    const storedData = localStorage.getItem(FAILED_NOTIFICATIONS_KEY);
+    if (!storedData) return [];
+    
+    const parsed = JSON.parse(storedData);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch (error) {
+    console.error('Error reading failed notifications from storage:', error);
+    return [];
+  }
+}
+
+function saveFailedNotificationsToStorage(notifications: Array<{
+  title?: string;
+  message: string;
+  type: string;
+  link?: string;
+  metadata?: any;
+  timestamp: number;
+}>): void {
+  try {
+    localStorage.setItem(FAILED_NOTIFICATIONS_KEY, JSON.stringify(notifications));
+  } catch (error) {
+    console.error('Error saving failed notifications to storage:', error);
+  }
+}
 
 export default notificationService; 

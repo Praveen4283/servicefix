@@ -82,7 +82,10 @@ export function mapUserDTOToUser(dto: UserDTO): User {
     } : undefined,
     timezone: dto.timezone,
     language: dto.language,
-    lastLogin: dto.last_login_at || new Date().toISOString(),
+    // Keep all versions of login date for backwards compatibility
+    lastLogin: dto.last_login_at,
+    lastLoginAt: dto.last_login_at,
+    last_login_at: dto.last_login_at,
     notificationSettings: dto.notification_settings,
     createdAt: dto.created_at,
     updatedAt: dto.updated_at

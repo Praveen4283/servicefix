@@ -215,6 +215,34 @@ export const register = asyncHandler(async (
   // Convert snake_case database result to camelCase for the response
   const user = snakeToCamel<UserResponseData>(dbUser);
 
+  // Set access token as HttpOnly cookie with proper settings
+  const isProduction = process.env.NODE_ENV === 'production';
+  const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
+  
+  // Determine cookie domain based on environment
+  const cookieDomain = isProduction 
+    ? frontendUrl.includes('localhost') ? undefined : '.' + new URL(frontendUrl).hostname.split('.').slice(-2).join('.')
+    : undefined;
+  
+  res.cookie('accessToken', token, {
+    httpOnly: true,
+    secure: isProduction || frontendUrl.startsWith('https'),
+    sameSite: isProduction ? 'none' : 'lax',
+    path: '/',
+    domain: cookieDomain,
+    maxAge: 60 * 60 * 1000 // 1 hour in milliseconds
+  });
+  
+  // Set refresh token as HttpOnly cookie with the same settings
+  res.cookie('refreshToken', refreshToken, {
+    httpOnly: true,
+    secure: isProduction || frontendUrl.startsWith('https'),
+    sameSite: isProduction ? 'none' : 'lax',
+    path: '/',
+    domain: cookieDomain,
+    maxAge: 7 * 24 * 60 * 60 * 1000 // 7 days in milliseconds
+  });
+
   // Return user data and tokens
   res.status(201).json({
     token,
@@ -305,21 +333,31 @@ export const login = asyncHandler(async (
       designation: user.designation
     };
     
-    // Set access token as HttpOnly cookie
+    // Set access token as HttpOnly cookie with proper settings
+    const isProduction = process.env.NODE_ENV === 'production';
+    const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
+    
+    // Determine cookie domain based on environment
+    const cookieDomain = isProduction 
+      ? frontendUrl.includes('localhost') ? undefined : '.' + new URL(frontendUrl).hostname.split('.').slice(-2).join('.')
+      : undefined;
+    
     res.cookie('accessToken', token, {
       httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax',
+      secure: isProduction || frontendUrl.startsWith('https'),
+      sameSite: isProduction ? 'none' : 'lax',
       path: '/',
+      domain: cookieDomain,
       maxAge: 60 * 60 * 1000 // 1 hour in milliseconds
     });
     
-    // Set refresh token as HttpOnly cookie
+    // Set refresh token as HttpOnly cookie with the same settings
     res.cookie('refreshToken', refreshToken, {
       httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax',
+      secure: isProduction || frontendUrl.startsWith('https'),
+      sameSite: isProduction ? 'none' : 'lax',
       path: '/',
+      domain: cookieDomain,
       maxAge: 7 * 24 * 60 * 60 * 1000 // 7 days in milliseconds
     });
 
@@ -355,11 +393,20 @@ export const refreshToken = asyncHandler(async (
     const result = await authService.refreshAccessToken(refreshToken);
 
     // Set new access token as HttpOnly cookie
+    const isProduction = process.env.NODE_ENV === 'production';
+    const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
+    
+    // Determine cookie domain based on environment
+    const cookieDomain = isProduction 
+      ? frontendUrl.includes('localhost') ? undefined : '.' + new URL(frontendUrl).hostname.split('.').slice(-2).join('.')
+      : undefined;
+    
     res.cookie('accessToken', result.token, {
       httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax',
+      secure: isProduction || frontendUrl.startsWith('https'),
+      sameSite: isProduction ? 'none' : 'lax',
       path: '/',
+      domain: cookieDomain,
       maxAge: 60 * 60 * 1000 // 1 hour in milliseconds
     });
 
@@ -385,17 +432,28 @@ export const logout = asyncHandler(async (
 ) => {
   try {
     // Clear cookies with the same settings as when they were set
+    const isProduction = process.env.NODE_ENV === 'production';
+    const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
+    
+    // Determine cookie domain based on environment
+    const cookieDomain = isProduction 
+      ? frontendUrl.includes('localhost') ? undefined : '.' + new URL(frontendUrl).hostname.split('.').slice(-2).join('.')
+      : undefined;
+    
     res.clearCookie('accessToken', {
       httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax',
-      path: '/'
+      secure: isProduction || frontendUrl.startsWith('https'),
+      sameSite: isProduction ? 'none' : 'lax',
+      path: '/',
+      domain: cookieDomain
     });
+    
     res.clearCookie('refreshToken', {
       httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax',
-      path: '/'
+      secure: isProduction || frontendUrl.startsWith('https'),
+      sameSite: isProduction ? 'none' : 'lax',
+      path: '/',
+      domain: cookieDomain
     });
     
     // Get refresh token from cookie
@@ -617,12 +675,30 @@ export const getCsrfToken = asyncHandler(async (
     // Generate a token manually since req.csrfToken() is causing errors
     const csrfToken = crypto.randomBytes(32).toString('hex');
     
-    // Set the token in a cookie
+    // Set the token in a cookie with appropriate settings
+    const isProduction = process.env.NODE_ENV === 'production';
+    const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
+    
+    // Set cookie domain based on environment
+    let cookieDomain;
+    try {
+      if (isProduction && !frontendUrl.includes('localhost')) {
+        cookieDomain = new URL(frontendUrl).hostname.split('.').slice(-2).join('.');
+      }
+    } catch (e) {
+      logger.warn(`Failed to parse frontend URL for cookie domain: ${e}`);
+    }
+    
     res.cookie('_csrf', csrfToken, {
       httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'strict'
+      secure: isProduction || frontendUrl.startsWith('https'),
+      sameSite: isProduction ? 'none' : 'lax', // Use 'none' for cross-site requests in production
+      path: '/',
+      domain: cookieDomain,
+      maxAge: 24 * 60 * 60 * 1000 // 24 hours
     });
+    
+    logger.info(`CSRF token generated for client: ${req.ip}`);
     
     // Send the token to the client
     res.status(200).json({

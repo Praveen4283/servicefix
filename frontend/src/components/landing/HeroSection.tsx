@@ -66,6 +66,7 @@ import {
 import { Link, useNavigate } from 'react-router-dom';
 import '../../styles/logo-animation.css';
 import useIntersectionObserver from '../../hooks/useIntersectionObserver';
+import OptimizedImage from '../common/OptimizedImage';
 
 // Hero Section Component
 const HeroSection: React.FC = () => {
@@ -168,8 +169,7 @@ const HeroSection: React.FC = () => {
           }
         }}
       >
-        <Box
-          component="img"
+        <OptimizedImage
           src="/images/hero.png"
           alt="ServiceFix Platform Background"
           sx={{
@@ -634,8 +634,7 @@ const HeroSection: React.FC = () => {
                 </Box>
 
                 {/* Enhanced 3D hero image with advanced animations */}
-                <Box
-                  component="img"
+                <OptimizedImage
                   src="/images/hero.png"
                   alt="ServiceFix Platform"
                   sx={{
@@ -655,23 +654,6 @@ const HeroSection: React.FC = () => {
                       ? 'rgba(255,255,255,0.1)'
                       : 'rgba(63,81,181,0.1)',
                     filter: 'drop-shadow(0 10px 20px rgba(0,0,0,0.15))',
-                    '@keyframes float3D': {
-                      '0%': { transform: 'perspective(1000px) rotateY(-5deg) rotateX(5deg) translateY(0px) translateZ(0)' },
-                      '50%': { transform: 'perspective(1000px) rotateY(-8deg) rotateX(8deg) translateY(-15px) translateZ(30px)' },
-                      '100%': { transform: 'perspective(1000px) rotateY(-5deg) rotateX(5deg) translateY(0px) translateZ(0)' }
-                    },
-                    '&::after': {
-                      content: '""',
-                      position: 'absolute',
-                      top: 0,
-                      left: 0,
-                      width: '100%',
-                      height: '100%',
-                      background: 'linear-gradient(45deg, rgba(63,81,181,0.1), rgba(255,107,107,0.1))',
-                      borderRadius: '24px',
-                      opacity: 0.5,
-                      pointerEvents: 'none',
-                    }
                   }}
                 />
                 

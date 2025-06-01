@@ -98,7 +98,23 @@ const LoginPage: React.FC = () => {
         if (loginSuccess) {
           // Clear the registration notification flag
           sessionStorage.removeItem('registrationNotificationShown');
-          navigate(redirectTo);
+          
+          // Add console logging for debugging
+          console.log('[LoginPage] Login successful, redirecting to:', redirectTo);
+          
+          // Immediate navigation after successful login
+          navigate(redirectTo, { 
+            replace: true, 
+            state: { isRedirecting: true }
+          });
+          
+          // Safety check to ensure navigation happened - use a shorter timeout
+          setTimeout(() => {
+            if (window.location.pathname.includes('login')) {
+              console.log('[LoginPage] Still on login page, forcing navigation');
+              window.location.href = redirectTo;
+            }
+          }, 200);
         } else {
           // Login failed, error state is set in context, useEffect will handle notification
         }

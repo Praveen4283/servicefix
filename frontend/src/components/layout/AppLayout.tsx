@@ -1,4 +1,4 @@
-import React, { useState, ReactNode } from 'react';
+import React, { useState, ReactNode, useEffect } from 'react';
 import '../../../src/styles/logo-animation.css';
 import { 
   Box, 
@@ -70,6 +70,29 @@ const AppLayout: React.FC<AppLayoutProps> = ({ children }) => {
                     location.pathname === '/forgot-password' || 
                     location.pathname.includes('/reset-password');
   
+  // Add event listener for closing profile menu from other components
+  useEffect(() => {
+    const handleCloseProfileMenu = () => {
+      console.log('[AppLayout] Closing profile menu from event');
+      setAnchorEl(null);
+    };
+
+    // Listen for custom event from ProfilePage
+    window.addEventListener('closeProfileMenu', handleCloseProfileMenu);
+    
+    // Clean up event listener on unmount
+    return () => {
+      window.removeEventListener('closeProfileMenu', handleCloseProfileMenu);
+    };
+  }, []);
+  
+  // Also close menu when location changes (URL navigation)
+  useEffect(() => {
+    console.log('[AppLayout] Location changed, closing menus');
+    setAnchorEl(null);
+    setMobileMenuOpen(false);
+  }, [location.pathname]);
+
   // Handle profile menu
   const handleProfileMenuOpen = (event: React.MouseEvent<HTMLElement>) => {
     setAnchorEl(event.currentTarget);

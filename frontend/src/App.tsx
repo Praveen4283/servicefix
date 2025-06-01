@@ -123,54 +123,84 @@ const AppWithRouter = () => {
   
   // Protect routes that require authentication
   const withProtectedLayout = (Component: React.ComponentType<any>, requiredRole?: string) => {
-    // If still loading auth state, show a loading spinner instead of redirecting
-    if (isLoading) {
-      return <LoadingSpinner />;
-    }
+    // Return a proper function component that can use hooks
+    const WithProtectedLayoutComponent = () => {
+      const { isAuthenticated, user, isLoading } = useAuth();
+      const location = useLocation();
+      
+      // If still loading auth state, show a loading spinner instead of redirecting
+      if (isLoading) {
+        return <LoadingSpinner />;
+      }
+      
+      if (!isAuthenticated) {
+        // Only redirect to login if not authenticated AND not loading
+        return <Navigate to="/login" replace state={{ from: location }} />;
+      }
+      
+      // Check role requirement if specified
+      if (requiredRole && user?.role !== requiredRole) {
+        // Redirect to dashboard if role doesn't match
+        return <Navigate to="/dashboard" replace />;
+      }
+      
+      return (
+        <AppLayout>
+          <Component />
+        </AppLayout>
+      );
+    };
     
-    if (!isAuthenticated) {
-      // Only redirect to login if not authenticated AND not loading
-      return <Navigate to="/login" replace state={{ from: location }} />;
-    }
-    
-    // Check role requirement if specified
-    if (requiredRole && user?.role !== requiredRole) {
-      // Redirect to dashboard if role doesn't match
-      return <Navigate to="/dashboard" replace />;
-    }
-    
-    return (
-      <AppLayout>
-        <Component />
-      </AppLayout>
-    );
+    return <WithProtectedLayoutComponent />;
   };
   
   // Create a wrapper for authentication pages
   const withAuthLayout = (Component: React.ComponentType<any>) => {
-    // Also check loading state here to prevent flashing login page
-    if (isLoading) {
-      return <LoadingSpinner />;
-    }
+    // Return a proper function component that can use hooks
+    const WithAuthLayoutComponent = () => {
+      const location = useLocation();
+      const { isAuthenticated, isLoading } = useAuth();
+      
+      // Also check loading state here to prevent flashing login page
+      if (isLoading) {
+        return <LoadingSpinner />;
+      }
+      
+      // Check localStorage for user data as a backup check for successful login
+      const cachedUser = localStorage.getItem('user');
+      const isLocallyAuthenticated = !!cachedUser;
+      
+      // Prevent redirect loops by checking if we're already trying to redirect
+      const isRedirecting = location.state?.isRedirecting;
+      
+      // If we have authentication either from context or localStorage, consider the user authenticated
+      if ((isAuthenticated || isLocallyAuthenticated) && !isRedirecting) {
+        console.log('[App] User is authenticated, redirecting to dashboard from auth page');
+        // Redirect to dashboard if already authenticated, with state to prevent loops
+        return <Navigate to="/dashboard" replace state={{ isRedirecting: true }} />;
+      }
+      
+      return (
+        <AppLayout>
+          <Component />
+        </AppLayout>
+      );
+    };
     
-    if (isAuthenticated) {
-      // Redirect to dashboard if already authenticated
-      return <Navigate to="/dashboard" replace />;
-    }
-    
-    return (
+    return <WithAuthLayoutComponent />;
+  };
+  
+  // Create a wrapper for public pages (no auth check)
+  const withPublicLayout = (Component: React.ComponentType<any>) => {
+    // Return a proper function component
+    const WithPublicLayoutComponent = () => (
       <AppLayout>
         <Component />
       </AppLayout>
     );
+    
+    return <WithPublicLayoutComponent />;
   };
-  
-  // Create a wrapper for public pages (no auth check)
-  const withPublicLayout = (Component: React.ComponentType<any>) => (
-    <AppLayout>
-      <Component />
-    </AppLayout>
-  );
 
   return (
     <ThemeProvider>

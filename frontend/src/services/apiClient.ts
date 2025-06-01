@@ -85,6 +85,8 @@ class ApiClient {
   protected client: AxiosInstance;
   private baseURL: string;
   private csrfToken: string | null = null;
+  private fetchingCsrfToken: Promise<void> | null = null;
+  private isInitialized: boolean = false;
 
   constructor() {
     // Use environment variable for the API URL to make it configurable for different environments
@@ -107,23 +109,35 @@ class ApiClient {
         // Log the request URL for debugging
         console.log(`[API Client] Request URL: ${config.url}`);
         
+        // Skip CSRF token for login, logout, and register
+        if (config.url?.includes('/auth/login') || 
+            config.url?.includes('/auth/logout') || 
+            config.url?.includes('/auth/register')) {
+          console.log(`[API Client] Skipping CSRF token for auth endpoint: ${config.url}`);
+          return config;
+        }
+        
+        // Skip CSRF token for GET requests
+        if (config.method === 'get') {
+          return config;
+        }
+        
         // Only add CSRF token for non-GET methods
         if (config.method && ['post', 'put', 'patch', 'delete'].includes(config.method)) {
-          // If we don't have a CSRF token yet, fetch one
-          if (!this.csrfToken) {
             try {
-              // Skip for authentication endpoints to prevent circular dependencies
-              if (!config.url?.includes('/auth/') || config.url === '/auth/validate') {
+            // Always fetch a fresh CSRF token for POST/PUT/PATCH/DELETE requests 
+            // after successful login to ensure we have a valid token
                 await this.fetchCsrfToken();
-              }
-            } catch (error) {
-              console.error('[API Client] Failed to fetch CSRF token:', error);
-            }
-          }
 
           // Add CSRF token to header if available
           if (this.csrfToken && config.headers) {
+              console.log(`[API Client] Adding CSRF token to ${config.url}`);
             config.headers['x-csrf-token'] = this.csrfToken;
+            } else {
+              console.warn(`[API Client] No CSRF token available for ${config.url}`);
+            }
+          } catch (error) {
+            console.error('[API Client] Failed to fetch CSRF token:', error);
           }
         }
         
@@ -142,6 +156,37 @@ class ApiClient {
         // Handle 401 Unauthorized errors
         const originalRequest = error.config;
         
+        // Handle CSRF token errors
+        if (error.response?.status === 403 && 
+            error.response?.data?.code === 'CSRF_ERROR') {
+          console.log('[API Client] CSRF token error, fetching new token and retrying');
+          
+          if (!originalRequest._retry) {
+            originalRequest._retry = true;
+            
+            // Force refresh the CSRF token
+            this.csrfToken = null;
+            localStorage.removeItem('csrfToken');
+            localStorage.removeItem('csrfTokenExpiry');
+            
+            try {
+              await this.fetchCsrfToken();
+              if (this.csrfToken && originalRequest.headers) {
+                originalRequest.headers['x-csrf-token'] = this.csrfToken;
+                return this.client(originalRequest);
+              }
+            } catch (csrfError) {
+              console.error('[API Client] Failed to refresh CSRF token:', csrfError);
+            }
+          }
+        }
+        
+        // Skip token refresh for public routes to prevent unnecessary auth calls
+        if (this.isPublicRoute() && error.response?.status === 401) {
+          console.log('[API Client] 401 on public route, skipping token refresh');
+          return Promise.reject(error);
+        }
+        
         // Don't retry auth endpoints to prevent infinite loops
         if (error.response?.status === 401 && 
             !originalRequest._retry && 
@@ -157,10 +202,20 @@ class ApiClient {
             const refreshResponse = await this.post('/auth/refresh-token', {});
             
             // If refresh successful, retry the original request
-            if (refreshResponse && refreshResponse.success) {
+            if (refreshResponse && (refreshResponse.success || refreshResponse.status === 'success')) {
               console.log('[API Client] Token refreshed, retrying original request');
               
+              // Force refresh the CSRF token after token refresh
+              this.csrfToken = null;
+              await this.fetchCsrfToken();
+              
+              // Dispatch event to update any UI components about the refreshed session
+              window.dispatchEvent(new CustomEvent('auth:session-refreshed'));
+              
               // Token is now stored in HttpOnly cookie, just retry the request
+              if (this.csrfToken && originalRequest.headers) {
+                originalRequest.headers['x-csrf-token'] = this.csrfToken;
+              }
               return this.client(originalRequest);
             } else {
               // Token refresh failed
@@ -177,12 +232,62 @@ class ApiClient {
         return Promise.reject(error);
       }
     );
+    
+    // Initialize the client (fetch CSRF token)
+    this.initialize();
+  }
+  
+  /**
+   * Initialize the API client by prefetching the CSRF token
+   * This should be called when the app starts to ensure we have a valid token
+   */
+  async initialize(): Promise<void> {
+    if (this.isInitialized) {
+      return;
+    }
+    
+    try {
+      console.log('[API Client] Initializing API client...');
+      
+      // Skip initialization for public routes
+      if (this.isPublicRoute()) {
+        console.log('[API Client] On public route, skipping initial CSRF token fetch');
+        this.isInitialized = true;
+        return;
+      }
+      
+      // Fetch CSRF token
+      await this.fetchCsrfToken();
+      
+      // Try to validate the authentication session
+      try {
+        await this.get('/auth/validate');
+        console.log('[API Client] Authentication session validated during initialization');
+      } catch (validationError) {
+        console.log('[API Client] No active authentication session during initialization');
+        // This is normal on initial load, not an error condition
+      }
+      
+      this.isInitialized = true;
+      console.log('[API Client] API client initialized successfully');
+    } catch (error) {
+      console.error('[API Client] Error initializing API client:', error);
+      // We still consider the client initialized even if there was an error
+      this.isInitialized = true;
+    }
   }
 
   /**
    * Fetch a new CSRF token
    */
   private async fetchCsrfToken(): Promise<void> {
+    // If we're already fetching a token, wait for that promise to resolve
+    if (this.fetchingCsrfToken) {
+      return this.fetchingCsrfToken;
+    }
+    
+    // Create a new promise for fetching the token
+    this.fetchingCsrfToken = (async () => {
     try {
       console.log('[API Client] Fetching CSRF token...');
       
@@ -206,15 +311,19 @@ class ApiClient {
       if (response.data && response.data.csrfToken) {
         this.csrfToken = response.data.csrfToken;
         
-        // Cache the token for 10 minutes
+          // Cache the token for a shorter time to ensure freshness
         if (this.csrfToken) {
           localStorage.setItem('csrfToken', this.csrfToken);
-          localStorage.setItem('csrfTokenExpiry', (Date.now() + 10 * 60 * 1000).toString());
+            localStorage.setItem('csrfTokenExpiry', (Date.now() + 5 * 60 * 1000).toString()); // 5 minutes
           
         console.log('[API Client] CSRF token fetched successfully');
         }
       } else {
         console.error('[API Client] CSRF token response missing token:', response.data);
+          // Clear any existing token to avoid using stale tokens
+          this.csrfToken = null;
+          localStorage.removeItem('csrfToken');
+          localStorage.removeItem('csrfTokenExpiry');
       }
     } catch (error) {
       console.error('[API Client] Error fetching CSRF token:', error);
@@ -224,8 +333,21 @@ class ApiClient {
       if (cachedToken) {
         console.log('[API Client] Using expired cached CSRF token as fallback');
         this.csrfToken = cachedToken;
+        } else {
+          // If no cached token available, clear token state
+          this.csrfToken = null;
+          localStorage.removeItem('csrfToken');
+          localStorage.removeItem('csrfTokenExpiry');
       }
+        
+        throw error;
+      } finally {
+        // Clear the fetching promise when done
+        this.fetchingCsrfToken = null;
     }
+    })();
+    
+    return this.fetchingCsrfToken;
   }
 
   // Handle successful responses
@@ -290,6 +412,12 @@ class ApiClient {
   // Handle authentication errors by attempting to refresh token or logging out
   private handleAuthError = (): void => {
     try {
+      // Skip auth error handling for public routes
+      if (this.isPublicRoute()) {
+        console.log('[API Client] On public route, skipping auth error handling');
+        return;
+      }
+      
       // No need to retrieve refresh token from localStorage as it's now in HttpOnly cookies
       console.log('[API Client] Handling auth error');
       
@@ -350,52 +478,53 @@ class ApiClient {
     params?: Record<string, any>,
     config?: AxiosRequestConfig
   ): Promise<T> {
-    console.log(`[API Client] GET Request: ${url}`, { params, config }); // Log request details
+    console.log(`[API Client] _get: Requesting ${url}`, { params, config });
     return this.client
-      .get<ApiResponse<T> | T>(url, { ...config, params })
-      .then((response) => {
-        console.log(`[API Client] GET Response Raw Data for ${url}:`, response); // Log raw response data
-        
-        // The data property contains the actual response from the server
-        const responseData = response.data;
-        
-        // Check if response is in expected format
-        if (responseData && typeof responseData === 'object') {
-          // If it matches our ApiResponse format with status and data
-          if ('status' in responseData && responseData.status === 'success' && 'data' in responseData) {
-            console.log(`[API Client] GET Success Data for ${url}:`, responseData.data);
-            return responseData.data as T;
+      .get<T>(url, { ...config, params }) // Axios .get will resolve with T due to interceptor
+      .then((responseData) => { // responseData here IS the actual server payload of type T
+        console.log(`[API Client] _get: Received data payload for ${url}:`, responseData);
+
+        // Now, all logic should operate on responseData directly.
+        // The previous complex conditional logic was trying to re-parse what was already the direct data.
+
+        // Specific handling for /users list
+        if (url.includes('/users') && !url.includes('/stats')) {
+          if (responseData && typeof responseData === 'object' && 'users' in responseData && Array.isArray((responseData as any).users)) {
+            console.log(`[API Client] _get: Matched /users structure for ${url}. Returning data as is.`);
+            return responseData as T; // responseData is already UsersResponse
           }
-          // If it matches our authentication response format with user
-          else if ('status' in responseData && responseData.status === 'success' && 'user' in responseData) {
-            console.log(`[API Client] GET Success Auth Response for ${url}:`, responseData);
-            return responseData as unknown as T;
-          }
-          // Success response with standardized structure
-          else if ('success' in responseData && 'data' in responseData) {
-            console.log(`[API Client] GET Success Data from success structure for ${url}:`, responseData.data);
-            return responseData.data as T;
-          }
-          // Check if this is a notification preferences endpoint
-          else if (url.includes('/notifications/preferences')) {
-            // Special handling for notification preferences which may come in various formats
-            console.log(`[API Client] Processing notification preferences data for ${url}`);
-            return responseData as T;
-          }
-          // Fall back to assume direct data structure when not following ApiResponse
-          else {
-            console.log(`[API Client] GET Unexpected Response Format for ${url}. Returning raw data.`);
-            return responseData as T;
-          }
-        } else {
-          // For simple responses (strings, numbers, etc.)
-          return responseData as T;
+          console.warn(`[API Client] _get: /users at ${url} did NOT match expected structure. Data:`, responseData);
+          // Fallthrough to generic or error if structure is wrong for /users
         }
+        // Specific handling for /users/stats
+        else if (url.includes('/users/stats')) {
+          console.log(`[API Client] _get: Processing /users/stats for ${url}. Data:`, responseData);
+          if (responseData && typeof responseData === 'object') {
+            // If stats are wrapped in a 'data' property by the backend for this specific endpoint
+            if ('data' in responseData && typeof (responseData as any).data === 'object' && Object.keys((responseData as any).data).length > 0) {
+              console.log(`[API Client] _get: /users/stats has 'data' property. Returning .data`);
+              return (responseData as any).data as T;
+            }
+            // Otherwise, assume responseData is the stats object directly
+            console.log(`[API Client] _get: /users/stats does not have 'data' property or it's empty. Returning responseData as is.`);
+            return responseData as T;
+          }
+        }
+
+        // Generic handling for other endpoints that might have a {status: 'success', data: X} structure
+        if (responseData && typeof responseData === 'object' && 'status' in responseData && (responseData as any).status === 'success' && 'data' in responseData) {
+          console.log(`[API Client] _get: Standard success/data structure for ${url}. Returning .data`);
+          return (responseData as any).data as T;
+        }
+        
+        // If no specific handling matched and it's not the standard {status:'success', data: ...} structure,
+        // assume responseData is the direct data of type T. This is the most common case due to the interceptor.
+        console.log(`[API Client] _get: No specific/standard structure matched for ${url}. Returning responseData as is.`);
+        return responseData as T;
       })
       .catch(error => {
-        // Log the processed error from the interceptor or a new error
-        console.error(`[API Client] GET Request Failed for ${url}:`, error);
-        // Re-throw the error so downstream handlers catch it
+        console.error(`[API Client] _get: Request Failed for ${url}:`, error);
+        // Ensure the promise is rejected with the error to be caught by withRetry or the caller
         throw error; 
       });
   }
@@ -778,6 +907,23 @@ class ApiClient {
       .catch(error => {
         return { id: 'unknown', name: 'Unknown Organization' };
       });
+  }
+
+  /**
+   * Checks if the current URL path is a public route that doesn't need authentication
+   * This helps prevent unnecessary auth API calls on public pages
+   */
+  private isPublicRoute(): boolean {
+    const publicRoutes = ['/', '/login', '/register', '/forgot-password', '/reset-password', '/cookies'];
+    
+    // Get current path from browser
+    const currentPath = window.location.pathname;
+    
+    // Check if we're on a public route
+    return publicRoutes.some(route => 
+      currentPath === route || 
+      (route !== '/' && currentPath.startsWith(route))
+    );
   }
 }
 

@@ -22,6 +22,8 @@ export interface User {
   timezone?: string;
   language?: string;
   lastLogin?: string;
+  lastLoginAt?: string;
+  last_login_at?: string;
   createdAt?: string;
   updatedAt?: string;
   notificationSettings?: Record<string, { email: boolean; push: boolean; in_app: boolean } | boolean>;
@@ -50,6 +52,28 @@ interface AuthState {
   error: string | null;
   registrationSuccess: boolean;
 }
+
+// Format user response to ensure consistent structure across different API responses
+const formatUserResponse = (userData: any): User => {
+  return {
+    id: userData.id?.toString() || '',
+    email: userData.email || '',
+    firstName: userData.firstName || userData.first_name || '',
+    lastName: userData.lastName || userData.last_name || '',
+    role: userData.role || 'customer',
+    avatarUrl: userData.avatarUrl || userData.avatar_url || undefined,
+    phoneNumber: userData.phoneNumber || userData.phone || undefined,
+    designation: userData.designation || undefined,
+    organizationId: userData.organizationId?.toString() || userData.organization_id?.toString() || undefined,
+    organization: userData.organization || undefined,
+    timezone: userData.timezone || 'UTC',
+    language: userData.language || 'en',
+    lastLoginAt: userData.lastLoginAt || userData.last_login_at || undefined,
+    createdAt: userData.createdAt || userData.created_at || undefined,
+    updatedAt: userData.updatedAt || userData.updated_at || undefined,
+    notificationSettings: userData.notificationSettings || undefined
+  };
+};
 
 // Auth context interface
 export type AuthContextType = {
@@ -178,73 +202,109 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   // Initialize the auth state
   useEffect(() => {
     const initializeAuth = async () => {
-      setState(prevState => ({ ...prevState, isLoading: true }));
-      
-      try {
-        // Only try to validate if on a protected route
-        // This prevents validation loops on public pages
-        const isPublicRoute = ['/login', '/register', '/forgot-password', '/reset-password'].some(
-          route => location.pathname.startsWith(route)
-        );
-        
-        if (!isPublicRoute) {
-          try {
-            // Use consistent auth path without duplicate /api prefix
-            const response = await apiClient.get('/auth/validate');
-            console.log('[AuthContext] Validate response:', response);
-            
-            // Extract user data from the response, handling different response structures
-            let userData;
-            
-            if (response?.user) {
-              // Direct user property in response
-              userData = response.user;
-            } else if (response?.data?.user) {
-              // Nested user property
-              userData = response.data.user;
-            } else if (response?.status === 'success' && response?.user) {
-              // Standard API response format
-              userData = response.user;
-            }
-            
-            if (userData) {
-              setState({
-                isAuthenticated: true,
-                user: userData,
-                isLoading: false,
-                error: null,
-                registrationSuccess: false
-              });
-              return;
-            }
-          } catch (error) {
-            console.log('[AuthContext] Validation failed:', error);
-            // If validation fails on a protected route, redirect to login
-            if (!isPublicRoute) {
-              navigate('/login');
-            }
-          }
+      // If we already have a cached user, update state immediately to avoid flicker
+      const cachedUserJson = localStorage.getItem('user');
+      if (cachedUserJson) {
+        try {
+          const cachedUser = JSON.parse(cachedUserJson);
+          console.log('[AuthContext] Found cached user data:', cachedUser.id);
+          
+          // Update state with cached user data immediately
+          setState(prevState => ({
+            ...prevState,
+            isAuthenticated: true,
+            user: cachedUser,
+            isLoading: false // Set to false to avoid loading spinner
+          }));
+        } catch (e) {
+          console.error('[AuthContext] Error parsing cached user data:', e);
+          localStorage.removeItem('user'); // Remove invalid JSON
         }
-        
-        // If we're here, user is not authenticated
-        setState({
-          ...initialState,
-          isLoading: false
-        });
-      } catch (error: any) {
-        console.error('[AuthContext] Error during auth initialization:', error);
-        setState({
-          ...initialState,
-          isLoading: false,
-          error: error.message || 'Authentication error'
-        });
+      }
+      
+      // Check if we're on a public route
+      const isPublicRoute = ['/', '/login', '/register', '/forgot-password', '/reset-password', '/cookies'].some(
+        route => location.pathname === route || location.pathname.startsWith(route)
+      );
+
+      // Check for fresh login - if we have a recent login timestamp, consider it a fresh login
+      const lastLoginTimestamp = localStorage.getItem('lastLoginTimestamp');
+      const isFreshLogin = lastLoginTimestamp && 
+        (Date.now() - parseInt(lastLoginTimestamp, 10)) < 5000; // Within last 5 seconds
+      
+      // Check if we're in a redirect cycle by examining location state
+      const isRedirecting = location.state?.isRedirecting;
+      
+      // Log initialization details for debugging
+      console.log('[AuthContext] Initializing auth state:', {
+        path: location.pathname,
+        isPublicRoute,
+        isFreshLogin,
+        isRedirecting
+      });
+      
+      // If we're on a public route or currently redirecting, skip the validation 
+      if (isPublicRoute || isRedirecting) {
+        console.log('[AuthContext] On public route or redirecting, skipping auth validation');
+        setState(prevState => ({ ...prevState, isLoading: false }));
+        return;
+      }
+      
+      // For protected routes, validate with server in background
+      // without blocking the UI render
+      if (!isRedirecting) {
+        try {
+          console.log('[AuthContext] Validating auth with server');
+          const response = await apiClient.get<any>('/auth/validate');
+          console.log('[AuthContext] Validate response:', response);
+          
+          if (response?.user) {
+            console.log('[AuthContext] Server validation successful, updating state with server data');
+            
+            // Format user data to ensure consistent structure
+            const formattedUser = formatUserResponse(response.user);
+            
+            // Store user data in localStorage for persistence
+            localStorage.setItem('user', JSON.stringify(formattedUser));
+            
+            setState(prevState => ({
+              ...prevState,
+              isAuthenticated: true,
+              user: formattedUser,
+              isLoading: false,
+              error: null,
+            }));
+          } else {
+            // Authentication failed, clean up and redirect
+            console.log('[AuthContext] Server validation failed, cleaning up auth state');
+            localStorage.removeItem('user');
+            localStorage.removeItem('csrfToken');
+            localStorage.removeItem('csrfTokenExpiry');
+            localStorage.removeItem('lastLoginTimestamp');
+            
+            setState({
+              isAuthenticated: false,
+              user: null,
+              isLoading: false,
+              error: null,
+              registrationSuccess: false
+            });
+          }
+        } catch (error) {
+          console.error('[AuthContext] Error during auth initialization:', error);
+          
+          // Don't clear user data immediately on network errors
+          // This allows the app to work offline with cached data
+          setState(prevState => ({
+            ...prevState,
+            isLoading: false
+          }));
+        }
       }
     };
-
+    
     initializeAuth();
-    // Only run this effect once on mount
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [location.pathname, location.state]);
 
   // Login function
   const login = async (email: string, password: string): Promise<boolean> => {
@@ -257,6 +317,10 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     });
     
     try {
+      // Clear any existing CSRF tokens before login
+      localStorage.removeItem('csrfToken');
+      localStorage.removeItem('csrfTokenExpiry');
+      
       // Actual API call with correct API path without duplicate /api prefix
       const response = await apiClient.post<any>('/auth/login', { email, password });
       
@@ -284,22 +348,49 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         throw new Error('Invalid response format: No user data found');
       }
       
-      // Format user data for consistency
+      // Format user data
       const formattedUser: User = {
-        id: userData.id || userData._id || '',
+        id: userData.id || '',
         email: userData.email || '',
         firstName: userData.firstName || userData.first_name || '',
         lastName: userData.lastName || userData.last_name || '',
         role: userData.role || 'customer',
-        avatarUrl: userData.avatarUrl || userData.avatar_url || '',
-        designation: userData.designation || userData.job_title || userData.jobTitle || '',
-        organizationId: userData.organizationId || userData.organization_id || (userData.organization ? userData.organization.id : ''),
-        lastLogin: userData.lastLogin || userData.last_login_at || userData.lastLoginAt || '',
-        organization: userData.organization
+        ...(userData.avatarUrl && { avatarUrl: userData.avatarUrl }),
+        ...(userData.organizationId && { organizationId: userData.organizationId }),
+        ...(userData.organization && { organization: userData.organization })
       };
       
-      // Tokens are now stored in HttpOnly cookies by the server
-      // No need to manually store tokens in localStorage
+      // After successful login, always fetch a fresh CSRF token for subsequent API calls
+      // Using optimized retry logic
+      let csrfFetchSuccessful = false;
+      let attempts = 0;
+      const maxAttempts = 3;
+      
+      // Retry mechanism with shorter interval
+      while (!csrfFetchSuccessful && attempts < maxAttempts) {
+        try {
+          console.log(`[AuthContext] CSRF token fetch attempt ${attempts + 1}`);
+          
+          // Shorter wait on first attempt, longer on subsequent retries
+          if (attempts > 0) {
+            await new Promise(resolve => setTimeout(resolve, 150));
+          }
+          
+          // Make a request to fetch the CSRF token
+          await apiClient.get('/auth/csrf-token');
+          console.log(`[AuthContext] CSRF token refreshed after login (attempt ${attempts + 1})`);
+          csrfFetchSuccessful = true;
+        } catch (error) {
+          attempts++;
+          if (attempts >= maxAttempts) {
+            console.error('[AuthContext] Failed to fetch CSRF token after multiple attempts:', error);
+          }
+        }
+      }
+      
+      if (!csrfFetchSuccessful) {
+        console.warn('[AuthContext] Failed to obtain CSRF token after multiple attempts. Some features may not work correctly.');
+      }
       
       // Update auth state
       setState({
@@ -310,6 +401,18 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         error: null
       });
       
+      // Store user data in localStorage for persistence across refreshes
+      localStorage.setItem('user', JSON.stringify(formattedUser));
+      
+      // Log authentication state for debugging
+      console.log('[AuthContext] Authentication state updated:', {
+        isAuthenticated: true,
+        user: formattedUser ? { ...formattedUser, id: formattedUser.id } : null
+      });
+
+      // Add a timestamp to help identify fresh login during redirect
+      localStorage.setItem('lastLoginTimestamp', Date.now().toString());
+
       // Show success notification
       dispatchNotificationEvent(NotificationEventType.AUTH_SUCCESS, {
         message: `Welcome back, ${formattedUser.firstName}!`,
@@ -445,23 +548,36 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   /**
    * Logout the current user
    */
-  const logout = useCallback(() => {
-    // Call the server to invalidate the session and clear the cookies
-    apiClient.post('/auth/logout', {})
-      .catch(error => console.error('[AuthContext] Error during logout:', error))
-      .finally(() => {
-        // Reset the auth state regardless of the server response
-        setState({
-          ...state,
-          isAuthenticated: false,
-          user: null,
-          isLoading: false
-        });
-        
-        // Redirect to login page
-        navigate('/login');
+  const logout = useCallback(async () => {
+    try {
+      // Call logout endpoint to invalidate server-side session
+      await apiClient.post('/auth/logout');
+    } catch (error) {
+      console.error('[AuthContext] Logout API error:', error);
+      // Continue with client-side logout even if API call fails
+    } finally {
+      // Clear user data from localStorage
+      localStorage.removeItem('user');
+      localStorage.removeItem('csrfToken');
+      localStorage.removeItem('csrfTokenExpiry');
+      
+      // Reset auth state
+      setState({
+        ...initialState,
+        isLoading: false
       });
-  }, [navigate, state]);
+      
+      // Redirect to login page
+      navigate('/login');
+      
+      // Show success notification
+      dispatchNotificationEvent(NotificationEventType.AUTH_SUCCESS, {
+        message: 'You have been logged out successfully.',
+        type: 'info',
+        title: 'Logged Out'
+      });
+    }
+  }, [navigate]);
 
   // Reset password function
   const resetPassword = async (email: string): Promise<void> => {
@@ -787,24 +903,8 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     }));
   }, []);
 
-  // Listener for forced logout (token expiration)
-  useEffect(() => {
-    const handleForceLogout = () => {
-      console.log('Force logout triggered');
-      // Perform logout, but with a specific "session expired" message
-      logout();
-      // No need to notify here, as the NotificationContext already does this
-    };
-    
-    window.addEventListener('user:force-logout', handleForceLogout);
-    
-    return () => {
-      window.removeEventListener('user:force-logout', handleForceLogout);
-    };
-  }, [logout]); // Make sure logout is in dependency array
-
   // Refresh user data function
-  const refreshUserData = async (): Promise<void> => {
+  const refreshUserData = useCallback(async (): Promise<void> => {
     if (!state.user) throw new Error('User not authenticated');
     setState({ ...state, isLoading: true, error: null });
     
@@ -837,7 +937,33 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       });
       throw error;
     }
-  };
+  }, [state]);
+
+  // Listen for forced logout (token expiration)
+  useEffect(() => {
+    const handleForceLogout = () => {
+      console.log('Force logout triggered');
+      // Perform logout, but with a specific "session expired" message
+      logout();
+      // No need to notify here, as the NotificationContext already does this
+    };
+    
+    // Listen for session refresh events from the API client
+    const handleSessionRefreshed = () => {
+      console.log('[AuthContext] Session was refreshed by API client');
+      refreshUserData().catch(err => {
+        console.error('[AuthContext] Failed to refresh user data after token refresh:', err);
+      });
+    };
+    
+    window.addEventListener('user:force-logout', handleForceLogout);
+    window.addEventListener('auth:session-refreshed', handleSessionRefreshed);
+    
+    return () => {
+      window.removeEventListener('user:force-logout', handleForceLogout);
+      window.removeEventListener('auth:session-refreshed', handleSessionRefreshed);
+    };
+  }, [logout, refreshUserData]); // Make sure logout and refreshUserData are in dependency array
 
   // Provide auth context
   const contextValue: AuthContextType = {

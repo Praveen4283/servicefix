@@ -236,24 +236,41 @@ const UsersPage = () => {
         _cb: Date.now() // Cache-busting parameter
       };
       
-      const response = await apiClient.get<UsersResponse>('/users', params);
+      console.log("[fetchUsers] Sending request with params:", params);
       
-      if (response && response.users) {
-        console.log("[fetchUsers] Received users raw response:", response); // Log raw response
-        console.log("[fetchUsers] Received users data:", response.users); // Log parsed users
-        setUsers(response.users);
-        setFilteredUsers(response.users);
-        
-        // Update pagination from the response
-        if (response.pagination) {
-          setTotalUsers(response.pagination.total);
+      const response = await apiClient.get<UsersResponse>('/users', params);
+      console.log("[fetchUsers] Received users raw response:", response);
+      
+      // Check if response is proper - with more lenient checking
+      if (response) {
+        // With modified API client, response now has the users array directly
+        if (Array.isArray(response.users)) {
+          console.log("[fetchUsers] Received users array:", response.users);
+          setUsers(response.users);
+          setFilteredUsers(response.users);
+          
+          // Update pagination from the response
+          if (response.pagination) {
+            console.log("[fetchUsers] Pagination data:", response.pagination);
+            setTotalUsers(response.pagination.total);
+          }
+          
+          // Fetch user stats
+          await fetchUserStats();
+        } else {
+          console.error("[fetchUsers] Expected users array but got:", response);
+          addNotification('Invalid response format from server', 'error');
+          setUsers([]);
+          setFilteredUsers([]);
         }
-        
-        // Fetch user stats
-        await fetchUserStats();
+      } else {
+        console.error("[fetchUsers] Empty response from server");
+        addNotification('No response from server', 'error');
+        setUsers([]);
+        setFilteredUsers([]);
       }
     } catch (error: any) {
-      console.error('Error fetching users:', error);
+      console.error('[fetchUsers] Error fetching users:', error);
       
       // Display a user-friendly error message
       const errorMessage = error.message || 'Failed to load users data';
@@ -271,10 +288,12 @@ const UsersPage = () => {
   // Fetch user statistics
   const fetchUserStats = async () => {
     try {
+      console.log("[fetchUserStats] Sending request for user stats");
       const stats = await apiClient.get<UserStats>('/users/stats');
+      console.log("[fetchUserStats] Received stats:", stats);
       setUserStats(stats);
     } catch (error) {
-      console.error('Error fetching user stats:', error);
+      console.error('[fetchUserStats] Error fetching user stats:', error);
       // Remove the inaccurate fallback calculation
       // calculateUserStats(); 
     }
