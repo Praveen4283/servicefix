@@ -36,8 +36,17 @@ export const authenticate = asyncHandler(async (
   res: Response,
   next: NextFunction
 ) => {
-  // Get token from cookie
-  const token = req.cookies.accessToken;
+  // Get token from cookie or Authorization header
+  let token = req.cookies.accessToken;
+  
+  // If no cookie token, check Authorization header
+  if (!token && req.headers.authorization) {
+    // Extract token from Bearer token format
+    const authHeader = req.headers.authorization;
+    if (authHeader.startsWith('Bearer ')) {
+      token = authHeader.substring(7);
+    }
+  }
   
   // No token found
   if (!token) {

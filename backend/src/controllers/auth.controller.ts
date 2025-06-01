@@ -361,11 +361,13 @@ export const login = asyncHandler(async (
       maxAge: 7 * 24 * 60 * 60 * 1000 // 7 days in milliseconds
     });
 
-    // Return user data (no tokens in response)
+    // Return user data and tokens
     res.status(200).json({
       status: 'success',
       message: 'Login successful',
       user: userData,
+      token, // Include token in the response for header-based auth
+      refreshToken, // Include refresh token in the response
       success: true
     });
   } catch (error) {
@@ -382,16 +384,106 @@ export const refreshToken = asyncHandler(async (
   next: NextFunction
 ) => {
   try {
-    // Get refresh token from cookie rather than request body
-    const refreshToken = req.cookies.refreshToken;
+    // Try to get refresh token from cookie first, then from request body
+    let refreshToken = req.cookies.refreshToken;
+    
+    // If no cookie token, check the request body
+    if (!refreshToken && req.body && req.body.refreshToken) {
+      refreshToken = req.body.refreshToken;
+    }
     
     if (!refreshToken) {
       return next(AppError.unauthorized('Refresh token is required', 'REFRESH_TOKEN_REQUIRED'));
     }
 
-    // Refresh token
-    const result = await authService.refreshAccessToken(refreshToken);
+    // Verify the refresh token
+    let decoded;
+    try {
+      decoded = authService.verifyRefreshToken(refreshToken);
+    } catch (error) {
+      return next(AppError.unauthorized('Invalid refresh token', 'INVALID_REFRESH_TOKEN'));
+    }
 
+    // Check if the refresh token exists in the database
+    const tokenCheckResult = await query(
+      'SELECT id, user_id, expires_at, is_revoked FROM user_tokens WHERE token = $1',
+      [refreshToken]
+    );
+
+    if (tokenCheckResult.rows.length === 0) {
+      return next(AppError.unauthorized('Refresh token not found', 'TOKEN_NOT_FOUND'));
+    }
+
+    const tokenRecord = tokenCheckResult.rows[0];
+
+    // Check if token is revoked
+    if (tokenRecord.is_revoked) {
+      return next(AppError.unauthorized('Refresh token has been revoked', 'TOKEN_REVOKED'));
+    }
+
+    // Check if token is expired
+    const now = new Date();
+    if (new Date(tokenRecord.expires_at) < now) {
+      return next(AppError.unauthorized('Refresh token has expired', 'TOKEN_EXPIRED'));
+    }
+
+    // Get user details
+    const userResult = await query(
+      `SELECT 
+        u.id, u.email, u.first_name, u.last_name, u.role, 
+        u.avatar_url, u.phone, u.timezone, u.language, 
+        u.organization_id, u.designation,
+        o.name as organization_name
+      FROM users u 
+      LEFT JOIN organizations o ON u.organization_id = o.id 
+      WHERE u.id = $1`,
+      [tokenRecord.user_id]
+    );
+
+    if (userResult.rows.length === 0) {
+      return next(AppError.notFound('User not found'));
+    }
+
+    const user = userResult.rows[0];
+
+    // Generate a new access token
+    const newToken = authService.generateToken(user.id, user.role);
+    
+    // Generate a new refresh token (optional - can keep the same refresh token)
+    const newRefreshToken = authService.generateRefreshToken(user.id);
+    
+    // Update the refresh token in the database
+    const refreshTokenExpiresAt = new Date();
+    refreshTokenExpiresAt.setDate(refreshTokenExpiresAt.getDate() + 7); // 7 days
+    
+    // Revoke old refresh token
+    await query(
+      'UPDATE user_tokens SET is_revoked = TRUE WHERE id = $1',
+      [tokenRecord.id]
+    );
+    
+    // Save new refresh token
+    await authService.saveRefreshToken(user.id, newRefreshToken, refreshTokenExpiresAt);
+
+    // Format user data for response
+    const userData = {
+      id: user.id,
+      email: user.email,
+      firstName: user.first_name,
+      lastName: user.last_name,
+      role: user.role,
+      avatarUrl: user.avatar_url,
+      organizationId: user.organization_id,
+      organization: user.organization_id ? {
+        id: user.organization_id,
+        name: user.organization_name
+      } : null,
+      designation: user.designation,
+      phone: user.phone,
+      timezone: user.timezone,
+      language: user.language
+    };
+    
     // Set new access token as HttpOnly cookie
     const isProduction = process.env.NODE_ENV === 'production';
     const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
@@ -401,7 +493,7 @@ export const refreshToken = asyncHandler(async (
       ? frontendUrl.includes('localhost') ? undefined : '.' + new URL(frontendUrl).hostname.split('.').slice(-2).join('.')
       : undefined;
     
-    res.cookie('accessToken', result.token, {
+    res.cookie('accessToken', newToken, {
       httpOnly: true,
       secure: isProduction || frontendUrl.startsWith('https'),
       sameSite: isProduction ? 'none' : 'lax',
@@ -409,12 +501,24 @@ export const refreshToken = asyncHandler(async (
       domain: cookieDomain,
       maxAge: 60 * 60 * 1000 // 1 hour in milliseconds
     });
+    
+    // Set new refresh token as HttpOnly cookie
+    res.cookie('refreshToken', newRefreshToken, {
+      httpOnly: true,
+      secure: isProduction || frontendUrl.startsWith('https'),
+      sameSite: isProduction ? 'none' : 'lax',
+      path: '/',
+      domain: cookieDomain,
+      maxAge: 7 * 24 * 60 * 60 * 1000 // 7 days in milliseconds
+    });
 
-    // Return success response
+    // Return success response with tokens for header-based auth
     res.status(200).json({
       status: 'success',
       message: 'Token refreshed successfully',
-      user: result.user,
+      user: userData,
+      token: newToken,
+      refreshToken: newRefreshToken,
       success: true
     });
   } catch (error) {

@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useEffect, useState, ReactNode, useCallback } from 'react';
+import React, { createContext, useContext, useEffect, useState, ReactNode, useCallback, useRef } from 'react';
 import apiClient from '../services/apiClient';
 import { useNavigate, useLocation } from 'react-router-dom';
 import notificationService from '../services/notificationService';
@@ -114,7 +114,8 @@ interface AuthProviderProps {
 // Define a type for notification events
 export enum NotificationEventType {
   AUTH_SUCCESS = 'auth:success',
-  AUTH_ERROR = 'auth:error'
+  AUTH_ERROR = 'auth:error',
+  GENERAL = 'general'
 }
 
 export interface NotificationEventDetail {
@@ -198,6 +199,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   const [state, setState] = useState<AuthState>(initialState);
   const navigate = useNavigate();
   const location = useLocation();
+  const notificationIntervalRef = useRef<NodeJS.Timeout | null>(null);
 
   // Initialize the auth state
   useEffect(() => {
@@ -317,9 +319,11 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     });
     
     try {
-      // Clear any existing CSRF tokens before login
+      // Clear any existing tokens before login
       localStorage.removeItem('csrfToken');
       localStorage.removeItem('csrfTokenExpiry');
+      localStorage.removeItem('authToken');
+      localStorage.removeItem('refreshToken');
       
       // Actual API call with correct API path without duplicate /api prefix
       const response = await apiClient.post<any>('/auth/login', { email, password });
@@ -346,6 +350,15 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       
       if (!userData) {
         throw new Error('Invalid response format: No user data found');
+      }
+      
+      // Store tokens from the response if available
+      if (response.token) {
+        localStorage.setItem('authToken', response.token);
+      }
+      
+      if (response.refreshToken) {
+        localStorage.setItem('refreshToken', response.refreshToken);
       }
       
       // Format user data
@@ -550,32 +563,61 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
    */
   const logout = useCallback(async () => {
     try {
-      // Call logout endpoint to invalidate server-side session
-      await apiClient.post('/auth/logout');
-    } catch (error) {
-      console.error('[AuthContext] Logout API error:', error);
-      // Continue with client-side logout even if API call fails
-    } finally {
-      // Clear user data from localStorage
+      // Clear any notification interval
+      if (notificationIntervalRef.current) {
+        clearInterval(notificationIntervalRef.current);
+        notificationIntervalRef.current = null;
+      }
+
+      // Call logout endpoint
+      await apiClient.post('/auth/logout', {});
+      
+      // Clear authentication state and local storage
       localStorage.removeItem('user');
+      localStorage.removeItem('lastLoginTimestamp');
       localStorage.removeItem('csrfToken');
       localStorage.removeItem('csrfTokenExpiry');
+      localStorage.removeItem('authToken');
+      localStorage.removeItem('refreshToken');
       
-      // Reset auth state
+      // Clear auth state
       setState({
-        ...initialState,
-        isLoading: false
+        isAuthenticated: false,
+        user: null,
+        isLoading: false,
+        error: null,
+        registrationSuccess: false
       });
       
-      // Redirect to login page
+      // Navigate to login
       navigate('/login');
       
-      // Show success notification
-      dispatchNotificationEvent(NotificationEventType.AUTH_SUCCESS, {
-        message: 'You have been logged out successfully.',
+      // Show notification
+      dispatchNotificationEvent(NotificationEventType.GENERAL, {
+        message: 'You have been logged out',
         type: 'info',
         title: 'Logged Out'
       });
+    } catch (error) {
+      console.error('Logout error:', error);
+      
+      // Even if the server request fails, we still want to clear client-side state
+      localStorage.removeItem('user');
+      localStorage.removeItem('lastLoginTimestamp');
+      localStorage.removeItem('csrfToken');
+      localStorage.removeItem('csrfTokenExpiry');
+      localStorage.removeItem('authToken');
+      localStorage.removeItem('refreshToken');
+      
+      setState({
+        isAuthenticated: false,
+        user: null,
+        isLoading: false,
+        error: null,
+        registrationSuccess: false
+      });
+      
+      navigate('/login');
     }
   }, [navigate]);
 

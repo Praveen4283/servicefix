@@ -87,6 +87,8 @@ class ApiClient {
   private csrfToken: string | null = null;
   private fetchingCsrfToken: Promise<void> | null = null;
   private isInitialized: boolean = false;
+  private authToken: string | null = null;
+  private refreshToken: string | null = null;
 
   constructor() {
     // Use environment variable for the API URL to make it configurable for different environments
@@ -96,14 +98,18 @@ class ApiClient {
     // Add debug for the base URL
     console.log(`[API Client] Using base URL: ${this.baseURL}`);
     
+    // Retrieve tokens from localStorage
+    this.authToken = localStorage.getItem('authToken');
+    this.refreshToken = localStorage.getItem('refreshToken');
+    
     // Create axios instance
     this.client = axios.create({
       baseURL: this.baseURL,
       timeout: 10000,
-      withCredentials: true // Enable sending cookies with cross-origin requests
+      withCredentials: true // Keep this true for CSRF protection
     });
 
-    // Add request interceptor for CSRF token
+    // Add request interceptor for CSRF token and auth token
     this.client.interceptors.request.use(
       async (config) => {
         // Log the request URL for debugging
@@ -115,6 +121,11 @@ class ApiClient {
             config.url?.includes('/auth/register')) {
           console.log(`[API Client] Skipping CSRF token for auth endpoint: ${config.url}`);
           return config;
+        }
+        
+        // Add Authorization header if we have an auth token
+        if (this.authToken && config.headers) {
+          config.headers['Authorization'] = `Bearer ${this.authToken}`;
         }
         
         // Skip CSRF token for GET requests
@@ -187,45 +198,43 @@ class ApiClient {
           return Promise.reject(error);
         }
         
-        // Don't retry auth endpoints to prevent infinite loops
-        if (error.response?.status === 401 && 
-            !originalRequest._retry && 
-            !originalRequest.url?.includes('/auth/login') &&
-            !originalRequest.url?.includes('/auth/refresh-token')) {
-          
+        // Attempt to refresh token on 401 Unauthorized errors
+        if (error.response && error.response.status === 401 && !originalRequest._retry) {
           originalRequest._retry = true;
-          
+          console.log('[API Client] Attempting to refresh token for 401 response');
+
           try {
-            console.log('[API Client] Attempting to refresh token for 401 response');
+            // Use refreshToken from localStorage instead of cookie
+            if (!this.refreshToken) {
+              throw new Error('No refresh token available');
+            }
+
+            // Call refresh token endpoint with the token in request body
+            const response = await this.post('/auth/refresh-token', { refreshToken: this.refreshToken });
             
-            // Try to refresh the token - no need to send refresh token as it's in HttpOnly cookie
-            const refreshResponse = await this.post('/auth/refresh-token', {});
-            
-            // If refresh successful, retry the original request
-            if (refreshResponse && (refreshResponse.success || refreshResponse.status === 'success')) {
-              console.log('[API Client] Token refreshed, retrying original request');
+            if (response && response.token) {
+              // Update the stored tokens
+              this.authToken = response.token;
+              localStorage.setItem('authToken', response.token);
               
-              // Force refresh the CSRF token after token refresh
-              this.csrfToken = null;
-              await this.fetchCsrfToken();
-              
-              // Dispatch event to update any UI components about the refreshed session
-              window.dispatchEvent(new CustomEvent('auth:session-refreshed'));
-              
-              // Token is now stored in HttpOnly cookie, just retry the request
-              if (this.csrfToken && originalRequest.headers) {
-                originalRequest.headers['x-csrf-token'] = this.csrfToken;
+              // If there's a new refresh token, update that too
+              if (response.refreshToken) {
+                this.refreshToken = response.refreshToken;
+                localStorage.setItem('refreshToken', response.refreshToken);
               }
+              
+              // Update the original request and retry
+              if (originalRequest.headers) {
+                originalRequest.headers['Authorization'] = `Bearer ${this.authToken}`;
+              }
+              
               return this.client(originalRequest);
-            } else {
-              // Token refresh failed
-              console.warn('[API Client] Token refresh failed, logging out');
-              this.handleAuthError();
             }
           } catch (refreshError) {
             console.error('[API Client] Error refreshing token:', refreshError);
-            // If refresh fails, handle auth error
+            // Handle auth error (logout user)
             this.handleAuthError();
+            return Promise.reject(refreshError);
           }
         }
         
@@ -418,10 +427,9 @@ class ApiClient {
         return;
       }
       
-      // No need to retrieve refresh token from localStorage as it's now in HttpOnly cookies
       console.log('[API Client] Handling auth error');
       
-      // Call the auth/logout endpoint to clear the cookies server-side
+      // Call the auth/logout endpoint to handle server-side cleanup
       this.post('/auth/logout', {})
         .then(() => {
           console.log('[API Client] Logged out successfully');
@@ -439,6 +447,12 @@ class ApiClient {
 
   // Logout helper to trigger the auth context logout
   private logout = (): void => {
+    // Clear tokens
+    this.authToken = null;
+    this.refreshToken = null;
+    localStorage.removeItem('authToken');
+    localStorage.removeItem('refreshToken');
+    
     // Dispatch a logout event that AuthContext will listen for
     const logoutEvent = new CustomEvent('auth:logout');
     window.dispatchEvent(logoutEvent);

@@ -61,14 +61,20 @@ class AuthService {
   /**
    * Save refresh token to database
    * @param userId User ID
-   * @param refreshToken Refresh token
+   * @param token Refresh token
    * @param expiresAt Expiration date
    */
-  async saveRefreshToken(userId: string | number, refreshToken: string, expiresAt: Date): Promise<void> {
-    await query(
-      'INSERT INTO user_tokens (user_id, refresh_token, expires_at) VALUES ($1, $2, $3)',
-      [userId, refreshToken, expiresAt]
-    );
+  async saveRefreshToken(userId: string | number, token: string, expiresAt: Date): Promise<void> {
+    try {
+      await query(
+        `INSERT INTO user_tokens (user_id, token, expires_at)
+         VALUES ($1, $2, $3)`,
+        [userId, token, expiresAt]
+      );
+    } catch (error) {
+      logger.error('Error saving refresh token:', error);
+      throw error;
+    }
   }
 
   /**
@@ -90,8 +96,8 @@ class AuthService {
   }
 
   /**
-   * Verify refresh token
-   * @param token Refresh token
+   * Verify refresh JWT token
+   * @param token JWT token
    * @returns Decoded token
    */
   verifyRefreshToken(token: string): any {
@@ -103,7 +109,7 @@ class AuthService {
       } else if (error instanceof jwt.JsonWebTokenError) {
         throw AppError.unauthorized('Invalid refresh token', 'INVALID_REFRESH_TOKEN');
       }
-      throw AppError.unauthorized('Refresh token verification failed', 'REFRESH_AUTH_FAILED');
+      throw AppError.unauthorized('Authentication failed', 'AUTH_FAILED');
     }
   }
 
@@ -163,13 +169,20 @@ class AuthService {
   /**
    * Revoke refresh token
    * @param userId User ID
-   * @param refreshToken Refresh token
+   * @param token Refresh token
    */
-  async revokeRefreshToken(userId: string | number, refreshToken: string): Promise<void> {
-    await query(
-      'DELETE FROM user_tokens WHERE user_id = $1 AND refresh_token = $2',
-      [userId, refreshToken]
-    );
+  async revokeRefreshToken(userId: string | number, token: string): Promise<void> {
+    try {
+      await query(
+        `UPDATE user_tokens 
+         SET is_revoked = TRUE
+         WHERE user_id = $1 AND token = $2`,
+        [userId, token]
+      );
+    } catch (error) {
+      logger.error('Error revoking refresh token:', error);
+      throw error;
+    }
   }
 
   /**
