@@ -406,7 +406,7 @@ export const refreshToken = asyncHandler(async (
 
     // Check if the refresh token exists in the database
     const tokenCheckResult = await query(
-      'SELECT id, user_id, expires_at, is_revoked FROM user_tokens WHERE token = $1',
+      'SELECT id, user_id, expires_at, is_revoked FROM user_tokens WHERE refresh_token = $1',
       [refreshToken]
     );
 

@@ -67,7 +67,7 @@ class AuthService {
   async saveRefreshToken(userId: string | number, token: string, expiresAt: Date): Promise<void> {
     try {
       await query(
-        `INSERT INTO user_tokens (user_id, token, expires_at)
+        `INSERT INTO user_tokens (user_id, refresh_token, expires_at)
          VALUES ($1, $2, $3)`,
         [userId, token, expiresAt]
       );
@@ -176,7 +176,7 @@ class AuthService {
       await query(
         `UPDATE user_tokens 
          SET is_revoked = TRUE
-         WHERE user_id = $1 AND token = $2`,
+         WHERE user_id = $1 AND refresh_token = $2`,
         [userId, token]
       );
     } catch (error) {
