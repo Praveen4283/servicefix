@@ -354,10 +354,12 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       
       // Store tokens from the response if available
       if (response.token) {
+        console.log('[AuthContext] Storing auth token in localStorage');
         localStorage.setItem('authToken', response.token);
       }
       
       if (response.refreshToken) {
+        console.log('[AuthContext] Storing refresh token in localStorage');
         localStorage.setItem('refreshToken', response.refreshToken);
       }
       
@@ -386,7 +388,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
           
           // Shorter wait on first attempt, longer on subsequent retries
           if (attempts > 0) {
-            await new Promise(resolve => setTimeout(resolve, 150));
+            await new Promise(resolve => setTimeout(resolve, 150 * attempts));
           }
           
           // Make a request to fetch the CSRF token
@@ -561,65 +563,56 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   /**
    * Logout the current user
    */
-  const logout = useCallback(async () => {
-    try {
-      // Clear any notification interval
-      if (notificationIntervalRef.current) {
-        clearInterval(notificationIntervalRef.current);
-        notificationIntervalRef.current = null;
-      }
+  const logout = useCallback(() => {
+    console.log('[AuthContext] Logging out user');
+    
+    // Call logout endpoint to clear server-side cookies
+    apiClient.post('/auth/logout', {})
+      .then(() => {
+        console.log('[AuthContext] Logout API call successful');
+      })
+      .catch(error => {
+        console.error('[AuthContext] Logout API error:', error);
+      })
+      .finally(() => {
+        // Clear all authentication data regardless of API success
+        console.log('[AuthContext] Clearing auth state and localStorage');
+        localStorage.removeItem('user');
+        localStorage.removeItem('csrfToken');
+        localStorage.removeItem('csrfTokenExpiry');
+        localStorage.removeItem('lastLoginTimestamp');
+        localStorage.removeItem('authToken');
+        localStorage.removeItem('refreshToken');
+        
+        // Also remove any legacy tokens
+        localStorage.removeItem('token');
 
-      // Call logout endpoint
-      await apiClient.post('/auth/logout', {});
-      
-      // Clear authentication state and local storage
-      localStorage.removeItem('user');
-      localStorage.removeItem('lastLoginTimestamp');
-      localStorage.removeItem('csrfToken');
-      localStorage.removeItem('csrfTokenExpiry');
-      localStorage.removeItem('authToken');
-      localStorage.removeItem('refreshToken');
-      
-      // Clear auth state
-      setState({
-        isAuthenticated: false,
-        user: null,
-        isLoading: false,
-        error: null,
-        registrationSuccess: false
+        // Update auth state
+        setState({
+          isAuthenticated: false,
+          user: null,
+          isLoading: false,
+          error: null,
+          registrationSuccess: false
+        });
+        
+        // Clear any session timeouts
+        if (notificationIntervalRef.current) {
+          clearInterval(notificationIntervalRef.current);
+          notificationIntervalRef.current = null;
+        }
+        
+        // Navigate to login page
+        navigate('/login');
+        
+        // Show notification
+        dispatchNotificationEvent(NotificationEventType.GENERAL, {
+          message: 'You have been logged out',
+          type: 'info',
+          title: 'Logged Out'
+        });
       });
-      
-      // Navigate to login
-      navigate('/login');
-      
-      // Show notification
-      dispatchNotificationEvent(NotificationEventType.GENERAL, {
-        message: 'You have been logged out',
-        type: 'info',
-        title: 'Logged Out'
-      });
-    } catch (error) {
-      console.error('Logout error:', error);
-      
-      // Even if the server request fails, we still want to clear client-side state
-      localStorage.removeItem('user');
-      localStorage.removeItem('lastLoginTimestamp');
-      localStorage.removeItem('csrfToken');
-      localStorage.removeItem('csrfTokenExpiry');
-      localStorage.removeItem('authToken');
-      localStorage.removeItem('refreshToken');
-      
-      setState({
-        isAuthenticated: false,
-        user: null,
-        isLoading: false,
-        error: null,
-        registrationSuccess: false
-      });
-      
-      navigate('/login');
-    }
-  }, [navigate]);
+  }, [navigate, dispatchNotificationEvent]);
 
   // Reset password function
   const resetPassword = async (email: string): Promise<void> => {

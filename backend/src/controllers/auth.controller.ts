@@ -220,14 +220,27 @@ export const register = asyncHandler(async (
   const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
   
   // Determine cookie domain based on environment
-  const cookieDomain = isProduction 
-    ? frontendUrl.includes('localhost') ? undefined : '.' + new URL(frontendUrl).hostname.split('.').slice(-2).join('.')
-    : undefined;
+  let cookieDomain;
+  if (isProduction && !frontendUrl.includes('localhost')) {
+    try {
+      // Extract domain from frontend URL, but handle malformed URLs gracefully
+      const url = new URL(frontendUrl);
+      const domainParts = url.hostname.split('.');
+      if (domainParts.length >= 2) {
+        cookieDomain = '.' + domainParts.slice(-2).join('.');
+      }
+    } catch (error) {
+      logger.warn(`Error parsing frontend URL: ${frontendUrl}`, error);
+    }
+  }
+  
+  // Use SameSite=None for cross-site requests in production
+  const sameSite = isProduction ? 'none' : 'lax';
   
   res.cookie('accessToken', token, {
     httpOnly: true,
     secure: isProduction || frontendUrl.startsWith('https'),
-    sameSite: isProduction ? 'none' : 'lax',
+    sameSite: sameSite,
     path: '/',
     domain: cookieDomain,
     maxAge: 60 * 60 * 1000 // 1 hour in milliseconds
@@ -237,7 +250,7 @@ export const register = asyncHandler(async (
   res.cookie('refreshToken', refreshToken, {
     httpOnly: true,
     secure: isProduction || frontendUrl.startsWith('https'),
-    sameSite: isProduction ? 'none' : 'lax',
+    sameSite: sameSite,
     path: '/',
     domain: cookieDomain,
     maxAge: 7 * 24 * 60 * 60 * 1000 // 7 days in milliseconds
@@ -338,14 +351,27 @@ export const login = asyncHandler(async (
     const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
     
     // Determine cookie domain based on environment
-    const cookieDomain = isProduction 
-      ? frontendUrl.includes('localhost') ? undefined : '.' + new URL(frontendUrl).hostname.split('.').slice(-2).join('.')
-      : undefined;
+    let cookieDomain;
+    if (isProduction && !frontendUrl.includes('localhost')) {
+      try {
+        // Extract domain from frontend URL, but handle malformed URLs gracefully
+        const url = new URL(frontendUrl);
+        const domainParts = url.hostname.split('.');
+        if (domainParts.length >= 2) {
+          cookieDomain = '.' + domainParts.slice(-2).join('.');
+        }
+      } catch (error) {
+        logger.warn(`Error parsing frontend URL: ${frontendUrl}`, error);
+      }
+    }
+    
+    // Use SameSite=None for cross-site requests in production
+    const sameSite = isProduction ? 'none' : 'lax';
     
     res.cookie('accessToken', token, {
       httpOnly: true,
       secure: isProduction || frontendUrl.startsWith('https'),
-      sameSite: isProduction ? 'none' : 'lax',
+      sameSite: sameSite,
       path: '/',
       domain: cookieDomain,
       maxAge: 60 * 60 * 1000 // 1 hour in milliseconds
@@ -355,7 +381,7 @@ export const login = asyncHandler(async (
     res.cookie('refreshToken', refreshToken, {
       httpOnly: true,
       secure: isProduction || frontendUrl.startsWith('https'),
-      sameSite: isProduction ? 'none' : 'lax',
+      sameSite: sameSite,
       path: '/',
       domain: cookieDomain,
       maxAge: 7 * 24 * 60 * 60 * 1000 // 7 days in milliseconds
@@ -449,7 +475,7 @@ export const refreshToken = asyncHandler(async (
     // Generate a new access token
     const newToken = authService.generateToken(user.id, user.role);
     
-    // Generate a new refresh token (optional - can keep the same refresh token)
+    // Generate a new refresh token
     const newRefreshToken = authService.generateRefreshToken(user.id);
     
     // Update the refresh token in the database
@@ -489,14 +515,27 @@ export const refreshToken = asyncHandler(async (
     const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
     
     // Determine cookie domain based on environment
-    const cookieDomain = isProduction 
-      ? frontendUrl.includes('localhost') ? undefined : '.' + new URL(frontendUrl).hostname.split('.').slice(-2).join('.')
-      : undefined;
+    let cookieDomain;
+    if (isProduction && !frontendUrl.includes('localhost')) {
+      try {
+        // Extract domain from frontend URL, but handle malformed URLs gracefully
+        const url = new URL(frontendUrl);
+        const domainParts = url.hostname.split('.');
+        if (domainParts.length >= 2) {
+          cookieDomain = '.' + domainParts.slice(-2).join('.');
+        }
+      } catch (error) {
+        logger.warn(`Error parsing frontend URL: ${frontendUrl}`, error);
+      }
+    }
+    
+    // Use SameSite=None for cross-site requests in production
+    const sameSite = isProduction ? 'none' : 'lax';
     
     res.cookie('accessToken', newToken, {
       httpOnly: true,
       secure: isProduction || frontendUrl.startsWith('https'),
-      sameSite: isProduction ? 'none' : 'lax',
+      sameSite: sameSite,
       path: '/',
       domain: cookieDomain,
       maxAge: 60 * 60 * 1000 // 1 hour in milliseconds
@@ -506,7 +545,7 @@ export const refreshToken = asyncHandler(async (
     res.cookie('refreshToken', newRefreshToken, {
       httpOnly: true,
       secure: isProduction || frontendUrl.startsWith('https'),
-      sameSite: isProduction ? 'none' : 'lax',
+      sameSite: sameSite,
       path: '/',
       domain: cookieDomain,
       maxAge: 7 * 24 * 60 * 60 * 1000 // 7 days in milliseconds

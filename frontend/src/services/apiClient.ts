@@ -204,31 +204,55 @@ class ApiClient {
           console.log('[API Client] Attempting to refresh token for 401 response');
 
           try {
-            // Use refreshToken from localStorage instead of cookie
-            if (!this.refreshToken) {
-              throw new Error('No refresh token available');
-            }
-
-            // Call refresh token endpoint with the token in request body
-            const response = await this.post('/auth/refresh-token', { refreshToken: this.refreshToken });
+            // Get refreshToken from localStorage
+            this.refreshToken = localStorage.getItem('refreshToken');
             
-            if (response && response.token) {
-              // Update the stored tokens
-              this.authToken = response.token;
-              localStorage.setItem('authToken', response.token);
+            // Check if refresh token is available
+            if (!this.refreshToken) {
+              console.log('[API Client] No refresh token in localStorage, trying cookie-based refresh');
+              // Try cookie-based refresh as fallback
+              const response = await this.post('/auth/refresh-token', {});
               
-              // If there's a new refresh token, update that too
-              if (response.refreshToken) {
-                this.refreshToken = response.refreshToken;
-                localStorage.setItem('refreshToken', response.refreshToken);
+              if (response && response.token) {
+                // Update the stored tokens
+                this.authToken = response.token;
+                localStorage.setItem('authToken', response.token);
+                
+                // If there's a new refresh token, update that too
+                if (response.refreshToken) {
+                  this.refreshToken = response.refreshToken;
+                  localStorage.setItem('refreshToken', response.refreshToken);
+                }
+                
+                // Update the original request and retry
+                if (originalRequest.headers) {
+                  originalRequest.headers['Authorization'] = `Bearer ${this.authToken}`;
+                }
+                
+                return this.client(originalRequest);
               }
+            } else {
+              // Call refresh token endpoint with the token in request body
+              const response = await this.post('/auth/refresh-token', { refreshToken: this.refreshToken });
               
-              // Update the original request and retry
-              if (originalRequest.headers) {
-                originalRequest.headers['Authorization'] = `Bearer ${this.authToken}`;
+              if (response && response.token) {
+                // Update the stored tokens
+                this.authToken = response.token;
+                localStorage.setItem('authToken', response.token);
+                
+                // If there's a new refresh token, update that too
+                if (response.refreshToken) {
+                  this.refreshToken = response.refreshToken;
+                  localStorage.setItem('refreshToken', response.refreshToken);
+                }
+                
+                // Update the original request and retry
+                if (originalRequest.headers) {
+                  originalRequest.headers['Authorization'] = `Bearer ${this.authToken}`;
+                }
+                
+                return this.client(originalRequest);
               }
-              
-              return this.client(originalRequest);
             }
           } catch (refreshError) {
             console.error('[API Client] Error refreshing token:', refreshError);
