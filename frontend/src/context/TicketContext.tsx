@@ -9,33 +9,37 @@ interface TicketStatus {
   id: string;
   name: string;
   color: string;
+  isDefault?: boolean;
+  isResolved?: boolean;
 }
 
 interface TicketPriority {
   id: string;
   name: string;
   color: string;
+  slaHours?: number;
 }
 
 interface Department {
   id: string;
   name: string;
+  description?: string;
 }
 
 interface TicketType {
   id: string;
   name: string;
+  description?: string;
 }
 
 interface User {
-  id: string | number;
+  id: string;
   firstName: string;
   lastName: string;
   email: string;
   avatar?: string;
 }
 
-// Backend API response might include snake_case versions of the fields
 interface TicketBackendResponse {
   id: string;
   subject: string;
@@ -45,38 +49,29 @@ interface TicketBackendResponse {
   type?: TicketType;
   requester: User;
   assignee?: User;
-  // Include both camelCase and snake_case versions to handle either format
-  createdAt?: string;
-  created_at?: string;
-  updatedAt?: string;
-  updated_at?: string;
+  createdAt: string;
+  updatedAt: string;
   lastActivity?: string;
-  last_activity?: string;
   dueDate?: string;
-  due_date?: string;
   resolvedAt?: string;
-  resolved_at?: string;
   closedAt?: string;
-  closed_at?: string;
   tags?: string[];
   description?: string;
-  // Include optional properties for detail view
   comments?: Comment[];
   attachments?: Attachment[];
+  slaStatus?: string;
+  slaInfo?: any;
 }
 
-// Interface for Comment response from backend
 interface CommentBackendResponse extends Comment {
-  created_at?: string;
-  updated_at?: string;
+  createdAt: string;
+  updatedAt?: string;
 }
 
-// Interface for Attachment response from backend
 interface AttachmentBackendResponse extends Attachment {
-  created_at?: string;
+  createdAt: string;
 }
 
-// Frontend standardized interface using camelCase
 interface Ticket {
   id: string;
   subject: string;
@@ -104,6 +99,7 @@ interface Comment {
     firstName: string;
     lastName: string;
     avatar?: string;
+    email?: string;
   };
 }
 
@@ -294,10 +290,10 @@ export const TicketProvider: React.FC<{ children: ReactNode }> = ({ children }) 
         return {
           ...ticket,
           // Ensure correct date fields are available
-          createdAt: ticket.createdAt || ticket.created_at || null,
-          updatedAt: ticket.updatedAt || ticket.updated_at || null,
+          createdAt: ticket.createdAt || null,
+          updatedAt: ticket.updatedAt || null,
           // Handle other date fields too if needed
-          lastActivity: ticket.lastActivity || ticket.last_activity || new Date().toISOString() // Fallback for lastActivity
+          lastActivity: ticket.lastActivity || new Date().toISOString() // Fallback for lastActivity
         } as Ticket;
       });
       
@@ -352,17 +348,17 @@ export const TicketProvider: React.FC<{ children: ReactNode }> = ({ children }) 
         const normalizedTicket = {
           ...fetchedTicket,
           // Ensure correct date fields are available
-          createdAt: fetchedTicket.createdAt || fetchedTicket.created_at || null,
-          updatedAt: fetchedTicket.updatedAt || fetchedTicket.updated_at || null,
-          lastActivity: fetchedTicket.lastActivity || fetchedTicket.last_activity || new Date().toISOString(),
+          createdAt: fetchedTicket.createdAt || null,
+          updatedAt: fetchedTicket.updatedAt || null,
+          lastActivity: fetchedTicket.lastActivity || new Date().toISOString(),
           // Ensure comments and attachments are arrays, normalizing any date fields
           comments: (fetchedTicket.comments || []).map((comment: CommentBackendResponse) => ({
             ...comment,
-            createdAt: comment.createdAt || comment.created_at || new Date().toISOString()
+            createdAt: comment.createdAt || new Date().toISOString()
           })),
           attachments: (fetchedTicket.attachments || []).map((attachment: AttachmentBackendResponse) => ({
             ...attachment,
-            createdAt: attachment.createdAt || attachment.created_at || new Date().toISOString()
+            createdAt: attachment.createdAt || new Date().toISOString()
           }))
         } as TicketDetail;
         
@@ -606,39 +602,17 @@ export const TicketProvider: React.FC<{ children: ReactNode }> = ({ children }) 
     if (!isAuthenticated) return [];
     
     try {
-      // Fetch agents directly from users table where role is agent or admin
-      const response = await apiClient.get<{ agents: User[] }>('/users/roles/agent');
+      const response = await apiClient.get<{ users: any[] }>('/users/agents');
+      const agents = response.users || [];
       
-      // Log successful response
-      console.log('Successfully fetched agents:', response.agents?.length || 0);
-      
-      // Process agent IDs to ensure they're compatible with backend expectations
-      const formattedAgents = response.agents?.map(agent => {
-        let processedId = agent.id;
-        
-        // If ID is a string, check if it can be converted to a number
-        if (typeof agent.id === 'string') {
-          const numericId = parseInt(agent.id, 10);
-          if (!isNaN(numericId)) {
-            // It's a numeric string, convert to number
-            processedId = numericId;
-            console.log(`Converted agent ID from ${agent.id} to ${numericId}`);
-          } else {
-            // It's a UUID or non-numeric string, see if we can extract any numeric parts
-            const numericParts = agent.id.match(/\d+/);
-            if (numericParts && numericParts[0]) {
-              const extractedId = parseInt(numericParts[0], 10);
-              if (!isNaN(extractedId)) {
-                processedId = extractedId;
-                console.log(`Extracted numeric ID ${extractedId} from ${agent.id}`);
-              }
-            }
-          }
-        }
-        
+      // Format agents to match User interface with string IDs
+      const formattedAgents = agents.map((agent: any) => {
         return {
-          ...agent,
-          id: processedId
+          id: String(agent.id), // Ensure ID is always a string
+          firstName: agent.firstName || agent.first_name || '',
+          lastName: agent.lastName || agent.last_name || '',
+          email: agent.email || '',
+          avatar: agent.avatar || agent.avatarUrl || null
         };
       }) || [];
       

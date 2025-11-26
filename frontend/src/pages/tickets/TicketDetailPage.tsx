@@ -68,7 +68,6 @@ import { formatInTimeZone } from 'date-fns-tz';
 import { useAuth } from '../../context/AuthContext';
 import apiClient from '../../services/apiClient';
 import SLABadge from '../../components/tickets/SLABadge';
-import AssignSLAModal from '../../components/tickets/AssignSLAModal';
 import slaService from '../../services/slaService';
 
 interface TabPanelProps {
@@ -270,9 +269,6 @@ const TicketDetailPage: React.FC = () => {
   const isCustomer = user?.role === 'customer';
   const isAgentOrAdmin = isAdmin || isAgent;
   
-  // Add a state variable to manage the SLA assignment modal
-  const [slaModalOpen, setSlaModalOpen] = useState(false);
-  
   // Add a state variable for department management
   const [departmentMenuAnchor, setDepartmentMenuAnchor] = useState<null | HTMLElement>(null);
   const [departments, setDepartments] = useState<any[]>([]);
@@ -357,11 +353,24 @@ const TicketDetailPage: React.FC = () => {
             return;
           }
           
+          // Ensure comment has valid user data
+          const commentUser = comment.user || {
+            id: '0',
+            firstName: 'System',
+            lastName: '',
+            avatar: null
+          };
+          
           events.push({
-            id: comment.id,
+            id: String(comment.id),
             type: 'comment',
             timestamp: comment.createdAt,
-            user: comment.user,
+            user: {
+              id: String(commentUser.id),
+              firstName: commentUser.firstName || '',
+              lastName: commentUser.lastName || '',
+              avatar: commentUser.avatar
+            },
             details: {
               content: comment.content,
               isInternal: comment.isInternal
@@ -1704,17 +1713,6 @@ const TicketDetailPage: React.FC = () => {
           )}
         </Menu>
       </Box>
-
-      {/* Add the SLA assignment modal */}
-      <AssignSLAModal
-        open={slaModalOpen}
-        onClose={() => setSlaModalOpen(false)}
-        ticketId={Number(id)}
-        onAssign={() => {
-          // Refresh ticket data
-          fetchTicketById(id || '');
-        }}
-      />
     </Container>
   );
 };

@@ -2,6 +2,7 @@ import express from 'express';
 import { z } from 'zod';
 import multer from 'multer';
 import path from 'path';
+import { query } from '../config/database';
 
 import { 
   getTickets, 
@@ -27,9 +28,45 @@ import { authenticate } from '../middleware/auth.middleware';
 // Use memory storage for Supabase integration
 const storage = multer.memoryStorage();
 
+// Function to get the file size limit from settings
+const getFileSizeLimit = async () => {
+  try {
+    // Try to get max file size from settings
+    const result = await query(
+      'SELECT settings_data->\'maxFileSize\' as max_file_size FROM settings WHERE category = $1 LIMIT 1',
+      ['general']
+    );
+    
+    if (result.rows.length > 0 && result.rows[0].max_file_size) {
+      // Convert MB to bytes (settings are stored in MB)
+      const maxSizeMB = parseInt(result.rows[0].max_file_size);
+      if (!isNaN(maxSizeMB) && maxSizeMB > 0) {
+        return maxSizeMB * 1024 * 1024; // Convert MB to bytes
+      }
+    }
+    
+    // Default to 5MB if not found or invalid
+    return 5 * 1024 * 1024;
+  } catch (error) {
+    console.error('Error fetching max file size from settings:', error);
+    // Default to 5MB on error
+    return 5 * 1024 * 1024;
+  }
+};
+
+// Initially set with default limit, will be updated on each request
 const upload = multer({ 
   storage: storage, 
-  limits: { fileSize: 10 * 1024 * 1024 },
+  limits: { fileSize: 5 * 1024 * 1024 }, // Default 5MB
+  fileFilter: (req, file, cb) => {
+    // Dynamically update file size limit on each request
+    getFileSizeLimit().then(maxSize => {
+      (upload as any).limits.fileSize = maxSize;
+      cb(null, true);
+    }).catch(err => {
+      cb(null, true); // Still allow the file even if we couldn't get the limit
+    });
+  }
 });
 // --- End Multer Configuration ---
 

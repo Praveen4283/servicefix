@@ -178,6 +178,14 @@ class NotificationManager {
       return;
     }
 
+    // Ensure login notifications are always app category
+    let effectiveCategory = options.category || 'system';
+    if ((options.type === 'success' && options.message.includes('Welcome back')) ||
+        (options.title && options.title === 'Login Successful')) {
+      console.log('[NotificationManager] Detected login notification, forcing app category');
+      effectiveCategory = 'app';
+    }
+
     // Create notification object
     const notification: Notification = {
       id: uuidv4(),
@@ -187,15 +195,15 @@ class NotificationManager {
       duration: options.duration || 5000,
       timestamp: Date.now(),
       isRead: options.isRead || false,
-      category: options.category || 'system'
+      category: effectiveCategory
     };
     
-    this.log('[NotificationManager] Notification object created:', notification);
+    console.log('[NotificationManager] Notification object created:', notification);
 
     try {
       // Different handling based on persistence
-      if (options.isPersistent) {
-        // For persistent notifications, add to backend and panel
+      if (options.isPersistent || effectiveCategory === 'app') {
+        // For persistent notifications or app category, add to backend and panel
         this._context?._addPersistentNotification(notification)
           .then(() => {
             // After adding to backend/storage, also show a toast if it's a new notification
@@ -226,18 +234,19 @@ class NotificationManager {
             id: notification.id
           }
         );
-        
-        // Even for non-persistent notifications, if it's an app notification
-        // or a profile update, we should make sure it appears in the notification panel
-        if (options.category === 'app' || 
-            (options.type === 'success' && options.message.includes('profile')) ||
-            (options.title && options.title.includes('Profile'))) {
-          // Add to the notification panel 
-          this._context._addPersistentNotification({
+      }
+
+      // For login notifications, also add directly to local storage as a backup
+      if ((options.type === 'success' && options.message.includes('Welcome back')) ||
+          (options.title && options.title === 'Login Successful')) {
+        console.log('[NotificationManager] Adding login notification directly to local storage as backup');
+        import('../services/notificationService').then(({ default: notificationService }) => {
+          notificationService.addNotification({
             ...notification,
-            isRead: false // Keep it unread so it's visible in the panel
+            category: 'app', // Always set app category for login notifications
+            isRead: false
           });
-        }
+        });
       }
     } catch (error) {
       console.error('[NotificationManager] Error showing notification:', error);
@@ -246,84 +255,80 @@ class NotificationManager {
 
   // Process incoming socket notification
   private processSocketNotification(notification: any) {
+    console.log('[NotificationManager] Processing socket notification:', notification);
+    
     // Add required fields if missing
     const processedNotification: ManagedNotification = {
       id: notification.id || uuidv4(),
       message: notification.message || '',
-      type: (notification.type || 'info') as NotificationType,
+      type: notification.type || 'info',
       duration: notification.duration || 0,
       timestamp: notification.timestamp || Date.now(),
       isRead: notification.isRead || false,
       title: notification.title || '',
       category: notification.category || 'app',
-      source: 'socket',
-      isPersistent: notification.isPersistent !== false
+      source: 'socket'
     };
-
-    // Check if we already showed this notification directly
-    const fingerprint = this.getFingerprint(processedNotification);
     
-    // Skip if it's from a notification we sent directly
-    let isDuplicate = false;
-    this.pendingSyncNotifications.forEach((pending, id) => {
-      const pendingFingerprint = this.getFingerprint(pending);
-      if (pendingFingerprint === fingerprint) {
-        this.log('[NotificationManager] Skipping socket notification already sent directly:', fingerprint);
-        isDuplicate = true;
-        this.pendingSyncNotifications.delete(id);
-      }
-    });
-    
-    // Also check general duplicate detection
-    if (!isDuplicate && this.isDuplicate(processedNotification)) {
-      isDuplicate = true;
-    }
-    
-    if (!isDuplicate) {
-      this.addToUI(processedNotification);
-    }
+    // Add to UI and store
+    this.addToUI(processedNotification);
   }
 
-  // Add notification to UI through notification context
+  // Add a notification to the UI via the context
   private addToUI(notification: ManagedNotification) {
-    if (!this.notificationContext) {
-      console.error('[NotificationManager] No notification context set');
+    console.log('[NotificationManager] Adding notification to UI:', notification);
+    
+    if (!this._context) {
+      console.warn('[NotificationManager] Context not set, queueing notification:', notification);
+      this._queue.push({ 
+        type: 'direct', 
+        payload: { 
+          message: notification.message,
+          type: notification.type,
+          title: notification.title,
+          duration: notification.duration,
+          isPersistent: notification.category === 'app',
+          category: notification.category,
+          isRead: notification.isRead
+        } 
+      });
       return;
     }
-
-    this.log('[NotificationManager] Adding to UI:', notification);
     
-    // Treat as temporary toast if either:
-    // 1. Explicitly set isPersistent to false, OR
-    // 2. It's a system category notification (default behavior)
-    if (notification.isPersistent === false || notification.category === 'system') {
-      // Use _addTemporaryToast for transient notifications
-      this.notificationContext._addTemporaryToast(
+    // Always add persistent notifications to the backend/panel
+    if (notification.category === 'app') {
+      this._context._addPersistentNotification(notification)
+        .then(() => {
+          // Double check context is still available
+          if (this._context) {
+            // If the notification is new and not marked as read, also show a toast
+            if (!notification.isRead) {
+              this._context._addTemporaryToast(
+                notification.message,
+                notification.type,
+                {
+                  title: notification.title,
+                  duration: notification.duration || 5000,
+                  id: notification.id
+                }
+              );
+            }
+          }
+        })
+        .catch(error => {
+          console.error('[NotificationManager] Error adding notification to persistent storage:', error);
+        });
+    } else {
+      // For system notifications, just show toast
+      this._context._addTemporaryToast(
         notification.message,
         notification.type,
-        { 
-          title: notification.title, 
-          duration: notification.duration || 5000,
-          id: notification.id // Pass the existing ID to prevent duplicates
+        {
+          title: notification.title,
+          duration: notification.duration,
+          id: notification.id
         }
       );
-      
-      // For login notifications, also add to persistent storage so they appear in the notification menu
-      // Only do this if it's a system notification that should also be persistent
-      if (notification.isPersistent === true && (
-          notification.title === 'Login Successful' || 
-          notification.message.includes('Welcome back')
-      )) {
-        const persistentCopy = {
-          ...notification,
-          category: 'app' as 'app' | 'system' // Explicitly type as union
-        };
-        this.notificationContext._addPersistentNotification(persistentCopy);
-        this.log('[NotificationManager] Also adding as persistent notification:', persistentCopy);
-      }
-    } else {
-      // Use _addPersistentNotification for persistent notifications
-      this.notificationContext._addPersistentNotification(notification);
     }
   }
 

@@ -9,6 +9,7 @@ import { isValidEmail } from '../utils/validation';
 import authService from '../services/auth.service';
 import { camelToSnake, snakeToCamel } from '../utils/modelConverters';
 import { v4 as uuidv4 } from 'uuid';
+import { createHash } from 'crypto';
 
 // Secret key for JWT - Ensure environment variables are set
 if (!process.env.JWT_SECRET) {
@@ -63,6 +64,46 @@ logger.info('[Auth Signing] Using JWT secrets from environment variables.');
 interface RequestWithCsrf extends Request {
   csrfToken(): string;
 }
+
+/**
+ * Get cookie options with appropriate security settings
+ * @param isRefreshToken Whether the cookie is for a refresh token (longer expiry)
+ * @returns Cookie options
+ */
+const getCookieOptions = (isRefreshToken = false) => {
+  const isProduction = process.env.NODE_ENV === 'production';
+  const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
+  
+  // Extract domain for production environment
+  let cookieDomain;
+  try {
+    if (isProduction && !frontendUrl.includes('localhost')) {
+      const url = new URL(frontendUrl);
+      // Use full hostname in production, not just domain segments
+      // This prevents cookie sharing between unrelated subdomains
+      cookieDomain = url.hostname;
+    }
+  } catch (error) {
+    logger.warn(`Error parsing frontend URL: ${frontendUrl}`, error);
+  }
+  
+  // Define sameSite based on environment and context
+  const sameSite: 'strict' | 'lax' | 'none' = isProduction ? 'strict' : 'lax';
+  
+  // Get max age from environment variables or use defaults
+  const maxAge = isRefreshToken ? 
+    parseDuration(process.env.JWT_REFRESH_EXPIRES_IN || '7d') :
+    parseDuration(process.env.JWT_EXPIRES_IN || '1h');
+  
+  return {
+    httpOnly: true,
+    secure: isProduction || frontendUrl.startsWith('https'),
+    sameSite,
+    path: '/',
+    domain: cookieDomain,
+    maxAge
+  };
+};
 
 /**
  * Generate JWT token
@@ -267,301 +308,205 @@ export const register = asyncHandler(async (
 });
 
 /**
- * User login
+ * Generate a fingerprint for the request source
+ * @param req Request object
+ * @returns MD5 hash of IP and simplified user agent
  */
-export const login = asyncHandler(async (
-  req: Request,
-  res: Response,
-  next: NextFunction
-) => {
-  try {
-    const { email, password } = req.body;
+function generateRequestFingerprint(req: Request): string {
+  const ip = req.ip || req.socket.remoteAddress || '0.0.0.0';
+  // Extract browser and OS info without version numbers to be more resilient to updates
+  const userAgent = req.headers['user-agent'] || '';
+  
+  // Create a simplified fingerprint that's still useful for validation
+  // but resilient to minor changes in the user agent string
+  let simplifiedUserAgent = '';
+  
+  // Extract browser name
+  if (userAgent.includes('Chrome')) simplifiedUserAgent += 'Chrome_';
+  else if (userAgent.includes('Firefox')) simplifiedUserAgent += 'Firefox_';
+  else if (userAgent.includes('Safari') && !userAgent.includes('Chrome')) simplifiedUserAgent += 'Safari_';
+  else if (userAgent.includes('Edge')) simplifiedUserAgent += 'Edge_';
+  else if (userAgent.includes('Trident') || userAgent.includes('MSIE')) simplifiedUserAgent += 'IE_';
+  else simplifiedUserAgent += 'Other_';
+  
+  // Extract OS
+  if (userAgent.includes('Windows')) simplifiedUserAgent += 'Windows';
+  else if (userAgent.includes('Mac OS')) simplifiedUserAgent += 'MacOS';
+  else if (userAgent.includes('Linux')) simplifiedUserAgent += 'Linux';
+  else if (userAgent.includes('Android')) simplifiedUserAgent += 'Android';
+  else if (userAgent.includes('iOS') || userAgent.includes('iPhone') || userAgent.includes('iPad')) simplifiedUserAgent += 'iOS';
+  else simplifiedUserAgent += 'Other';
+  
+  // Create a hash of the IP and simplified user agent
+  const hash = createHash('md5')
+    .update(`${ip}|${simplifiedUserAgent}`)
+    .digest('hex');
 
-    // Validate input
-    if (!email || !password) {
-      return next(AppError.badRequest('Email and password are required'));
-    }
+  return hash;
+}
 
-    // Find user by email
-    const userResult = await query(
-      'SELECT id, email, first_name, last_name, password, role, avatar_url, organization_id, designation FROM users WHERE email = $1',
-      [email]
-    );
+/**
+ * Log in a user
+ * @param req Request with email and password
+ * @param res Response with user data and token
+ */
+export const login = asyncHandler(async (req: Request, res: Response, next: NextFunction) => {
+  const { email, password } = req.body;
+  
+  if (!email || !password) {
+    throw AppError.badRequest('Email and password are required');
+  }
 
-    if (userResult.rows.length === 0) {
-      return next(AppError.unauthorized('Invalid email or password'));
-    }
-
-    const user = userResult.rows[0];
-
-    // Verify password
-    const isPasswordValid = await bcrypt.compare(password, user.password);
-
-    if (!isPasswordValid) {
-      return next(AppError.unauthorized('Invalid email or password'));
-    }
-
-    // Generate JWT token
-    const token = authService.generateToken(user.id, user.role);
-    
-    // Generate refresh token
-    const refreshToken = authService.generateRefreshToken(user.id);
-    
-    // Set expiration date for refresh token
-    const refreshTokenExpiresAt = new Date();
-    refreshTokenExpiresAt.setDate(refreshTokenExpiresAt.getDate() + 7); // 7 days
-    
-    // Store refresh token in database
-    await authService.saveRefreshToken(user.id, refreshToken, refreshTokenExpiresAt);
-    
-    // Update last login time
-    await query(
-      'UPDATE users SET last_login_at = NOW() WHERE id = $1',
-      [user.id]
-    );
-
-    // Get organization details if applicable
-    let organizationData = null;
-    if (user.organization_id) {
-      const orgResult = await query(
-        'SELECT id, name, domain FROM organizations WHERE id = $1',
-        [user.organization_id]
-      );
-      
-      if (orgResult.rows.length > 0) {
-        organizationData = orgResult.rows[0];
-      }
-    }
-
-    // Prepare user data for response
-    const userData = {
+  // Query user by email
+  const userResult = await query(
+    'SELECT * FROM users WHERE email = $1',
+    [email.toLowerCase()]
+  );
+  
+  if (userResult.rows.length === 0) {
+    throw AppError.unauthorized('Invalid email or password');
+  }
+  
+  const user = userResult.rows[0];
+  
+  // Check if password matches
+  const isPasswordValid = await bcrypt.compare(password, user.password || user.encrypted_password || '');
+  if (!isPasswordValid) {
+    throw AppError.unauthorized('Invalid email or password');
+  }
+  
+  // Generate request fingerprint
+  const fingerprint = generateRequestFingerprint(req);
+  
+  // Generate token
+  const token = authService.generateToken(user.id, user.role);
+  
+  // Generate refresh token
+  const refreshToken = authService.generateRefreshToken(user.id);
+  
+  // Store user's IP address for security monitoring
+  const clientIp = req.ip || req.socket.remoteAddress || '0.0.0.0';
+  await authService.storeUserIpAddress(user.id, clientIp);
+  
+  // Save refresh token to database
+  const expiryDays = parseInt(process.env.JWT_REFRESH_EXPIRES_IN?.replace(/\D/g, '') || '7');
+  const expiresAt = new Date();
+  expiresAt.setDate(expiresAt.getDate() + expiryDays);
+  
+  await authService.saveRefreshToken(user.id, refreshToken, expiresAt, fingerprint);
+  
+  // Set cookies with enhanced security 
+  const cookieOptions = getCookieOptions();
+  const refreshCookieOptions = getCookieOptions(true);
+  
+  // Set accessToken cookie
+  res.cookie('accessToken', token, cookieOptions);
+  
+  // Set refresh token cookie
+  res.cookie('refreshToken', refreshToken, refreshCookieOptions);
+  
+  // Create a short-lived CSRF token with improved security
+  const csrfToken = crypto.randomBytes(64).toString('hex');
+  res.cookie('_csrf', csrfToken, {
+    ...cookieOptions,
+    httpOnly: false, // CSRF token needs to be readable by JavaScript
+    maxAge: 24 * 60 * 60 * 1000 // 24 hours
+  });
+  
+  // Add token creation time for improved management
+  res.cookie('_token_created', Date.now().toString(), {
+    httpOnly: false,
+    secure: cookieOptions.secure,
+    sameSite: cookieOptions.sameSite,
+    path: cookieOptions.path,
+    domain: cookieOptions.domain,
+    maxAge: cookieOptions.maxAge
+  });
+  
+  // Update last login timestamp
+  await query('UPDATE users SET last_login_at = CURRENT_TIMESTAMP WHERE id = $1', [user.id]);
+  
+  // Return user data and token
+  res.json({
+    status: 'success',
+    message: 'Login successful',
+    user: {
       id: user.id,
       email: user.email,
       firstName: user.first_name,
       lastName: user.last_name,
       role: user.role,
       avatarUrl: user.avatar_url,
-      organizationId: user.organization_id,
-      organization: organizationData,
-      designation: user.designation
-    };
-    
-    // Set access token as HttpOnly cookie with proper settings
-    const isProduction = process.env.NODE_ENV === 'production';
-    const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
-    
-    // Determine cookie domain based on environment
-    let cookieDomain;
-    if (isProduction && !frontendUrl.includes('localhost')) {
-      try {
-        // Extract domain from frontend URL, but handle malformed URLs gracefully
-        const url = new URL(frontendUrl);
-        const domainParts = url.hostname.split('.');
-        if (domainParts.length >= 2) {
-          cookieDomain = '.' + domainParts.slice(-2).join('.');
-        }
-      } catch (error) {
-        logger.warn(`Error parsing frontend URL: ${frontendUrl}`, error);
-      }
-    }
-    
-    // Use SameSite=None for cross-site requests in production
-    const sameSite = isProduction ? 'none' : 'lax';
-    
-    res.cookie('accessToken', token, {
-      httpOnly: true,
-      secure: isProduction || frontendUrl.startsWith('https'),
-      sameSite: sameSite,
-      path: '/',
-      domain: cookieDomain,
-      maxAge: 60 * 60 * 1000 // 1 hour in milliseconds
-    });
-    
-    // Set refresh token as HttpOnly cookie with the same settings
-    res.cookie('refreshToken', refreshToken, {
-      httpOnly: true,
-      secure: isProduction || frontendUrl.startsWith('https'),
-      sameSite: sameSite,
-      path: '/',
-      domain: cookieDomain,
-      maxAge: 7 * 24 * 60 * 60 * 1000 // 7 days in milliseconds
-    });
-
-    // Return user data and tokens
-    res.status(200).json({
-      status: 'success',
-      message: 'Login successful',
-      user: userData,
-      token, // Include token in the response for header-based auth
-      refreshToken, // Include refresh token in the response
-      success: true
-    });
-  } catch (error) {
-    next(error);
-  }
+      organizationId: user.organization_id
+    },
+    token,
+    refreshToken,
+    csrfToken
+  });
 });
 
 /**
- * Refresh access token
+ * Refresh an expired JWT token using a refresh token
+ * @param req Request with refreshToken
+ * @param res Response with new token
  */
-export const refreshToken = asyncHandler(async (
-  req: Request,
-  res: Response,
-  next: NextFunction
-) => {
+export const refreshToken = asyncHandler(async (req: Request, res: Response, next: NextFunction) => {
+  // Try different methods to get the refresh token
+  let refreshToken = req.body.refreshToken || req.cookies?.refreshToken || null;
+  
+  if (!refreshToken) {
+      throw AppError.badRequest('Refresh token is required');
+  }
+  
+  // Generate request fingerprint for security validation
+  const fingerprint = generateRequestFingerprint(req);
+  
   try {
-    // Try to get refresh token from cookie first, then from request body
-    let refreshToken = req.cookies.refreshToken;
+    // Request new access token
+    const result = await authService.refreshAccessToken(refreshToken, fingerprint);
     
-    // If no cookie token, check the request body
-    if (!refreshToken && req.body && req.body.refreshToken) {
-      refreshToken = req.body.refreshToken;
+    // Set new access token in HTTP-only cookie with enhanced security
+    const cookieOptions = getCookieOptions();
+    res.cookie('accessToken', result.token, cookieOptions);
+    
+    // If we got a new refresh token due to rotation, update the cookie
+    if (result.refreshToken) {
+      const refreshCookieOptions = getCookieOptions(true);
+      res.cookie('refreshToken', result.refreshToken, refreshCookieOptions);
     }
     
-    if (!refreshToken) {
-      return next(AppError.unauthorized('Refresh token is required', 'REFRESH_TOKEN_REQUIRED'));
-    }
-
-    // Verify the refresh token
-    let decoded;
-    try {
-      decoded = authService.verifyRefreshToken(refreshToken);
-    } catch (error) {
-      return next(AppError.unauthorized('Invalid refresh token', 'INVALID_REFRESH_TOKEN'));
-    }
-
-    // Check if the refresh token exists in the database
-    const tokenCheckResult = await query(
-      'SELECT id, user_id, expires_at, is_revoked FROM user_tokens WHERE refresh_token = $1',
-      [refreshToken]
-    );
-
-    if (tokenCheckResult.rows.length === 0) {
-      return next(AppError.unauthorized('Refresh token not found', 'TOKEN_NOT_FOUND'));
-    }
-
-    const tokenRecord = tokenCheckResult.rows[0];
-
-    // Check if token is revoked
-    if (tokenRecord.is_revoked) {
-      return next(AppError.unauthorized('Refresh token has been revoked', 'TOKEN_REVOKED'));
-    }
-
-    // Check if token is expired
-    const now = new Date();
-    if (new Date(tokenRecord.expires_at) < now) {
-      return next(AppError.unauthorized('Refresh token has expired', 'TOKEN_EXPIRED'));
-    }
-
-    // Get user details
-    const userResult = await query(
-      `SELECT 
-        u.id, u.email, u.first_name, u.last_name, u.role, 
-        u.avatar_url, u.phone, u.timezone, u.language, 
-        u.organization_id, u.designation,
-        o.name as organization_name
-      FROM users u 
-      LEFT JOIN organizations o ON u.organization_id = o.id 
-      WHERE u.id = $1`,
-      [tokenRecord.user_id]
-    );
-
-    if (userResult.rows.length === 0) {
-      return next(AppError.notFound('User not found'));
-    }
-
-    const user = userResult.rows[0];
-
-    // Generate a new access token
-    const newToken = authService.generateToken(user.id, user.role);
-    
-    // Generate a new refresh token
-    const newRefreshToken = authService.generateRefreshToken(user.id);
-    
-    // Update the refresh token in the database
-    const refreshTokenExpiresAt = new Date();
-    refreshTokenExpiresAt.setDate(refreshTokenExpiresAt.getDate() + 7); // 7 days
-    
-    // Revoke old refresh token
-    await query(
-      'UPDATE user_tokens SET is_revoked = TRUE WHERE id = $1',
-      [tokenRecord.id]
-    );
-    
-    // Save new refresh token
-    await authService.saveRefreshToken(user.id, newRefreshToken, refreshTokenExpiresAt);
-
-    // Format user data for response
-    const userData = {
-      id: user.id,
-      email: user.email,
-      firstName: user.first_name,
-      lastName: user.last_name,
-      role: user.role,
-      avatarUrl: user.avatar_url,
-      organizationId: user.organization_id,
-      organization: user.organization_id ? {
-        id: user.organization_id,
-        name: user.organization_name
-      } : null,
-      designation: user.designation,
-      phone: user.phone,
-      timezone: user.timezone,
-      language: user.language
-    };
-    
-    // Set new access token as HttpOnly cookie
-    const isProduction = process.env.NODE_ENV === 'production';
-    const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
-    
-    // Determine cookie domain based on environment
-    let cookieDomain;
-    if (isProduction && !frontendUrl.includes('localhost')) {
-      try {
-        // Extract domain from frontend URL, but handle malformed URLs gracefully
-        const url = new URL(frontendUrl);
-        const domainParts = url.hostname.split('.');
-        if (domainParts.length >= 2) {
-          cookieDomain = '.' + domainParts.slice(-2).join('.');
-        }
-      } catch (error) {
-        logger.warn(`Error parsing frontend URL: ${frontendUrl}`, error);
-      }
-    }
-    
-    // Use SameSite=None for cross-site requests in production
-    const sameSite = isProduction ? 'none' : 'lax';
-    
-    res.cookie('accessToken', newToken, {
-      httpOnly: true,
-      secure: isProduction || frontendUrl.startsWith('https'),
-      sameSite: sameSite,
-      path: '/',
-      domain: cookieDomain,
-      maxAge: 60 * 60 * 1000 // 1 hour in milliseconds
+    // Also refresh the CSRF token with improved security
+    const newCsrfToken = crypto.randomBytes(64).toString('hex');
+    res.cookie('_csrf', newCsrfToken, {
+      ...cookieOptions,
+      httpOnly: false, // CSRF token needs to be readable by JavaScript
+      maxAge: 24 * 60 * 60 * 1000 // 24 hours
     });
     
-    // Set new refresh token as HttpOnly cookie
-    res.cookie('refreshToken', newRefreshToken, {
-      httpOnly: true,
-      secure: isProduction || frontendUrl.startsWith('https'),
-      sameSite: sameSite,
-      path: '/',
-      domain: cookieDomain,
-      maxAge: 7 * 24 * 60 * 60 * 1000 // 7 days in milliseconds
+    // Update token creation time
+    res.cookie('_token_created', Date.now().toString(), {
+      httpOnly: false,
+      secure: cookieOptions.secure,
+      sameSite: cookieOptions.sameSite,
+      path: cookieOptions.path,
+      domain: cookieOptions.domain,
+      maxAge: cookieOptions.maxAge
     });
-
-    // Return success response with tokens for header-based auth
-    res.status(200).json({
+    
+    // Return new tokens
+    res.json({
       status: 'success',
-      message: 'Token refreshed successfully',
-      user: userData,
-      token: newToken,
-      refreshToken: newRefreshToken,
-      success: true
+      token: result.token,
+      refreshToken: result.refreshToken, // Will be undefined if no rotation happened
+      user: result.user,
+      csrfToken: newCsrfToken
     });
   } catch (error) {
-    next(error);
+    if (error instanceof AppError) {
+      throw error;
+    } else {
+      throw AppError.unauthorized('Invalid refresh token');
+    }
   }
 });
 
@@ -574,31 +519,6 @@ export const logout = asyncHandler(async (
   next: NextFunction
 ) => {
   try {
-    // Clear cookies with the same settings as when they were set
-    const isProduction = process.env.NODE_ENV === 'production';
-    const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
-    
-    // Determine cookie domain based on environment
-    const cookieDomain = isProduction 
-      ? frontendUrl.includes('localhost') ? undefined : '.' + new URL(frontendUrl).hostname.split('.').slice(-2).join('.')
-      : undefined;
-    
-    res.clearCookie('accessToken', {
-      httpOnly: true,
-      secure: isProduction || frontendUrl.startsWith('https'),
-      sameSite: isProduction ? 'none' : 'lax',
-      path: '/',
-      domain: cookieDomain
-    });
-    
-    res.clearCookie('refreshToken', {
-      httpOnly: true,
-      secure: isProduction || frontendUrl.startsWith('https'),
-      sameSite: isProduction ? 'none' : 'lax',
-      path: '/',
-      domain: cookieDomain
-    });
-    
     // Get refresh token from cookie
     const refreshToken = req.cookies.refreshToken;
     
@@ -617,6 +537,20 @@ export const logout = asyncHandler(async (
         logger.warn('Error verifying refresh token during logout:', error);
       }
     }
+    
+    // Clear all auth-related cookies
+    const baseAccessOptions = getCookieOptions();
+    const baseRefreshOptions = getCookieOptions(true);
+    const baseCsrfOptions = getCookieOptions();
+    
+    // Create new option objects without the maxAge property
+    const { maxAge: _1, ...accessOptions } = baseAccessOptions;
+    const { maxAge: _2, ...refreshOptions } = baseRefreshOptions;
+    const { maxAge: _3, ...csrfOptions } = baseCsrfOptions;
+    
+    res.clearCookie('accessToken', accessOptions);
+    res.clearCookie('refreshToken', refreshOptions);
+    res.clearCookie('_csrf', csrfOptions);
 
     res.status(200).json({
       status: 'success',
@@ -815,29 +749,13 @@ export const getCsrfToken = asyncHandler(async (
   next: NextFunction
 ) => {
   try {
-    // Generate a token manually since req.csrfToken() is causing errors
+    // Generate a new token
     const csrfToken = crypto.randomBytes(32).toString('hex');
     
     // Set the token in a cookie with appropriate settings
-    const isProduction = process.env.NODE_ENV === 'production';
-    const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
-    
-    // Set cookie domain based on environment
-    let cookieDomain;
-    try {
-      if (isProduction && !frontendUrl.includes('localhost')) {
-        cookieDomain = new URL(frontendUrl).hostname.split('.').slice(-2).join('.');
-      }
-    } catch (e) {
-      logger.warn(`Failed to parse frontend URL for cookie domain: ${e}`);
-    }
-    
     res.cookie('_csrf', csrfToken, {
-      httpOnly: true,
-      secure: isProduction || frontendUrl.startsWith('https'),
-      sameSite: isProduction ? 'none' : 'lax', // Use 'none' for cross-site requests in production
-      path: '/',
-      domain: cookieDomain,
+      ...getCookieOptions(),
+      httpOnly: false, // CSRF token needs to be accessible by JavaScript
       maxAge: 24 * 60 * 60 * 1000 // 24 hours
     });
     

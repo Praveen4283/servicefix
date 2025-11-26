@@ -1,6 +1,7 @@
-import { Entity, PrimaryGeneratedColumn, Column, ManyToOne, JoinColumn, CreateDateColumn, UpdateDateColumn } from 'typeorm';
+import { Entity, PrimaryGeneratedColumn, Column, ManyToOne, JoinColumn, CreateDateColumn, UpdateDateColumn, OneToMany } from 'typeorm';
 import { User } from './User';
 import { Ticket } from './Ticket';
+import { Attachment } from './Attachment';
 
 @Entity('ticket_comments')
 export class TicketComment {
@@ -23,6 +24,9 @@ export class TicketComment {
   @ManyToOne(() => Ticket, ticket => ticket.comments, { nullable: false, onDelete: 'CASCADE' })
   @JoinColumn({ name: 'ticket_id' })
   ticket: Ticket;
+
+  @OneToMany(() => Attachment, attachment => attachment.comment)
+  attachments: Attachment[];
 
   @CreateDateColumn({ name: 'created_at' })
   createdAt: Date;

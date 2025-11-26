@@ -9,7 +9,12 @@ import {
   getTicketSettings,
   updateTicketSettings,
   getSLASettings,
-  updateSLASettings
+  updateSLASettings,
+  getAdvancedSettings,
+  updateAdvancedSettings,
+  getIntegrationSettings,
+  updateIntegrationSettings,
+  testIntegrationConnection
 } from '../controllers/settings.controller';
 
 const router = express.Router();
@@ -33,5 +38,14 @@ router.put('/ticket', authorize(['admin']), updateTicketSettings);
 // SLA settings routes
 router.get('/sla', authorize(['admin']), getSLASettings);
 router.put('/sla', authorize(['admin']), updateSLASettings);
+
+// Advanced settings routes
+router.get('/advanced', authorize(['admin']), getAdvancedSettings);
+router.put('/advanced', authorize(['admin']), updateAdvancedSettings);
+
+// Integration settings routes
+router.get('/integration', authorize(['admin']), getIntegrationSettings);
+router.put('/integration', authorize(['admin']), updateIntegrationSettings);
+router.post('/integration/:type/test', authorize(['admin']), testIntegrationConnection);
 
 export default router; 

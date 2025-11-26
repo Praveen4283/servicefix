@@ -12,6 +12,7 @@ const router = express.Router();
 router.post(
   '/conversations',
   authenticate, // Ensure user is logged in
+  chatbotController.validateCreateConversation, // Add validation
   chatbotController.createConversationHandler
 );
 
@@ -23,6 +24,7 @@ router.post(
 router.post(
   '/conversations/:id/messages',
   authenticate, // Ensure user is logged in
+  chatbotController.validateAddMessage, // Add validation
   chatbotController.addMessageHandler
 );
 
@@ -34,7 +36,43 @@ router.post(
 router.get(
   '/conversations/:id/messages',
   authenticate, // Ensure user is logged in
+  chatbotController.validateGetMessages, // Add validation
   chatbotController.getMessagesHandler
+);
+
+/**
+ * @route   GET /api/chat/conversations
+ * @desc    Get all conversations for the authenticated user's organization
+ * @access  Private
+ */
+router.get(
+  '/conversations',
+  authenticate,
+  chatbotController.getAllConversations
+);
+
+/**
+ * @route   GET /api/chat/conversations/:id
+ * @desc    Get a specific conversation by ID with its messages
+ * @access  Private
+ */
+router.get(
+  '/conversations/:id',
+  authenticate,
+  chatbotController.validateGetMessages, // Reuse the same validation
+  chatbotController.getConversation
+);
+
+/**
+ * @route   PATCH /api/chat/conversations/:id/end
+ * @desc    End a conversation
+ * @access  Private
+ */
+router.patch(
+  '/conversations/:id/end',
+  authenticate,
+  chatbotController.validateGetMessages, // Reuse the same validation for conversation ID
+  chatbotController.endConversation
 );
 
 // Add other routes if needed (e.g., GET /conversations/:id/messages)

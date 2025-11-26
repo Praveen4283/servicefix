@@ -45,6 +45,8 @@ import {
   TableRow,
   TableCell,
   TableBody,
+  FormHelperText,
+  SelectChangeEvent,
 } from '@mui/material';
 import { 
   Save as SaveIcon, 
@@ -91,9 +93,9 @@ import {
   IntegrationSettings,
   AdvancedSettings,
   ValidationErrors,
-  NotificationState
 } from '../../types/settings';
 import { useLocation } from 'react-router-dom';
+import { notificationManager } from '../../services/notificationManager';
 
 // Type definitions for better type safety
 interface TabPanelProps {
@@ -272,13 +274,94 @@ interface SLAFormState {
   isNew?: boolean; // Added isNew property to fix linter errors
 }
 
+// Add the TIMEZONES constant at the appropriate place in the file, near other constants
+const TIMEZONES = [
+  { value: 'UTC', label: 'UTC' },
+  { value: 'America/New_York', label: 'Eastern Time (ET)' },
+  { value: 'America/Chicago', label: 'Central Time (CT)' },
+  { value: 'America/Denver', label: 'Mountain Time (MT)' },
+  { value: 'America/Los_Angeles', label: 'Pacific Time (PT)' },
+  { value: 'Europe/London', label: 'Greenwich Mean Time (GMT)' },
+  { value: 'Europe/Paris', label: 'Central European Time (CET)' },
+  { value: 'Asia/Tokyo', label: 'Japan Standard Time (JST)' },
+  { value: 'Asia/Shanghai', label: 'China Standard Time (CST)' },
+  { value: 'Asia/Kolkata', label: 'India Standard Time (IST)' },
+  { value: 'Australia/Sydney', label: 'Australian Eastern Time (AET)' },
+];
+
+// Add FormSelectProps interface
+interface FormSelectProps {
+  label: string;
+  name: string;
+  value: string;
+  onChange: (e: SelectChangeEvent) => void;
+  options: Array<{ value: string, label: string }>;
+  fullWidth?: boolean;
+  margin?: 'none' | 'dense' | 'normal';
+  required?: boolean;
+  error?: boolean;
+  helperText?: string;
+  disabled?: boolean;
+}
+
+// Create FormSelect component
+const FormSelect: React.FC<FormSelectProps> = ({
+  label,
+  name,
+  value,
+  onChange,
+  options,
+  fullWidth = true,
+  margin = 'normal',
+  required = false,
+  error = false,
+  helperText,
+  disabled = false,
+}) => (
+  <FormControl 
+    fullWidth={fullWidth} 
+    margin={margin} 
+    required={required} 
+    error={error}
+    disabled={disabled}
+  >
+    <InputLabel id={`${name}-label`}>{label}</InputLabel>
+    <Select
+      labelId={`${name}-label`}
+      id={name}
+      name={name}
+      value={value}
+      onChange={onChange}
+      label={label}
+      sx={{
+        borderRadius: 2,
+        transition: 'all 0.2s',
+        '&:hover': {
+          backgroundColor: (theme) => alpha(theme.palette.primary.main, 0.02),
+        },
+        '&.Mui-focused': {
+          backgroundColor: (theme) => alpha(theme.palette.primary.main, 0.05),
+        }
+      }}
+    >
+      {options.map((option) => (
+        <MenuItem key={option.value} value={option.value}>
+          {option.label}
+        </MenuItem>
+      ))}
+    </Select>
+    {helperText && <FormHelperText>{helperText}</FormHelperText>}
+  </FormControl>
+);
+
 const SettingsPage: React.FC = () => {
   const theme = useTheme();
   const { user } = useAuth();
   const location = useLocation();
   
-  // Provide a default organization ID to avoid user.organizationId being null
-  const defaultOrgId = 1001;
+  // Get organization ID from authenticated user instead of hardcoding it
+  // Convert to number to ensure compatibility with APIs expecting numeric IDs
+  const organizationId = user?.organizationId ? Number(user.organizationId) : undefined;
   
   // Tab state
   const [value, setValue] = useState<number>(0);
@@ -294,11 +377,6 @@ const SettingsPage: React.FC = () => {
     ticket: false,
     integration: false,
     advanced: false
-  });
-  const [notification, setNotification] = useState<NotificationState>({
-    open: false,
-    message: '',
-    type: 'success',
   });
   const [unsavedChanges, setUnsavedChanges] = useState(false);
   const [showLeaveDialog, setShowLeaveDialog] = useState(false);
@@ -325,7 +403,6 @@ const SettingsPage: React.FC = () => {
     companyName: '',
     supportEmail: '',
     maxFileSize: 5, // MB
-    allowGuestTickets: true,
     defaultTimeZone: 'UTC',
   });
 
@@ -355,8 +432,7 @@ const SettingsPage: React.FC = () => {
     closedTicketReopen: 7, // days
     autoCloseResolved: 3, // days
     enableCustomerSatisfaction: true,
-    requireCategory: true,
-    enableSLA: false,
+    requireCategory: true
   });
 
   const [originalTicketSettings, setOriginalTicketSettings] = useState<TicketSettings>({
@@ -402,6 +478,7 @@ const SettingsPage: React.FC = () => {
     // API settings
     apiEnabled: true,
     apiRateLimitPerHour: 1000,
+    apiRateLimitWindowMinutes: 15,
     enableApiDocumentation: true,
     
     // Security settings
@@ -429,18 +506,39 @@ const SettingsPage: React.FC = () => {
     ...advancedSettings
   });
 
+  // Default settings for the general settings tab
+  const defaultGeneralSettings: GeneralSettings = {
+    companyName: 'ServiceFix',
+    supportEmail: 'support@servicefix.com',
+    maxFileSize: 5,
+    defaultTimeZone: 'UTC'
+  };
+
+  // Default settings for the ticket settings tab
+  const defaultTicketSettings: TicketSettings = {
+    defaultPriority: 'medium',
+    closedTicketReopen: 7,
+    autoCloseResolved: 3,
+    enableCustomerSatisfaction: true,
+    requireCategory: true
+  };
+
   // Load all settings on initial render
   useEffect(() => {
+    if (organizationId) {
     fetchAllSettings();
     fetchTicketPriorities();
     fetchSLAPolicies();
+    } else {
+      notificationManager.showError('Organization ID not found. Please contact support.');
+    }
     
     // Check if we have an initialTab passed from navigation state
     const state = location.state as { initialTab?: number } | null;
     if (state && typeof state.initialTab === 'number') {
       setValue(state.initialTab);
     }
-  }, [location]);
+  }, [location, organizationId]);
   
   // Fetch all settings from the API
   const fetchAllSettings = async () => {
@@ -459,27 +557,41 @@ const SettingsPage: React.FC = () => {
     try {
       setLoadingSettings(prev => ({ ...prev, general: true }));
       
-      // Simulate API call with a timeout
-      // In production, use: const data = await settingsService.getGeneralSettings();
-      await new Promise(resolve => setTimeout(resolve, 1000));
-      const data: GeneralSettings = {
-        companyName: 'Acme Corporation',
-        supportEmail: 'support@acmecorp.com',
-        maxFileSize: 5,
-        allowGuestTickets: true,
-        defaultTimeZone: 'UTC',
-      };
+      // Use the actual API call
+      const data = await settingsService.getGeneralSettings();
       
-      setGeneralSettings(data);
-      setOriginalGeneralSettings(data);
+      if (data && typeof data === 'object') {
+        setGeneralSettings(data);
+        setOriginalGeneralSettings(data);
+        setApiError(null); // Clear previous errors on success
+      } else {
+        // Fallback to defaults if no settings found
+        const defaultData: GeneralSettings = {
+          companyName: 'ServiceFix',
+          supportEmail: 'support@servicefix.com',
+          maxFileSize: 5,
+          defaultTimeZone: 'UTC',
+        };
+        
+        setGeneralSettings(defaultData);
+        setOriginalGeneralSettings(defaultData);
+      }
     } catch (error) {
       console.error('Error fetching general settings:', error);
       setApiError('Failed to load general settings. Please try again.');
-      setNotification({
-        open: true,
-        message: 'Failed to load general settings',
-        type: 'error',
-      });
+      // Use notificationManager instead of setNotification
+      notificationManager.showError('Failed to load general settings');
+      
+      // Set defaults on error
+      const defaultData: GeneralSettings = {
+        companyName: 'ServiceFix',
+        supportEmail: 'support@servicefix.com',
+        maxFileSize: 5,
+        defaultTimeZone: 'UTC',
+      };
+      
+      setGeneralSettings(defaultData);
+      setOriginalGeneralSettings(defaultData);
     } finally {
       setLoadingSettings(prev => ({ ...prev, general: false }));
     }
@@ -504,11 +616,8 @@ const SettingsPage: React.FC = () => {
       setEmailSettings(null as any); // Explicitly set to null on error to trigger error UI
       setOriginalEmailSettings(null as any); // Also set original to null
       setApiError(`Failed to load email settings: ${error.message || 'Unknown error'}`);
-      setNotification({
-        open: true,
-        message: `Failed to load email settings: ${error.message || 'Unknown error'}`,
-        type: 'error',
-      });
+      // Use notificationManager instead of setNotification
+      notificationManager.showError(`Failed to load email settings: ${error.message || 'Unknown error'}`);
     } finally {
       setLoadingSettings(prev => ({ ...prev, email: false }));
     }
@@ -519,49 +628,24 @@ const SettingsPage: React.FC = () => {
     try {
       setLoadingSettings(prev => ({ ...prev, ticket: true }));
       
-      // Call the service to get actual ticket settings
-      const response = await settingsService.getTicketSettings();
-      console.log('Loaded ticket settings:', response);
+      // Use the actual API call
+      const data = await settingsService.getTicketSettings();
       
-      // If we have valid data, use it
-      if (response && typeof response === 'object') {
-        setTicketSettings(response);
-        setOriginalTicketSettings(response);
+      if (data && typeof data === 'object') {
+        setTicketSettings(data);
+        setOriginalTicketSettings(data);
+        setApiError(null); // Clear previous errors on success
       } else {
         // Fallback to defaults if no settings found
-        const defaultData: TicketSettings = {
-        defaultPriority: 'medium',
-        closedTicketReopen: 7,
-        autoCloseResolved: 3,
-        enableCustomerSatisfaction: true,
-        requireCategory: true,
-        enableSLA: false,
-      };
-      
-        setTicketSettings(defaultData);
-        setOriginalTicketSettings(defaultData);
+        setTicketSettings(defaultTicketSettings);
+        setOriginalTicketSettings(defaultTicketSettings);
       }
     } catch (error) {
       console.error('Error fetching ticket settings:', error);
+      // Fallback to defaults on error
+      setTicketSettings(defaultTicketSettings);
+      setOriginalTicketSettings(defaultTicketSettings);
       setApiError('Failed to load ticket settings. Please try again.');
-      setNotification({
-        open: true,
-        message: 'Failed to load ticket settings',
-        type: 'error',
-      });
-      
-      // Set defaults on error
-      const defaultData: TicketSettings = {
-        defaultPriority: 'medium',
-        closedTicketReopen: 7,
-        autoCloseResolved: 3,
-        enableCustomerSatisfaction: true,
-        requireCategory: true,
-        enableSLA: false,
-      };
-      
-      setTicketSettings(defaultData);
-      setOriginalTicketSettings(defaultData);
     } finally {
       setLoadingSettings(prev => ({ ...prev, ticket: false }));
     }
@@ -572,14 +656,59 @@ const SettingsPage: React.FC = () => {
     try {
       setLoadingSettings(prev => ({ ...prev, integration: true }));
       
-      // Simulate API call with a timeout
-      // In production, use: const data = await settingsService.getIntegrationSettings();
-      await new Promise(resolve => setTimeout(resolve, 1500));
-      const data: IntegrationSettings = {
+      // Use the actual API call
+      const data = await settingsService.getIntegrationSettings();
+      
+      if (data && typeof data === 'object') {
+        setIntegrationSettings(data);
+        setOriginalIntegrationSettings(data);
+        setApiError(null); // Clear previous errors on success
+      } else {
+        // Fallback to defaults if no settings found
+        const defaultData: IntegrationSettings = {
+          // Slack Integration
+          slackEnabled: false,
+          slackWebhookUrl: '',
+          slackChannel: '',
+          slackNotifyOnNewTicket: true,
+          slackNotifyOnTicketUpdates: false,
+          
+          // Microsoft Teams Integration
+          teamsEnabled: false,
+          teamsWebhookUrl: '',
+          teamsNotifyOnNewTicket: true,
+          teamsNotifyOnTicketUpdates: false,
+
+          // Jira Integration
+          jiraEnabled: false,
+          jiraUrl: '',
+          jiraUsername: '',
+          jiraApiToken: '',
+          jiraProject: '',
+          jiraCreateIssuesForTickets: true,
+          
+          // GitHub Integration
+          githubEnabled: false,
+          githubAccessToken: '',
+          githubRepository: '',
+          githubCreateIssuesForTickets: true
+        };
+        
+        setIntegrationSettings(defaultData);
+        setOriginalIntegrationSettings(defaultData);
+      }
+    } catch (error) {
+      console.error('Error fetching integration settings:', error);
+      setApiError('Failed to load integration settings. Please try again.');
+      // Use notificationManager instead of setNotification
+      notificationManager.showError('Failed to load integration settings');
+      
+      // Set defaults on error
+      const defaultData: IntegrationSettings = {
         // Slack Integration
-        slackEnabled: true,
-        slackWebhookUrl: 'https://hooks.slack.com/services/T00000000/B00000000/XXXXXXXXXXXXXXXXXXXXXXXX',
-        slackChannel: '#support-tickets',
+        slackEnabled: false,
+        slackWebhookUrl: '',
+        slackChannel: '',
         slackNotifyOnNewTicket: true,
         slackNotifyOnTicketUpdates: false,
         
@@ -590,11 +719,11 @@ const SettingsPage: React.FC = () => {
         teamsNotifyOnTicketUpdates: false,
 
         // Jira Integration
-        jiraEnabled: true,
-        jiraUrl: 'https://acmecorp.atlassian.net',
-        jiraUsername: 'jira-api-user',
-        jiraApiToken: '••••••••••••••••',
-        jiraProject: 'SUP',
+        jiraEnabled: false,
+        jiraUrl: '',
+        jiraUsername: '',
+        jiraApiToken: '',
+        jiraProject: '',
         jiraCreateIssuesForTickets: true,
         
         // GitHub Integration
@@ -604,16 +733,8 @@ const SettingsPage: React.FC = () => {
         githubCreateIssuesForTickets: true
       };
       
-      setIntegrationSettings(data);
-      setOriginalIntegrationSettings(data);
-    } catch (error) {
-      console.error('Error fetching integration settings:', error);
-      setApiError('Failed to load integration settings. Please try again.');
-      setNotification({
-        open: true,
-        message: 'Failed to load integration settings',
-        type: 'error',
-      });
+      setIntegrationSettings(defaultData);
+      setOriginalIntegrationSettings(defaultData);
     } finally {
       setLoadingSettings(prev => ({ ...prev, integration: false }));
     }
@@ -624,13 +745,58 @@ const SettingsPage: React.FC = () => {
     try {
       setLoadingSettings(prev => ({ ...prev, advanced: true }));
       
-      // Simulate API call with a timeout
-      // In production, use: const data = await settingsService.getAdvancedSettings();
-      await new Promise(resolve => setTimeout(resolve, 1200));
-      const data: AdvancedSettings = {
+      // Use the actual API call
+      const data = await settingsService.getAdvancedSettings();
+      
+      if (data && typeof data === 'object') {
+        setAdvancedSettings(data);
+        setOriginalAdvancedSettings(data);
+        setApiError(null); // Clear previous errors on success
+      } else {
+        // Fallback to defaults if no settings found
+        const defaultData: AdvancedSettings = {
+          // API settings
+          apiEnabled: true,
+          apiRateLimitPerHour: 1000,
+          apiRateLimitWindowMinutes: 15,
+          enableApiDocumentation: true,
+          
+          // Security settings
+          maxLoginAttempts: 5,
+          passwordExpiryDays: 90,
+          sessionTimeoutMinutes: 60,
+          enforceMfa: false,
+          
+          // Performance settings
+          cacheDurationMinutes: 15,
+          maxConcurrentFileUploads: 5,
+          
+          // Custom fields
+          enableCustomFields: true,
+          maxCustomFieldsPerTicket: 10,
+          
+          // AI features
+          enableAiSuggestions: true,
+          enableAutoTagging: true,
+          enableSentimentAnalysis: true,
+          aiModelName: 'gpt-3.5-turbo'
+        };
+        
+        setAdvancedSettings(defaultData);
+        setOriginalAdvancedSettings(defaultData);
+      }
+    } catch (error) {
+      console.error('Error fetching advanced settings:', error);
+      setApiError('Failed to load advanced settings. Please try again.');
+      // Use notificationManager instead of setNotification
+      notificationManager.showError('Failed to load advanced settings');
+      
+      // Set defaults on error
+      const defaultData: AdvancedSettings = {
         // API settings
         apiEnabled: true,
         apiRateLimitPerHour: 1000,
+        apiRateLimitWindowMinutes: 15,
         enableApiDocumentation: true,
         
         // Security settings
@@ -654,16 +820,8 @@ const SettingsPage: React.FC = () => {
         aiModelName: 'gpt-3.5-turbo'
       };
       
-      setAdvancedSettings(data);
-      setOriginalAdvancedSettings(data);
-    } catch (error) {
-      console.error('Error fetching advanced settings:', error);
-      setApiError('Failed to load advanced settings. Please try again.');
-      setNotification({
-        open: true,
-        message: 'Failed to load advanced settings',
-        type: 'error',
-      });
+      setAdvancedSettings(defaultData);
+      setOriginalAdvancedSettings(defaultData);
     } finally {
       setLoadingSettings(prev => ({ ...prev, advanced: false }));
     }
@@ -674,14 +832,19 @@ const SettingsPage: React.FC = () => {
     const isGeneralDirty = JSON.stringify(generalSettings) !== JSON.stringify(originalGeneralSettings);
     const isEmailDirty = JSON.stringify(emailSettings) !== JSON.stringify(originalEmailSettings);
     const isTicketDirty = JSON.stringify(ticketSettings) !== JSON.stringify(originalTicketSettings);
+    const isIntegrationDirty = JSON.stringify(integrationSettings) !== JSON.stringify(originalIntegrationSettings);
+    const isAdvancedDirty = JSON.stringify(advancedSettings) !== JSON.stringify(originalAdvancedSettings);
     
-    setUnsavedChanges(isGeneralDirty || isEmailDirty || isTicketDirty);
+    setUnsavedChanges(isGeneralDirty || isEmailDirty || isTicketDirty || isIntegrationDirty || isAdvancedDirty);
     
-    // When ticket SLA settings are enabled/disabled, refresh SLA policies
-    if (ticketSettings.enableSLA !== originalTicketSettings.enableSLA) {
+    // Always refresh SLA policies on any ticket settings change
+    if (isTicketDirty) {
       fetchSLAPolicies();
     }
-  }, [generalSettings, emailSettings, ticketSettings, originalGeneralSettings, originalEmailSettings, originalTicketSettings]);
+  }, [
+    generalSettings, emailSettings, ticketSettings, integrationSettings, advancedSettings,
+    originalGeneralSettings, originalEmailSettings, originalTicketSettings, originalIntegrationSettings, originalAdvancedSettings
+  ]);
 
   // Prompt user when leaving with unsaved changes
   useEffect(() => {
@@ -810,6 +973,10 @@ const SettingsPage: React.FC = () => {
       // Validate API settings
       if (advancedSettings.apiRateLimitPerHour <= 0) {
         newErrors.advancedSettings.apiRateLimitPerHour = 'API rate limit must be greater than 0';
+      }
+      
+      if (advancedSettings.apiRateLimitWindowMinutes <= 0) {
+        newErrors.advancedSettings.apiRateLimitWindowMinutes = 'Rate limit window must be greater than 0';
       }
       
       // Validate security settings
@@ -955,14 +1122,31 @@ const SettingsPage: React.FC = () => {
 
   const handleAdvancedSettingsChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const { name, value, checked, type } = e.target;
+    
+    // For number inputs, convert to number and validate
+    if (type === 'number') {
+      const numValue = Number(value);
+      // Basic validation for negative numbers
+      if (numValue < 0) {
+        setValidationErrors((prev: ValidationErrors) => ({
+          ...prev,
+          advancedSettings: {
+            ...prev.advancedSettings,
+            [name]: 'Value must be greater than or equal to 0'
+          }
+        }));
+        return;
+      }
+    }
+    
     setAdvancedSettings((prev) => ({
       ...prev,
       [name]: type === 'checkbox' ? checked : type === 'number' ? Number(value) : value,
     }));
     
     // Clear validation error for this field if it exists
-    if (validationErrors.advancedSettings && validationErrors.advancedSettings[name as keyof AdvancedSettings]) {
-      setValidationErrors((prev) => ({
+    if (validationErrors.advancedSettings && name in validationErrors.advancedSettings) {
+      setValidationErrors((prev: ValidationErrors) => ({
         ...prev,
         advancedSettings: {
           ...prev.advancedSettings,
@@ -972,7 +1156,10 @@ const SettingsPage: React.FC = () => {
     }
   };
 
-  const handleSelectChange = (e: React.ChangeEvent<{ name?: string; value: unknown }>, settingsType: string) => {
+  const handleSelectChange = (
+    e: SelectChangeEvent<string> | React.ChangeEvent<{ name?: string; value: unknown }>,
+    settingsType: string
+  ) => {
     const { name, value } = e.target;
     if (!name) return;
 
@@ -991,33 +1178,24 @@ const SettingsPage: React.FC = () => {
   // Define different save handlers for each settings section
   const handleSaveGeneralSettings = async () => {
     if (!validateForm('general')) {
-      setNotification({
-        open: true,
-        message: 'Please correct the errors before saving',
-        type: 'error',
-      });
+      // Use notificationManager instead of setNotification
+      notificationManager.showError('Please correct the errors before saving');
       return;
     }
     
     setLoading(true);
     
     try {
-      // Call the actual settings service instead of using mock data
+      // Call the actual settings service
       const result = await settingsService.updateGeneralSettings(generalSettings);
       
       setOriginalGeneralSettings(result);
-      setNotification({
-        open: true,
-        message: 'General settings saved successfully',
-        type: 'success',
-      });
+      // Use notificationManager instead of setNotification
+      notificationManager.showSuccess('General settings saved successfully');
     } catch (error) {
       console.error('Error saving general settings:', error);
-      setNotification({
-        open: true,
-        message: 'Failed to save general settings. Please try again.',
-        type: 'error',
-      });
+      // Use notificationManager instead of setNotification
+      notificationManager.showError('Failed to save general settings. Please try again.');
     } finally {
       setLoading(false);
     }
@@ -1025,34 +1203,24 @@ const SettingsPage: React.FC = () => {
 
   const handleSaveEmailSettings = async () => {
     if (!validateForm('email')) {
-      setNotification({
-        open: true,
-        message: 'Please correct the errors before saving',
-        type: 'error',
-      });
+      // Use notificationManager instead of setNotification
+      notificationManager.showError('Please correct the errors before saving');
       return;
     }
     
     setLoading(true);
     
     try {
-      // In production, use: const result = await settingsService.updateEmailSettings(emailSettings);
-      await new Promise(resolve => setTimeout(resolve, 1000));
-      const result = { ...emailSettings };
+      // Call the actual settings service
+      const result = await settingsService.updateEmailSettings(emailSettings);
       
       setOriginalEmailSettings(result);
-      setNotification({
-        open: true,
-        message: 'Email settings saved successfully',
-        type: 'success',
-      });
+      // Use notificationManager instead of setNotification
+      notificationManager.showSuccess('Email settings saved successfully');
     } catch (error) {
       console.error('Error saving email settings:', error);
-      setNotification({
-        open: true,
-        message: 'Failed to save email settings. Please try again.',
-        type: 'error',
-      });
+      // Use notificationManager instead of setNotification
+      notificationManager.showError('Failed to save email settings. Please try again.');
     } finally {
       setLoading(false);
     }
@@ -1060,34 +1228,24 @@ const SettingsPage: React.FC = () => {
 
   const handleSaveIntegrationSettings = async () => {
     if (!validateForm('integration')) {
-      setNotification({
-        open: true,
-        message: 'Please correct the errors before saving',
-        type: 'error',
-      });
+      // Use notificationManager instead of setNotification
+      notificationManager.showError('Please correct the errors before saving');
       return;
     }
     
     setLoading(true);
     
     try {
-      // In production, use: const result = await settingsService.updateIntegrationSettings(integrationSettings);
-      await new Promise(resolve => setTimeout(resolve, 1000));
-      const result = { ...integrationSettings };
+      // Call the actual settings service
+      const result = await settingsService.updateIntegrationSettings(integrationSettings);
       
       setOriginalIntegrationSettings(result);
-      setNotification({
-        open: true,
-        message: 'Integration settings saved successfully',
-        type: 'success',
-      });
+      // Use notificationManager instead of setNotification
+      notificationManager.showSuccess('Integration settings saved successfully');
     } catch (error) {
       console.error('Error saving integration settings:', error);
-      setNotification({
-        open: true,
-        message: 'Failed to save integration settings. Please try again.',
-        type: 'error',
-      });
+      // Use notificationManager instead of setNotification
+      notificationManager.showError('Failed to save integration settings. Please try again.');
     } finally {
       setLoading(false);
     }
@@ -1095,34 +1253,20 @@ const SettingsPage: React.FC = () => {
 
   const handleSaveAdvancedSettings = async () => {
     if (!validateForm('advanced')) {
-      setNotification({
-        open: true,
-        message: 'Please correct the errors before saving',
-        type: 'error',
-      });
+      notificationManager.showError('Please correct the errors before saving');
       return;
     }
     
     setLoading(true);
     
     try {
-      // In production, use: const result = await settingsService.updateAdvancedSettings(advancedSettings);
-      await new Promise(resolve => setTimeout(resolve, 1000));
-      const result = { ...advancedSettings };
+      const result = await settingsService.updateAdvancedSettings(advancedSettings);
       
       setOriginalAdvancedSettings(result);
-      setNotification({
-        open: true,
-        message: 'Advanced settings saved successfully',
-        type: 'success',
-      });
+      notificationManager.showSuccess('Advanced settings saved successfully');
     } catch (error) {
       console.error('Error saving advanced settings:', error);
-      setNotification({
-        open: true,
-        message: 'Failed to save advanced settings. Please try again.',
-        type: 'error',
-      });
+      notificationManager.showError('Failed to save advanced settings. Please try again.');
     } finally {
       setLoading(false);
     }
@@ -1131,11 +1275,7 @@ const SettingsPage: React.FC = () => {
   // Handle saving ticket settings including SLA policies
   const handleSaveTicketSettings = async () => {
     if (!validateForm('ticket')) {
-      setNotification({
-        open: true,
-        message: 'Please correct the errors before saving',
-        type: 'error',
-      });
+      notificationManager.showError('Please correct the errors before saving');
       return;
     }
     
@@ -1147,23 +1287,13 @@ const SettingsPage: React.FC = () => {
       
       setOriginalTicketSettings(result);
       
-      // After saving, also sync SLA policies if SLA is enabled
-      if (ticketSettings.enableSLA) {
-        await syncSLAPoliciesToSettings();
-      }
+      // Always sync SLA policies after saving ticket settings
+      await syncSLAPoliciesToSettings();
       
-      setNotification({
-        open: true,
-        message: 'Ticket settings saved successfully',
-        type: 'success',
-      });
+      notificationManager.showSuccess('Ticket settings saved successfully');
     } catch (error) {
       console.error('Error saving ticket settings:', error);
-      setNotification({
-        open: true,
-        message: `Failed to save ticket settings: ${error instanceof Error ? error.message : 'Unknown error'}`,
-        type: 'error',
-      });
+      notificationManager.showError('Failed to save ticket settings. Please try again.');
     } finally {
       setLoading(false);
     }
@@ -1172,16 +1302,20 @@ const SettingsPage: React.FC = () => {
   // Add a new function to sync SLA policies to the settings table
   const syncSLAPoliciesToSettings = async () => {
     try {
+      if (!organizationId) {
+        throw new Error('Organization ID not available');
+      }
+      
       console.log('Syncing SLA policies to settings table...');
       // Get the latest policies from the SLA service
-      const latestPolicies = await slaService.getSLAPolicies(defaultOrgId);
+      const latestPolicies = await slaService.getSLAPolicies(organizationId);
       
       if (latestPolicies && latestPolicies.length > 0) {
         console.log(`Syncing ${latestPolicies.length} SLA policies to settings table`);
         
         // Save to settings table
         const response = await settingsService.updateSLASettings({
-          organizationId: defaultOrgId,
+          organizationId,
           policies: latestPolicies
         });
         
@@ -1198,11 +1332,8 @@ const SettingsPage: React.FC = () => {
   // Add handleTestEmailSettings function
   const handleTestEmailSettings = async () => {
     if (!validateForm('email')) {
-      setNotification({
-        open: true,
-        message: 'Please correct the errors before testing',
-        type: 'error',
-      });
+      // Use notificationManager instead of setNotification
+      notificationManager.showError('Please correct the errors before testing');
       return;
     }
     
@@ -1212,18 +1343,16 @@ const SettingsPage: React.FC = () => {
       // Use the real API to test email settings
       const result = await settingsService.testEmailSettings(emailSettings);
       
-      setNotification({
-        open: true,
-        message: result.message || 'Test email sent successfully. Please check your inbox.',
-        type: result.success ? 'success' : 'error',
-      });
+      // Use notificationManager instead of setNotification
+      if (result.success) {
+        notificationManager.showSuccess(result.message || 'Test email sent successfully. Please check your inbox.');
+      } else {
+        notificationManager.showError(result.message || 'Failed to send test email');
+      }
     } catch (error) {
       console.error('Error testing email settings:', error);
-      setNotification({
-        open: true,
-        message: 'Failed to send test email. Please check your configuration.',
-        type: 'error',
-      });
+      // Use notificationManager instead of setNotification
+      notificationManager.showError('Failed to send test email. Please check your configuration.');
     } finally {
       setLoading(false);
     }
@@ -1266,19 +1395,11 @@ const SettingsPage: React.FC = () => {
     // Fetch all settings
     fetchAllSettings()
       .then(() => {
-        setNotification({
-          open: true,
-          message: 'Settings refreshed successfully',
-          type: 'success',
-        });
+        notificationManager.showSuccess('Settings refreshed successfully');
       })
       .catch((error) => {
         console.error('Error refreshing settings:', error);
-        setNotification({
-          open: true,
-          message: 'Failed to refresh settings',
-          type: 'error',
-        });
+        notificationManager.showError('Failed to refresh settings');
       })
       .finally(() => {
         setLoading(false);
@@ -1289,11 +1410,8 @@ const SettingsPage: React.FC = () => {
   const handleTestIntegration = async (type: string) => {
     // First validate the integration settings
     if (!validateForm('integration')) {
-      setNotification({
-        open: true,
-        message: 'Please correct the errors before testing',
-        type: 'error',
-      });
+      // Use notificationManager instead of setNotification
+      notificationManager.showError('Please correct the errors before testing');
       return;
     }
     
@@ -1354,28 +1472,23 @@ const SettingsPage: React.FC = () => {
       try {
         const result = await settingsService.testIntegrationConnection(type, testSettings);
         
-        setNotification({
-          open: true,
-          message: result.message || `Connection to ${testName} tested successfully`,
-          type: result.success ? 'success' : 'error',
-        });
+        // Use notificationManager instead of setNotification
+        if (result.success) {
+          notificationManager.showSuccess(result.message || `Connection to ${testName} tested successfully`);
+        } else {
+          notificationManager.showError(result.message || `Failed to test ${type} integration`);
+        }
       } catch (error) {
         console.error(`Error testing ${type} integration:`, error);
-        setNotification({
-          open: true,
-          message: error instanceof Error ? error.message : `Failed to test ${type} integration`,
-          type: 'error',
-        });
+        // Use notificationManager instead of setNotification
+        notificationManager.showError(error instanceof Error ? error.message : `Failed to test ${type} integration`);
       } finally {
         setLoading(false);
       }
     } catch (error) {
       console.error(`Error testing ${type} integration:`, error);
-      setNotification({
-        open: true,
-        message: error instanceof Error ? error.message : `Failed to test ${type} integration`,
-        type: 'error',
-      });
+      // Use notificationManager instead of setNotification
+      notificationManager.showError(error instanceof Error ? error.message : `Failed to test ${type} integration`);
     } finally {
       setLoading(false);
     }
@@ -1385,6 +1498,10 @@ const SettingsPage: React.FC = () => {
   const fetchTicketPriorities = async () => {
     try {
       setLoadingPriorities(true);
+      if (!organizationId) {
+        throw new Error('Organization ID not available');
+      }
+      
       const priorities = await ticketPriorityService.getPriorities();
       
       // We should have an array of priorities at this point thanks to the fixed service
@@ -1397,11 +1514,8 @@ const SettingsPage: React.FC = () => {
     } catch (error) {
       console.error('Error fetching ticket priorities:', error);
       setPriorities([]); // Set to empty array on catch
-      setNotification({
-        open: true,
-        message: 'Failed to load ticket priorities',
-        type: 'error'
-      });
+      // Use notificationManager instead of setNotification
+      notificationManager.showError('Failed to load ticket priorities');
     } finally {
       setLoadingPriorities(false);
     }
@@ -1413,8 +1527,11 @@ const SettingsPage: React.FC = () => {
       setLoadingSlaPolicies(true);
       setSlaError(null);
       
-      // Always use the default organization ID of 1001 since we have existing SLA policies for this org
-      console.log('Using organization ID for SLA policies:', defaultOrgId);
+      if (!organizationId) {
+        throw new Error('Organization ID not available');
+      }
+      
+      console.log('Using organization ID for SLA policies:', organizationId);
       
       // First try to get policies from the settings table
       let policies: SLAPolicy[] = [];
@@ -1447,7 +1564,7 @@ const SettingsPage: React.FC = () => {
         // Fallback to the SLA service if needed
         console.log('No policies found in settings table, fetching from SLA service');
         try {
-          const fetchedPolicies = await slaService.getSLAPolicies(defaultOrgId);
+          const fetchedPolicies = await slaService.getSLAPolicies(organizationId);
           
           if (fetchedPolicies && Array.isArray(fetchedPolicies) && fetchedPolicies.length > 0) {
             console.log(`Got ${fetchedPolicies.length} policies from SLA service`, fetchedPolicies);
@@ -1522,32 +1639,44 @@ const SettingsPage: React.FC = () => {
   
   // Function to save SLA policy
   const handleSaveSLAPolicy = async () => {
-    if (!slaForm.priorityId || !slaForm.firstResponseHours || !slaForm.resolutionHours) {
-      setSlaError('Please fill in all required fields');
+    // Validate form
+    if (!slaForm.priorityId) {
+      notificationManager.showError('Please select a priority');
+      return;
+    }
+    
+    if (!slaForm.firstResponseHours || !slaForm.nextResponseHours || !slaForm.resolutionHours) {
+      notificationManager.showError('Please enter all SLA time values');
+      return;
+    }
+    
+    if (!organizationId) {
+      notificationManager.showError('Organization ID not available');
       return;
     }
     
     setSavingSlaPolicies(true);
-    setSlaError(null);
     
     try {
-      // Find priority to update slaHours
+      // Get the priority details
       const priority = priorities.find(p => p.id === slaForm.priorityId);
+      
       if (!priority) {
         throw new Error('Selected priority not found');
       }
       
       console.log(`Creating/updating SLA policy for priority: ${priority.name} (ID: ${priority.id})`);
-      console.log(`Using organization ID: ${defaultOrgId}`);
       
-      // Find if policy already exists
-      const existingPolicy = slaPolicies.find(policy => policy.ticketPriorityId === slaForm.priorityId);
+      // Find existing policy for this priority
+      const existingPolicy = slaPolicies.find(policy => 
+        policy.ticketPriorityId === slaForm.priorityId
+      );
       
       const policyData = {
         name: `${priority.name} Priority SLA`,
         description: `SLA policy for ${priority.name} priority tickets`,
-        organizationId: defaultOrgId, // Always use the default org ID for consistency
-        ticketPriorityId: slaForm.priorityId,
+        organizationId,
+        ticketPriorityId: priority.id,
         firstResponseHours: slaForm.firstResponseHours,
         nextResponseHours: slaForm.nextResponseHours,
         resolutionHours: slaForm.resolutionHours,
@@ -1564,95 +1693,76 @@ const SettingsPage: React.FC = () => {
         console.log(`Updating existing SLA policy with ID: ${existingPolicy.id}`);
         savedPolicy = await slaService.updateSLAPolicy(existingPolicy.id, policyData);
         
+        // Log what we got back
         console.log('SLA policy saved successfully:', savedPolicy ? savedPolicy : 'No response data returned');
         
-        // Update state with null-safe approach - completely avoid using savedPolicy in the map function
-        setSlaPolicies(prevPolicies => {
-          return prevPolicies.map(policy => {
-            if (policy.id === existingPolicy.id) {
-              // If we have savedPolicy use it, otherwise merge policyData with existing policy
-              return savedPolicy || { ...policy, ...policyData };
-            }
-            return policy;
-          });
-        });
+        // Update the policies list
+        if (savedPolicy) {
+          setSlaPolicies(prevPolicies => 
+            prevPolicies.map(p => p.id === savedPolicy!.id ? savedPolicy! : p)
+          );
+        }
       } else {
         // Create new policy
         console.log('Creating new SLA policy');
         savedPolicy = await slaService.createSLAPolicy(policyData);
         
+        // Log what we got back
         console.log('SLA policy saved successfully:', savedPolicy ? savedPolicy : 'No response data returned');
         
-        // Add to local state with null check
+        // Add to the policies list
         if (savedPolicy) {
-          // Use non-null assertion since we've already checked savedPolicy is not null
           setSlaPolicies(prevPolicies => [...prevPolicies, savedPolicy as SLAPolicy]);
-        } else {
-          setNotification({
-            open: true,
-            message: 'Failed to save SLA policy',
-            type: 'error'
-          });
         }
       }
       
-      // Update the SLA hours in the priority - Only if we have valid data
-      if (priority && priority.id) {
-        console.log(`Updating priority ${priority.id} with SLA hours: ${slaForm.resolutionHours}`);
-      await ticketPriorityService.updatePriority(priority.id, {
-        ...priority,
-        slaHours: slaForm.resolutionHours
-      });
-      
-      // Refresh priorities
-      await fetchTicketPriorities();
-      } else {
-        console.warn('Cannot update priority: Invalid priority data');
+      // Update the priority's SLA hours to match the policy
+      console.log(`Updating priority ${priority.id} with SLA hours: ${slaForm.resolutionHours}`);
+      if (priority && priority.slaHours !== slaForm.resolutionHours) {
+        await ticketPriorityService.updatePriority(priority.id, {
+          ...priority,
+          slaHours: slaForm.resolutionHours
+        });
+        
+        // Update the priorities list
+        setPriorities(prevPriorities => 
+          prevPriorities.map(p => 
+            p.id === priority.id 
+              ? { ...p, slaHours: slaForm.resolutionHours } 
+              : p
+          )
+        );
       }
       
       // Sync the updated SLA policies to the settings table
       await syncSLAPoliciesToSettings();
       
-      setNotification({
-        open: true,
-        message: 'SLA policy saved successfully',
-        type: 'success'
-      });
+      // Show success message
+      notificationManager.showSuccess('SLA policy saved successfully');
     } catch (err) {
       console.error('Error saving SLA policy:', err);
       setSlaError('Failed to save SLA policy. Please try again.');
-      setNotification({
-        open: true,
-        message: 'Failed to save SLA policy',
-        type: 'error'
-      });
+      
+      notificationManager.showError('Failed to save SLA policy');
     } finally {
       setSavingSlaPolicies(false);
     }
   };
 
-  // Replace the renderSLASaveText function
+  // Render the SLA save text
   const renderSLASaveText = () => {
-    if (!ticketSettings.enableSLA) {
-      return (
-        <Typography variant="body2" color="textSecondary" sx={{ mt: 2 }}>
-          Enable SLA Tracking to configure SLA policies by priority
-        </Typography>
-      );
-    }
-    
     if (slaPolicies.length === 0) {
       return (
-        <Typography variant="body2" color="textSecondary" sx={{ mt: 2 }}>
+        <Alert severity="info" sx={{ mt: 2 }}>
           No SLA policies configured. Select a priority above to create an SLA policy.
-        </Typography>
+        </Alert>
       );
     }
     
     return (
-      <Typography variant="body2" color="textSecondary" sx={{ mt: 2 }}>
+      <Alert severity="info" sx={{ mt: 2 }}>
         SLA settings will be saved when you click "Save Ticket Settings"
-      </Typography>
+      </Alert>
     );
   };
 
@@ -1673,65 +1783,74 @@ const SettingsPage: React.FC = () => {
     return () => clearTimeout(timer);
   }, []);
 
-  // Add a specific handler for toggling SLA that updates and saves immediately
-  const handleSLAEnableToggle = async (event: React.ChangeEvent<HTMLInputElement>) => {
-    const isEnabled = event.target.checked;
-    
-    // First update the local state
-    setTicketSettings(prev => ({
-      ...prev,
-      enableSLA: isEnabled
-    }));
-    
-    setLoading(true);
-    
-    try {
-      // Use functional updates to ensure we're using the latest state
-      const updatedSettings = {
-        ...ticketSettings,
-        enableSLA: isEnabled
-      };
+  // Render the General Settings tab content
+  const renderGeneralSettings = () => (
+    <Box>
+      <EnhancedCard>
+        <CardHeader title="Company Information" />
+        <Divider />
+        <CardContent>
+          <FormField
+            label="Company Name"
+            name="companyName"
+            value={generalSettings.companyName}
+            onChange={handleGeneralSettingsChange}
+            error={!!validationErrors.generalSettings?.companyName}
+            helperText={validationErrors.generalSettings?.companyName || "Your company name as displayed to customers"}
+            required
+          />
+          <FormField
+            label="Support Email"
+            name="supportEmail"
+            value={generalSettings.supportEmail}
+            onChange={handleGeneralSettingsChange}
+            error={!!validationErrors.generalSettings?.supportEmail}
+            helperText={validationErrors.generalSettings?.supportEmail || "Public email for support inquiries"}
+            type="email"
+            required
+          />
+        </CardContent>
+      </EnhancedCard>
       
-      // Save the ticket settings to the database immediately
-      console.log(`Saving SLA enabled state: ${isEnabled}`, updatedSettings);
-      const result = await settingsService.updateTicketSettings(updatedSettings);
+      <EnhancedCard>
+        <CardHeader title="System Settings" />
+        <Divider />
+        <CardContent>
+          <FormField
+            label="Max File Size (MB)"
+            name="maxFileSize"
+            value={generalSettings.maxFileSize}
+            onChange={handleGeneralSettingsChange}
+            type="number"
+            error={!!validationErrors.generalSettings?.maxFileSize}
+            helperText={validationErrors.generalSettings?.maxFileSize || "Maximum attachment size allowed for file uploads across the application"}
+            required
+          />
+          
+          <FormSelect
+            label="Default Time Zone"
+            name="defaultTimeZone"
+            value={generalSettings.defaultTimeZone}
+            onChange={(e: SelectChangeEvent) => handleSelectChange(e, 'general')}
+            options={TIMEZONES}
+            error={!!validationErrors.generalSettings?.defaultTimeZone}
+            helperText={validationErrors.generalSettings?.defaultTimeZone || "Default time zone for the entire organization. This will be used as the default for all users."}
+          />
+        </CardContent>
+      </EnhancedCard>
       
-      // Update local state with the server response
-      setTicketSettings(result);
-      setOriginalTicketSettings(result);
-      
-      // If enabling SLA, also update the SLA policies in settings table
-      if (isEnabled) {
-        await syncSLAPoliciesToSettings();
-      }
-      
-      setNotification({
-        open: true,
-        message: `SLA Tracking ${isEnabled ? 'enabled' : 'disabled'} successfully`,
-        type: 'success',
-      });
-      
-      // If SLA is being enabled, make sure we have policies
-      if (isEnabled) {
-        fetchSLAPolicies();
-      }
-    } catch (error) {
-      console.error('Error saving SLA enabled state:', error);
-      // Revert the local state change on error
-      setTicketSettings(prev => ({
-        ...prev,
-        enableSLA: !isEnabled
-      }));
-      
-      setNotification({
-        open: true,
-        message: 'Failed to update SLA settings',
-        type: 'error',
-      });
-    } finally {
-      setLoading(false);
-    }
-  };
+      <Box mt={2} display="flex" justifyContent="flex-end">
+        <Button
+          variant="contained"
+          color="primary"
+          onClick={handleSaveGeneralSettings}
+          disabled={loading || !unsavedChanges || JSON.stringify(generalSettings) === JSON.stringify(originalGeneralSettings)}
+        >
+          {loading ? <CircularProgress size={24} /> : 'Save General Settings'}
+        </Button>
+      </Box>
+    </Box>
+  );
 
   return (
     <Container maxWidth={false} sx={{ 
@@ -2007,33 +2126,14 @@ const SettingsPage: React.FC = () => {
                           error={!!getGeneralError('maxFileSize')}
                           helperText={getGeneralError('maxFileSize')}
                         />
-                        <FormControl fullWidth margin="normal">
-                          <InputLabel id="default-timezone-label">Default Time Zone</InputLabel>
-                          <Select
-                            labelId="default-timezone-label"
-                            name="defaultTimeZone"
-                            value={generalSettings.defaultTimeZone}
-                            onChange={(e) => handleSelectChange(e as any, 'general')}
-                            label="Default Time Zone"
-                          >
-                            <MenuItem value="UTC">UTC</MenuItem>
-                            <MenuItem value="America/New_York">Eastern Time (ET)</MenuItem>
-                            <MenuItem value="America/Chicago">Central Time (CT)</MenuItem>
-                            <MenuItem value="America/Denver">Mountain Time (MT)</MenuItem>
-                            <MenuItem value="America/Los_Angeles">Pacific Time (PT)</MenuItem>
-                          </Select>
-                        </FormControl>
-                        <FormControlLabel
-                          control={
-                            <Switch
-                              checked={generalSettings.allowGuestTickets}
-                              onChange={handleGeneralSettingsChange}
-                              name="allowGuestTickets"
-                              color="primary"
-                            />
-                          }
-                          label="Allow Guest Tickets"
-                          sx={{ mt: 2 }}
+                        <FormSelect
+                          label="Default Time Zone"
+                          name="defaultTimeZone"
+                          value={generalSettings.defaultTimeZone}
+                          onChange={(e: SelectChangeEvent) => handleSelectChange(e, 'general')}
+                          options={TIMEZONES}
+                          error={!!validationErrors.generalSettings?.defaultTimeZone}
+                          helperText={validationErrors.generalSettings?.defaultTimeZone || "Default time zone for the entire organization. This will be used as the default for all users."}
                         />
                       </>
                     )}
@@ -2087,9 +2187,6 @@ const SettingsPage: React.FC = () => {
                         </Typography>
                         <Typography variant="body2" color="textSecondary">
                           <strong>Default Time Zone:</strong> Used for displaying dates and times.
-                        </Typography>
-                        <Typography variant="body2" color="textSecondary">
-                          <strong>Allow Guest Tickets:</strong> Enables ticket creation without an account.
                         </Typography>
                       </CardContent>
                     </EnhancedCard>
@@ -2379,7 +2476,7 @@ const SettingsPage: React.FC = () => {
                             labelId="default-priority-label"
                             name="defaultPriority"
                             value={ticketSettings.defaultPriority}
-                            onChange={(e) => handleSelectChange(e as any, 'ticket')}
+                            onChange={(e: SelectChangeEvent) => handleSelectChange(e, 'ticket')}
                             label="Default Priority"
                           >
                             <MenuItem value="low">Low</MenuItem>
@@ -2576,20 +2673,11 @@ const SettingsPage: React.FC = () => {
                             </Alert>
                           )}
                           
-                          <FormControlLabel
-                            control={
-                              <Switch
-                                checked={ticketSettings.enableSLA || false}
-                                onChange={handleSLAEnableToggle}
-                                name="enableSLA"
-                                color="primary"
-                              />
-                            }
-                            label="Enable SLA Tracking"
-                            sx={{ mb: 2, display: 'block' }}
-                          />
+                          <Typography variant="body2" color="textSecondary" sx={{ mb: 2 }}>
+                            Configure SLA policies for each ticket priority to set response and resolution time targets.
+                          </Typography>
                           
-                          <Box sx={{ opacity: ticketSettings.enableSLA ? 1 : 0.5, pointerEvents: ticketSettings.enableSLA ? 'auto' : 'none' }}>
+                          <Box>
                             <FormControl fullWidth margin="normal">
                               <InputLabel id="sla-priority-label">Ticket Priority</InputLabel>
                               <Select
@@ -2598,7 +2686,7 @@ const SettingsPage: React.FC = () => {
                                 value={slaForm.priorityId || ''}
                                 onChange={handleSLAPriorityChange as any}
                                 label="Ticket Priority"
-                                disabled={!ticketSettings.enableSLA || savingSlaPolicies}
+                                disabled={savingSlaPolicies}
                               >
                                 <MenuItem value={0} disabled>Select a priority</MenuItem>
                                 {priorities.map((priority) => (
@@ -2628,7 +2716,7 @@ const SettingsPage: React.FC = () => {
                               fullWidth
                               value={slaForm.firstResponseHours || ''}
                               onChange={handleSLAFormChange}
-                              disabled={!ticketSettings.enableSLA || !slaForm.priorityId || savingSlaPolicies}
+                              disabled={!slaForm.priorityId || savingSlaPolicies}
                               InputProps={{ inputProps: { min: 1 } }}
                               helperText="Time to first respond to the ticket"
                             />
@@ -2641,7 +2729,7 @@ const SettingsPage: React.FC = () => {
                               fullWidth
                               value={slaForm.nextResponseHours || ''}
                               onChange={handleSLAFormChange}
-                              disabled={!ticketSettings.enableSLA || !slaForm.priorityId || savingSlaPolicies}
+                              disabled={!slaForm.priorityId || savingSlaPolicies}
                               InputProps={{ inputProps: { min: 1 } }}
                               helperText="Time for subsequent responses"
                             />
@@ -2654,7 +2742,7 @@ const SettingsPage: React.FC = () => {
                               fullWidth
                               value={slaForm.resolutionHours || ''}
                               onChange={handleSLAFormChange}
-                              disabled={!ticketSettings.enableSLA || !slaForm.priorityId || savingSlaPolicies}
+                              disabled={!slaForm.priorityId || savingSlaPolicies}
                               InputProps={{ inputProps: { min: 1 } }}
                               helperText="Time to resolve the ticket (also updates SLA hours)"
                             />
@@ -2666,7 +2754,7 @@ const SettingsPage: React.FC = () => {
                                   onChange={handleSLAFormChange}
                                   name="businessHoursOnly"
                                   color="primary"
-                                  disabled={!ticketSettings.enableSLA || !slaForm.priorityId || savingSlaPolicies}
+                                  disabled={!slaForm.priorityId || savingSlaPolicies}
                                 />
                               }
                               label="Business Hours Only"
@@ -2680,7 +2768,7 @@ const SettingsPage: React.FC = () => {
                                 color="primary"
                                 startIcon={savingSlaPolicies ? <CircularProgress size={20} color="inherit" /> : <SaveIcon />}
                                 onClick={handleSaveSLAPolicy}
-                                disabled={savingSlaPolicies || !ticketSettings.enableSLA || !slaForm.priorityId}
+                                disabled={savingSlaPolicies || !slaForm.priorityId}
                                 fullWidth
                               >
                                 Save SLA Policy
@@ -2744,16 +2832,6 @@ const SettingsPage: React.FC = () => {
                         {loadingSlaPolicies ? (
                           <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '300px' }}>
                             <CircularProgress />
-                          </Box>
-                        ) : !ticketSettings.enableSLA ? (
-                          <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: '200px', flexDirection: 'column' }}>
-                            <WarningIcon color="warning" sx={{ fontSize: 40, mb: 2, opacity: 0.7 }} />
-                            <Typography variant="body1" align="center">
-                              SLA tracking is currently disabled
-                            </Typography>
-                            <Typography variant="body2" color="textSecondary" align="center" sx={{ mt: 1 }}>
-                              Enable SLA tracking to manage policies
-                            </Typography>
                           </Box>
                         ) : slaPolicies.length === 0 ? (
                           <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: '200px', flexDirection: 'column' }}>
@@ -3206,6 +3284,17 @@ const SettingsPage: React.FC = () => {
                               helperText={getAdvancedError('apiRateLimitPerHour')}
                             />
                             
+                            <FormField
+                              label="Rate Limit Window (minutes)"
+                              name="apiRateLimitWindowMinutes"
+                              value={advancedSettings.apiRateLimitWindowMinutes}
+                              onChange={handleAdvancedSettingsChange}
+                              type="number"
+                              disabled={!advancedSettings.apiEnabled}
+                              error={!!getAdvancedError('apiRateLimitWindowMinutes')}
+                              helperText={getAdvancedError('apiRateLimitWindowMinutes') || 'Time window for rate limiting (e.g., 15 minutes)'}
+                            />
+                            
                             <FormControlLabel
                               control={
                                 <Switch
@@ -3525,25 +3614,6 @@ const SettingsPage: React.FC = () => {
               </Button>
             </DialogActions>
           </Dialog>
-
-          <Snackbar
-            open={notification.open}
-            autoHideDuration={6000}
-            onClose={() => setNotification({ ...notification, open: false })}
-            anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
-          >
-            <Alert 
-              onClose={() => setNotification({ ...notification, open: false })} 
-              severity={notification.type} 
-              sx={{ 
-                width: '100%',
-                borderRadius: 2,
-                boxShadow: theme.shadows[8],
-              }}
-            >
-              {notification.message}
-            </Alert>
-          </Snackbar>
         </Grid>
       </Grid>
     </Container>

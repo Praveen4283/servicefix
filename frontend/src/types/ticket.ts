@@ -1,5 +1,5 @@
 export interface User {
-  id: number | string;
+  id: string; // Consistently use string for IDs
   email: string;
   firstName: string;
   lastName: string;
@@ -7,35 +7,40 @@ export interface User {
 }
 
 export interface TicketStatus {
-  id: number | string;
+  id: string;
   name: string;
   color: string;
+  isDefault?: boolean;
+  isResolved?: boolean;
 }
 
 export interface TicketPriority {
-  id: number | string;
+  id: string;
   name: string;
   color: string;
+  slaHours?: number;
 }
 
 export interface TicketDepartment {
-  id: number | string;
+  id: string;
   name: string;
+  description?: string;
 }
 
 export interface TicketType {
-  id: number | string;
+  id: string;
   name: string;
+  description?: string;
 }
 
 export interface TicketTag {
-  id: number | string;
+  id: string;
   name: string;
   color: string;
 }
 
 export interface TicketComment {
-  id: number | string;
+  id: string;
   content: string;
   createdAt: string;
   isInternal: boolean;
@@ -43,12 +48,23 @@ export interface TicketComment {
   user: User;
 }
 
+export interface TicketAttachment {
+  id: string;
+  fileName: string;
+  originalName: string;
+  filePath: string;
+  fileType: string;
+  fileSize: number;
+  uploadedBy?: User;
+  createdAt: string;
+}
+
 export interface SLAPolicy {
-  id: number | string;
+  id: string;
   name: string;
   description?: string;
-  organizationId: number;
-  ticketPriorityId: number;
+  organizationId: string;
+  ticketPriorityId: string;
   firstResponseHours: number;
   nextResponseHours?: number;
   resolutionHours: number;
@@ -56,9 +72,9 @@ export interface SLAPolicy {
 }
 
 export interface SLAPolicyTicket {
-  id: number | string;
-  ticketId: number;
-  slaPolicyId: number;
+  id: string;
+  ticketId: string;
+  slaPolicyId: string;
   firstResponseDueAt: string;
   nextResponseDueAt?: string;
   resolutionDueAt: string;
@@ -66,10 +82,11 @@ export interface SLAPolicyTicket {
   nextResponseMet?: boolean;
   resolutionMet?: boolean;
   slaPolicy?: SLAPolicy;
+  metadata?: any; // For pause/resume data
 }
 
 export interface Ticket {
-  id: number | string;
+  id: string;
   subject: string;
   description?: string;
   status: TicketStatus;
@@ -84,8 +101,19 @@ export interface Ticket {
   dueDate?: string;
   tags?: TicketTag[];
   comments?: TicketComment[];
+  attachments?: TicketAttachment[];
   slaStatus?: string;
   slaInfo?: SLAPolicyTicket;
+  organization?: {
+    id: string;
+    name: string;
+  };
+  resolvedAt?: string;
+  closedAt?: string;
+  sentimentScore?: number;
+  aiSummary?: string;
+  source?: string;
+  isSpam?: boolean;
 }
 
 export enum TicketAction {

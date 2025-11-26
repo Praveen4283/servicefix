@@ -1,11 +1,20 @@
 # ServiceFix - Service Desk & Support Ticket System
 
-*Last Updated: June 19, 2024*
+*Last Updated: July 16, 2024*
 
 A comprehensive service desk and ticket management system built with React, Node.js, and PostgreSQL.
 
 ## Recent Improvements
 
+- 🤖 **Enterprise-Ready Chatbot**: Enhanced chatbot implementation with numbered list options for selections, support for both numeric and name-based selection, improved tag input with skip option, and clearer UI prompts
+- 🔄 **Form Submission Fix**: Fixed continuous loading icon issue in CreateTicketPage by implementing proper local submitting state and reliable form validation
+- 🏢 **Organization ID Fix**: Replaced hardcoded organization ID (1001) in SettingsPage with authenticated user's organization ID, including proper null checks and TypeScript error fixes
+- 🗑️ **Notification Soft Delete**: Implemented soft deletion for notifications with an is_deleted flag, allowing notifications to be removed from view while preserving them in the database
+- 📋 **Default Notification Preferences**: Added database trigger to automatically create default notification preferences when new users are created
+- 🔔 **Independent Notification Settings**: Added separate "Edit Notifications" button in profile page for modifying notification settings independently
+- 🔄 **Dynamic Rate Limiting**: Implemented database-driven API rate limiting with configurable limits and window times that can be managed through the admin Settings page
+- 🌐 **API Management**: Enhanced API settings tab in admin interface with functional controls for rate limiting and API access
+- 🚀 **Rate Limiting Performance**: Optimized rate limiting implementation with proper database initialization timing
 - 🔐 **Authentication Persistence**: Fixed session persistence issues that previously caused users to be redirected to login after page refreshes
 - 🔄 **Token Refresh**: Implemented robust token refresh mechanism to maintain authenticated state across browser sessions
 - ⚡ **Login Performance**: Optimized authentication flows for faster login and page transitions with reduced delays
@@ -29,6 +38,14 @@ A comprehensive service desk and ticket management system built with React, Node
 - 🔔 **Notification System**: Created standardized notification utilities for consistent messaging
 - 🚀 **Build Process**: Enhanced backend build process with production-optimized scripts
 - 🗃️ **Storage Integration**: Consolidated Supabase client initialization for more reliable file operations
+- 🔄 **Settings Page**: Fixed all functionality in the Settings page with proper API integration and consistent notification handling
+- 🗄️ **Database Schema**: Added default entries for all settings categories in the Supabase database to ensure proper data persistence
+- 🔄 **API Integration**: Replaced mock data with real API service calls throughout the frontend for settings management
+- 🔔 **Notification System**: Improved notification consistency by using the global notification manager across all settings components
+- 💾 **Settings State**: Enhanced change detection across all settings tabs to properly enable save buttons when values are modified
+- 🔔 **Notification System Fixes**: Enhanced notification system with proper localStorage cleanup on logout, improved data synchronization between backend and frontend, and multi-stage retry logic for pagination discrepancies
+- 🧠 **Smart Notification Fetching**: Added intelligent retry logic when backend pagination data indicates more notifications exist than are initially returned
+- 🗄️ **Local Storage Management**: Improved localStorage synchronization with React state to prevent notification state mismatches
 
 ## Features
 
@@ -1393,7 +1410,7 @@ Key frontend components and their latest significant changes:
 | ProfilePage | 2.2.0 | May 26, 2024 | frontend/src/pages/ProfilePage.tsx |
 | TicketContext | 3.3.0 | May 22, 2024 | frontend/src/context/TicketContext.tsx |
 | AuthContext | 2.7.0 | May 26, 2024 | frontend/src/context/AuthContext.tsx |
-| NotificationContext | 2.3.0 | May 27, 2024 | frontend/src/context/NotificationContext.tsx |
+| NotificationContext | 2.4.0 | June 27, 2024 | frontend/src/context/NotificationContext.tsx |
 | NotificationPreferencesContext | 1.3.0 | May 27, 2024 | frontend/src/context/NotificationPreferencesContext.tsx |
 | ThemeContext | 1.5.0 | May 22, 2024 | frontend/src/context/ThemeContext.tsx |
 | CookieConsentContext | 1.2.0 | May 22, 2024 | frontend/src/context/CookieConsentContext.tsx |
@@ -1467,7 +1484,7 @@ Ongoing optimization efforts:
 ### Latest Component Versions
 | Component | Current Version | Last Updated |
 |-----------|----------------|-------------|
-| NotificationContext | 2.3.0 | May 27, 2024 |
+| NotificationContext | 2.4.0 | June 27, 2024 |
 | AuthContext | 2.7.0 | May 26, 2024 |
 | ProfilePage | 2.2.0 | May 26, 2024 |
 | LandingPage | 2.5.0 | May 22, 2024 |
@@ -1514,7 +1531,7 @@ Key frontend components and their latest significant changes:
 | ProfilePage | 2.2.0 | May 26, 2024 | frontend/src/pages/ProfilePage.tsx |
 | TicketContext | 3.3.0 | May 22, 2024 | frontend/src/context/TicketContext.tsx |
 | AuthContext | 2.7.0 | May 26, 2024 | frontend/src/context/AuthContext.tsx |
-| NotificationContext | 2.3.0 | May 27, 2024 | frontend/src/context/NotificationContext.tsx |
+| NotificationContext | 2.4.0 | June 27, 2024 | frontend/src/context/NotificationContext.tsx |
 | NotificationPreferencesContext | 1.3.0 | May 27, 2024 | frontend/src/context/NotificationPreferencesContext.tsx |
 | ThemeContext | 1.5.0 | May 22, 2024 | frontend/src/context/ThemeContext.tsx |
 | CookieConsentContext | 1.2.0 | May 22, 2024 | frontend/src/context/CookieConsentContext.tsx |

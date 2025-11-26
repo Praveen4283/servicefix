@@ -16,11 +16,12 @@ export const diagnoseDatabaseConnection = async (): Promise<void> => {
     const connectionResult = await pool.query('SELECT current_database(), current_schema');
     logger.info(`Connected to database: ${connectionResult.rows[0].current_database}, schema: ${connectionResult.rows[0].current_schema}`);
     
-    // Check users table structure
+    // Check users table structure - be specific about the schema to avoid Supabase auth tables
     const usersTableResult = await pool.query(`
       SELECT column_name, data_type 
       FROM information_schema.columns 
-      WHERE table_name = 'users'
+      WHERE table_name = 'users' 
+      AND table_schema = 'public'
       ORDER BY ordinal_position
     `);
     

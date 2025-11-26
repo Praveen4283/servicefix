@@ -109,6 +109,7 @@ const CreateTicketPage: React.FC = () => {
   } | null>(null);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [activeStep, setActiveStep] = useState(0);
+  const [submitting, setSubmitting] = useState(false);
   
   const steps = ['Ticket Details', 'Additional Information & Submit'];
 
@@ -151,6 +152,7 @@ const CreateTicketPage: React.FC = () => {
       
       try {
         setSubmitError(null);
+        setSubmitting(true);
 
         // Create FormData object
         const formData = new FormData();
@@ -220,6 +222,8 @@ const CreateTicketPage: React.FC = () => {
           title: 'Error Creating Ticket',
           duration: 0 // No auto-dismiss for errors
         });
+      } finally {
+        setSubmitting(false);
       }
     },
   });
@@ -718,6 +722,24 @@ const CreateTicketPage: React.FC = () => {
     }
   };
 
+  // Add a function to check if the form is ready to submit
+  const isFormReadyToSubmit = () => {
+    if (activeStep === steps.length - 1) {
+      // On the final step, check if required fields are filled
+      return (
+        formik.values.subject &&
+        formik.values.subject.length >= 5 &&
+        formik.values.description &&
+        formik.values.description.length >= 10 &&
+        formik.values.departmentId &&
+        formik.values.typeId &&
+        formik.values.priorityId &&
+        formik.isValid
+      );
+    }
+    return false;
+  };
+
   return (
     <Container maxWidth="lg">
       <Box mt={4} mb={4}>
@@ -766,10 +788,10 @@ const CreateTicketPage: React.FC = () => {
                       type="submit"
                       variant="contained"
                       color="primary"
-                      disabled={isLoading || !formik.isValid || Object.keys(formik.touched).length === 0}
-                      startIcon={isLoading ? <CircularProgress size={24} color="inherit" /> : <SendIcon />}
+                      disabled={submitting || !isFormReadyToSubmit()}
+                      startIcon={submitting ? <CircularProgress size={24} color="inherit" /> : <SendIcon />}
                     >
-                      {isLoading ? 'Submitting...' : 'Submit Ticket'}
+                      {submitting ? 'Submitting...' : 'Submit Ticket'}
                     </Button>
                   ) : (
                     <Button

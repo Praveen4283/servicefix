@@ -376,9 +376,65 @@ class NotificationController {
       
       const userIdNum = Number(userId); // Convert userId to number
 
-      const { preferences } = req.body; // Expect an array { preferences: [ ... ] }
-      if (!Array.isArray(preferences)) {
-        res.status(400).json({ success: false, message: 'Invalid input format: preferences array is required' });
+      // Support both formats:
+      // 1. Array format: { preferences: [ ... ] }
+      // 2. New nested format: { notificationSettings: { type: { enabled, channels: {...} } } }
+      let preferences = [];
+      
+      if (req.body.preferences && Array.isArray(req.body.preferences)) {
+        // Handle legacy format - array of preferences
+        preferences = req.body.preferences;
+      } else if (req.body.notificationSettings && typeof req.body.notificationSettings === 'object') {
+        // Handle new nested format from ProfilePage
+        const notificationSettings = req.body.notificationSettings;
+        
+        // Convert from nested format to flat array
+        preferences = Object.entries(notificationSettings).map(([eventType, setting]) => {
+          // Check if it's the new format with enabled and channels
+          if (setting && typeof setting === 'object' && 'enabled' in setting && 'channels' in setting) {
+            // Only include enabled notification types
+            if (setting.enabled) {
+              // Add type check for channels
+              const channels = setting.channels as { email?: boolean; inApp?: boolean; push?: boolean };
+              return {
+                eventType,
+                emailEnabled: channels.email || false,
+                inAppEnabled: channels.inApp || false,
+                pushEnabled: channels.push || false
+              };
+            } else {
+              // If disabled, set all channels to false
+              return {
+                eventType,
+                emailEnabled: false,
+                inAppEnabled: false,
+                pushEnabled: false
+              };
+            }
+          } else if (typeof setting === 'boolean') {
+            // Handle simple boolean format (backward compatibility)
+            return {
+              eventType,
+              emailEnabled: setting,
+              inAppEnabled: setting,
+              pushEnabled: setting
+            };
+          }
+          return null;
+        }).filter(Boolean); // Remove null entries
+      } else {
+        res.status(400).json({ 
+          success: false, 
+          message: 'Invalid input format: preferences array or notificationSettings object is required' 
+        });
+        return;
+      }
+
+      if (!preferences.length) {
+        res.status(400).json({ 
+          success: false, 
+          message: 'No valid notification preferences provided' 
+        });
         return;
       }
 
@@ -416,7 +472,11 @@ class NotificationController {
         inAppEnabled: p.inAppEnabled
       }));
 
-      res.status(200).json(formattedPreferences);
+      res.status(200).json({
+        success: true,
+        message: 'Notification preferences updated successfully',
+        data: formattedPreferences
+      });
     } catch (error) {
       console.error('Error updating notification preferences:', error);
       res.status(500).json({ success: false, message: 'Failed to update notification preferences' });

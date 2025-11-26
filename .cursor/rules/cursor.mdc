@@ -1,0 +1,88 @@
+---
+description: 
+globs: 
+alwaysApply: true
+---
+# Cursor Rules
+
+## Database Management with Supabase MCP Tools
+
+### Rule: Direct Database Operations
+
+When making database changes (creating tables, modifying columns, adding constraints, etc.), always use MCP Supabase tools directly instead of creating migration scripts.
+
+**Process:**
+
+1. Use the appropriate MCP Supabase tools for the operation:
+   - `mcp_supabase_apply_migration` - For executing DDL operations
+   - `mcp_supabase_execute_sql` - For executing DML operations or queries
+
+2. After implementing changes via MCP tools, update the following files:
+   - Database schema files
+   - Type definitions
+   - Models that interact with the modified tables
+   - Any service files that depend on the schema changes
+   - API documentation if applicable
+
+**Example:**
+
+Instead of creating a migration script like:
+```sql
+-- migrations/001_create_users.sql
+CREATE TABLE users (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  email TEXT UNIQUE NOT NULL,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+```
+
+Use the MCP tool directly:
+```
+mcp_supabase_apply_migration(
+  project_id: "your-project-id",
+  name: "create_users_table",
+  query: "CREATE TABLE users (id UUID PRIMARY KEY DEFAULT gen_random_uuid(), email TEXT UNIQUE NOT NULL, created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW());"
+)
+```
+
+Then update all relevant schema files and code that references this table. 
+
+## Code Quality Management
+
+### Rule: Fix Linter Errors First
+
+After editing any file or page, fix all linter errors in that file before proceeding to the next operation.
+
+**Process:**
+
+1. After making changes to a file, check for any linter errors or warnings
+2. Address all linter issues in the edited file
+3. Only proceed to the next file edit or operation after resolving all linter issues
+4. Do not make more than 3 attempts to fix linter errors on the same file
+
+**Importance:**
+
+- Maintaining code quality through immediate linter error resolution
+- Preventing error propagation throughout the codebase
+- Ensuring consistent code style and best practices 
+
+### Rule: Fix TypeScript Issues First
+
+After editing any file, resolve all TypeScript errors and type-related issues before moving on to the next task or operation.
+
+**Process:**
+
+1. After making changes to a TypeScript file, check for type errors and TypeScript-specific issues
+2. Address all type incompatibilities, missing type definitions, and incorrect typings
+3. Ensure proper interface implementations and type assertions
+4. Only proceed to the next operation after resolving all TypeScript issues
+5. Do not make more than 3 attempts to fix TypeScript issues on the same file
+
+**Importance:**
+
+- Ensuring type safety throughout the codebase
+- Preventing runtime errors by catching type-related issues at compile time
+- Maintaining accurate type definitions for better developer experience and code reliability
+- Leveraging TypeScript's static typing benefits for more robust code 
+
+

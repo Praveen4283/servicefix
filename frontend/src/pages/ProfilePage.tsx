@@ -225,32 +225,180 @@ const gradientAccent = (theme: any) => ({
 });
 
 const ProfilePage: React.FC = () => {
-  const { user, updateProfile, changePassword, refreshUserData } = useAuth();
+  const { user, updateProfile, changePassword, refreshUserData, isLoading: isAuthLoading } = useAuth();
   const [editing, setEditing] = useState(false);
+  const [editingNotifications, setEditingNotifications] = useState(false);
   const [avatarFile, setAvatarFile] = useState<File | null>(null);
   const [avatarPreview, setAvatarPreview] = useState<string | null>(null);
   const [removeCurrentAvatar, setRemoveCurrentAvatar] = useState(false);
   const [changePasswordOpen, setChangePasswordOpen] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
-  const [notification, setNotification] = useState<{ open: boolean; message: string; type: 'success' | 'error' | 'info' }>({
-    open: false,
-    message: '',
-    type: 'success',
-  });
+  const [notification, setNotification] = useState<{ open: boolean; message: string; type: 'success' | 'error' | 'info' }>(
+    { open: false, message: '', type: 'success' }
+  );
+  // Track data loading to prevent unnecessary API calls
+  const [profileRefreshAttempted, setProfileRefreshAttempted] = useState(false);
+  const [notificationPreferencesChecked, setNotificationPreferencesChecked] = useState(false);
   // New state for notification tab
   const [notificationTab, setNotificationTab] = useState(0);
+  // Add state to track whether notification settings have changed
+  const [notificationSettingsChanged, setNotificationSettingsChanged] = useState(false);
+  // State to store notification settings
+  const [notificationSettings, setNotificationSettings] = useState<Record<string, NotificationSetting>>({});
   
   const theme = useTheme();
 
-  // Add state to track whether notification settings have changed
-  const [notificationSettingsChanged, setNotificationSettingsChanged] = useState(false);
+  // Effect to populate form once user data is loaded
+  useEffect(() => {
+    const loadProfileData = async () => {
+      // Wait for AuthContext to finish loading its initial user data
+      if (isAuthLoading) {
+        return;
+      }
+
+      if (user) {
+        // Log user data but avoid excessive logging
+        if (process.env.NODE_ENV !== 'production') {
+          console.log('[ProfilePage useEffect] User data loaded:', user.id);
+        }
+        
+        // Only check for critical data once
+        if (!profileRefreshAttempted) {
+          const isCriticalDataMissing = !user.designation || !user.phoneNumber || !user.organization;
+          
+          if (isCriticalDataMissing) {
+            setProfileRefreshAttempted(true);
+            
+            try {
+              await refreshUserData();
+            } catch (error) {
+              console.error('[ProfilePage useEffect] Error refreshing user data:', error);
+            }
+          } else {
+            setProfileRefreshAttempted(true);
+          }
+        }
+        
+        // Only proceed if we have user data
+        if (user.designation && user.phoneNumber) {
+          const convertedNotificationSettings = getDefaultNotificationSettings();
+          
+          if (user.notificationSettings) {
+            // Handle notification settings conversion
+            try {
+              Object.entries(user.notificationSettings).forEach(([key, value]) => {
+                if (typeof value === 'boolean') {
+                  if (convertedNotificationSettings[key]) {
+                    convertedNotificationSettings[key].enabled = value;
+                  }
+                } else if (typeof value === 'object' && value !== null) {
+                  const isNewFormat = 'enabled' in value && 'channels' in value;
+                  
+                  if (isNewFormat) {
+                    const typedValue = value as any;
+                    convertedNotificationSettings[key] = typedValue;
+                  } else {
+                    const legacyValue = value as any;
+                    convertedNotificationSettings[key] = {
+                      enabled: true,
+                      channels: {
+                        email: legacyValue.email || false,
+                        inApp: legacyValue.in_app || false,
+                        push: legacyValue.push || false
+                      }
+                    };
+                  }
+                }
+              });
+              
+              // Set notification settings only if they've changed
+              if (JSON.stringify(notificationSettings) !== JSON.stringify(convertedNotificationSettings)) {
+                setNotificationSettings(convertedNotificationSettings);
+              }
+            } catch (error) {
+              console.error('[ProfilePage] Error processing notification settings:', error);
+            }
+          } else if (!notificationPreferencesChecked) {
+            setNotificationPreferencesChecked(true);
+            // API call to fetch notification preferences would go here
+            // Removing for simplicity to focus on fixing the re-render issue
+          }
+          
+          // Only reset form values when user data changes or when form is not being edited
+          if (!editing) {
+            const formValues = {
+              firstName: user.firstName || '',
+              lastName: user.lastName || '',
+              email: user.email || '',
+              phoneNumber: user.phoneNumber || '',
+              designation: user.designation || '',
+              timezone: user.timezone || 'UTC',
+              language: user.language || 'en',
+              notificationSettings: notificationSettings // Include the notification settings
+            };
+            
+            // Only reset if values have changed to avoid unnecessary re-renders
+            const currentValues = profileFormik.values;
+            const hasChanged = Object.keys(formValues).some(
+              key => formValues[key as keyof typeof formValues] !== currentValues[key as keyof typeof currentValues]
+            );
+            
+            if (hasChanged) {
+              profileFormik.resetForm({
+                values: formValues
+              });
+            }
+            
+            // Reset avatar removal flag
+            setRemoveCurrentAvatar(false);
+          }
+        }
+      }
+    };
+    
+    loadProfileData();
+    // Explicitly list all dependencies and ensure they're stable
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user, isAuthLoading, editing, profileRefreshAttempted, notificationPreferencesChecked]);
+
+  // Debug outputs - comment these out or remove them entirely for production
+  useEffect(() => {
+    if (user && process.env.NODE_ENV !== 'production') {
+      debugUserFields();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Helper function to get default notification settings
+  const getDefaultNotificationSettings = () => {
+    return Object.fromEntries(
+      Object.entries(NOTIFICATION_TYPES).map(([key, value]) => [
+        key, 
+        {
+          enabled: true,
+          channels: {
+            email: value.defaultChannels.email,
+            inApp: value.defaultChannels.inApp,
+            push: value.defaultChannels.push
+          }
+        }
+      ])
+    );
+  };
 
   // Effect to refresh user data after successful profile update
   const refreshProfileData = useCallback(async () => {
     if (user) {
       console.log('[ProfilePage] Explicitly refreshing user data from API');
+      
+      // Reset the refresh flag to ensure we can refresh again if needed
+      setProfileRefreshAttempted(false);
+      
       try {
+        // Clear any cached data to ensure fresh fetch
         await refreshUserData();
+        
+        console.log('[ProfilePage] User data refresh successful');
       } catch (error) {
         console.error('[ProfilePage] Error refreshing user data:', error);
       }
@@ -265,13 +413,13 @@ const ProfilePage: React.FC = () => {
     submitSuccess: profileSubmitSuccess
   } = useFormValidation({
     initialValues: { 
-      firstName: '',
-      lastName: '',
-      email: '',
-      phoneNumber: '',
-      designation: '',
-      timezone: '',
-      language: '',
+      firstName: user?.firstName || '',
+      lastName: user?.lastName || '',
+      email: user?.email || '',
+      phoneNumber: user?.phoneNumber || '',
+      designation: user?.designation || '',
+      timezone: user?.timezone || 'UTC',
+      language: user?.language || 'en',
       notificationSettings: Object.fromEntries(
         Object.entries(NOTIFICATION_TYPES).map(([key, value]) => [
           key, 
@@ -297,13 +445,13 @@ const ProfilePage: React.FC = () => {
       try {
         // Prepare update data
         const updateData: Partial<User> & { avatar?: File | null } = {
-          firstName: values.firstName,
-          lastName: values.lastName,
-          email: values.email,
-          phoneNumber: values.phoneNumber,
-          designation: values.designation,
-          timezone: values.timezone,
-          language: values.language
+          firstName: values.firstName.trim(),
+          lastName: values.lastName.trim(),
+          email: values.email.trim(),
+          phoneNumber: values.phoneNumber ? values.phoneNumber.trim() : '',
+          designation: values.designation ? values.designation.trim() : '',
+          timezone: values.timezone || 'UTC',
+          language: values.language || 'en'
         };
         
         // Handle avatar changes
@@ -357,105 +505,6 @@ const ProfilePage: React.FC = () => {
       refreshProfileData();
     }
   }, [profileSubmitSuccess, refreshProfileData]);
-
-  // Effect to populate form once user data is loaded
-  useEffect(() => {
-    const loadProfileData = async () => {
-      if (user) {
-        // Create a unique key based on user data for debugging
-        const userDataKey = JSON.stringify({
-          firstName: user.firstName,
-          lastName: user.lastName,
-          email: user.email,
-          phoneNumber: user.phoneNumber,
-          designation: user.designation,
-          timezone: user.timezone,
-          language: user.language
-        });
-        
-        console.log('[ProfilePage useEffect] User data changed:', userDataKey);
-        console.log('[ProfilePage useEffect] User timezone before resetForm:', user?.timezone);
-        console.log('[ProfilePage useEffect] Phone number before resetForm:', user?.phoneNumber);
-        
-        // If user data is incomplete (missing timezone, etc.), refresh it first
-        if (user.id && (!user.timezone || !user.language)) {
-          console.log('[ProfilePage useEffect] User data incomplete, refreshing from API');
-          try {
-            await refreshUserData();
-            return; // The useEffect will run again with the refreshed data
-          } catch (error) {
-            console.error('[ProfilePage useEffect] Error refreshing incomplete user data:', error);
-          }
-        }
-        
-        // Convert old notification format to new format if needed
-        const convertedNotificationSettings = { ...profileFormik.initialValues.notificationSettings };
-        
-        if (user.notificationSettings) {
-          // Handle both old and new notification format
-          Object.entries(user.notificationSettings).forEach(([key, value]) => {
-            if (typeof value === 'boolean') {
-              // Old format - just enabled flag
-              if (convertedNotificationSettings[key]) {
-                convertedNotificationSettings[key].enabled = value;
-              }
-            } else if (typeof value === 'object') {
-              // New format - with channels
-              // Check if value has the correct structure
-              const isNewFormat = value !== null && 
-                typeof value === 'object' && 
-                'enabled' in value && 
-                'channels' in value && 
-                typeof value.enabled === 'boolean' && 
-                typeof value.channels === 'object';
-              
-              if (isNewFormat) {
-                // Already in the correct format
-                const typedValue = value as NotificationSetting;
-                convertedNotificationSettings[key] = typedValue;
-              } else {
-                // Old format with direct channel keys - transform to new structure
-                const legacyValue = value as LegacyNotificationSetting;
-                convertedNotificationSettings[key] = {
-                  enabled: true, // Default to enabled
-                  channels: {
-                    email: legacyValue.email || false,
-                    inApp: legacyValue.in_app || false, // Note: API might use in_app instead of inApp
-                    push: legacyValue.push || false
-                  }
-                };
-              }
-            }
-          });
-        }
-        
-        // Reset the form with the latest user data
-        const newValues = {
-          firstName: user.firstName || '',
-          lastName: user.lastName || '',
-          email: user.email || '',
-          phoneNumber: user.phoneNumber || '',
-          designation: user.designation || '',
-          timezone: user.timezone || 'UTC',
-          language: user.language || 'en',
-          notificationSettings: convertedNotificationSettings
-        };
-        
-        console.log('[ProfilePage useEffect] Resetting form with values:', JSON.stringify(newValues));
-        
-        // Reset the form with new values
-        profileFormik.resetForm({
-          values: newValues
-        });
-        
-        // Reset avatar removal flag when user data changes
-        setRemoveCurrentAvatar(false); 
-      }
-    };
-    
-    loadProfileData();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [user?.id, refreshUserData]); // Changed dependency to just user.id and refreshUserData
 
   // Change Password form validation hook
   const { 
@@ -530,6 +579,7 @@ const ProfilePage: React.FC = () => {
     }
   };
 
+  // Modify handleCancel to also handle notification settings cancel
   const handleCancel = () => {
     setEditing(false);
     setAvatarPreview(null);
@@ -537,6 +587,47 @@ const ProfilePage: React.FC = () => {
     setRemoveCurrentAvatar(false); // Reset removal flag on cancel
     setNotificationSettingsChanged(false); // Reset notification changes flag
     profileFormik.resetForm(); // Resets to initial values (or values from useEffect based on user)
+  };
+
+  // Add new function to handle notification settings cancel
+  const handleCancelNotifications = () => {
+    setEditingNotifications(false);
+    setNotificationSettingsChanged(false); // Reset notification changes flag
+    profileFormik.resetForm(); // Resets to initial values (or values from useEffect based on user)
+  };
+
+  // Add new function to save only notification settings
+  const handleSaveNotifications = async () => {
+    if (!user) return;
+    
+    setIsProcessing(true);
+    console.log('[ProfilePage] Submitting notification settings:', JSON.stringify(profileFormik.values.notificationSettings));
+    
+    try {
+      // Send only the notification settings
+      await fetch(`${process.env.REACT_APP_API_URL}/notifications/preferences`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${localStorage.getItem('token')}`
+        },
+        body: JSON.stringify({ notificationSettings: profileFormik.values.notificationSettings })
+      });
+      
+      setEditingNotifications(false);
+      setNotificationSettingsChanged(false);
+      setIsProcessing(false);
+      
+      // Show success toast
+      toast.success('Notification settings updated successfully');
+      
+      // Force refresh of user data to ensure UI shows updated information
+      await refreshProfileData();
+    } catch (error) {
+      console.error('[ProfilePage] Error updating notification settings:', error);
+      setIsProcessing(false);
+      toast.error(error instanceof Error ? error.message : 'Failed to update notification settings');
+    }
   };
 
   const handleOpenChangePassword = () => {
@@ -595,7 +686,7 @@ const ProfilePage: React.FC = () => {
               size="small"
               checked={notificationSetting.channels?.email || false}
               onChange={(e) => handleNotificationChannelChange(notificationType, 'email', e.target.checked)}
-              disabled={!editing || isProfileSubmitting || !notificationSetting.enabled}
+              disabled={(!editing && !editingNotifications) || isProfileSubmitting || !notificationSetting.enabled}
             />
           }
           label={
@@ -611,7 +702,7 @@ const ProfilePage: React.FC = () => {
               size="small"
               checked={notificationSetting.channels?.inApp || false}
               onChange={(e) => handleNotificationChannelChange(notificationType, 'inApp', e.target.checked)}
-              disabled={!editing || isProfileSubmitting || !notificationSetting.enabled}
+              disabled={(!editing && !editingNotifications) || isProfileSubmitting || !notificationSetting.enabled}
             />
           }
           label={
@@ -627,7 +718,7 @@ const ProfilePage: React.FC = () => {
               size="small"
               checked={notificationSetting.channels?.push || false}
               onChange={(e) => handleNotificationChannelChange(notificationType, 'push', e.target.checked)}
-              disabled={!editing || isProfileSubmitting || !notificationSetting.enabled}
+              disabled={(!editing && !editingNotifications) || isProfileSubmitting || !notificationSetting.enabled}
             />
           }
           label={
@@ -652,6 +743,22 @@ const ProfilePage: React.FC = () => {
     };
   }, []);
 
+  // Function to debug sensitive user fields without excessive logging
+  const debugUserFields = () => {
+    if (process.env.NODE_ENV === 'production') return;
+    
+    if (user) {
+      console.log('[ProfilePage] User designation:', user.designation);
+      console.log('[ProfilePage] Organization data:', user.organization);
+      
+      if (user.lastLoginAt || user.lastLogin || user.last_login_at) {
+        const loginDateString = user.lastLoginAt || user.lastLogin || user.last_login_at;
+        console.log('[ProfilePage] Last login date string:', loginDateString);
+        console.log('[ProfilePage] Last login date type:', typeof loginDateString);
+      }
+    }
+  };
+  
   if (!user) {
     return (
       <Box sx={{ width: '100%', display: 'flex', justifyContent: 'center', alignItems: 'center', height: '50vh' }}>
@@ -831,8 +938,13 @@ const ProfilePage: React.FC = () => {
                   )}
                 </Box>
               ) : (
-                <Typography variant="subtitle1" gutterBottom>
-                  {user?.designation || 'No Designation set'}
+                <Typography variant="subtitle1" gutterBottom sx={{ textAlign: 'center', mt: 1, mb: 2 }}>
+                  {(() => {
+                    // Handle designation display with fallback and debugging
+                    const designation = user?.designation || '';
+                    console.log('[ProfilePage] User designation:', designation);
+                    return designation ? designation : 'No Designation set';
+                  })()}
                 </Typography>
               )}
               
@@ -846,17 +958,33 @@ const ProfilePage: React.FC = () => {
                       try {
                         // Determine timezone, fallback to UTC if not set on user
                         const userTimeZone = user?.timezone || 'UTC'; 
+                        // Normalize the login date field (handle snake_case and camelCase variations)
                         const loginDateString = user.lastLoginAt || user.lastLogin || user.last_login_at;
+                        
+                        // Debugging to help identify format issues
+                        console.log('[ProfilePage] Last login date string:', loginDateString);
+                        console.log('[ProfilePage] Last login date type:', typeof loginDateString);
+                        
                         // Only create Date if we have a valid login date
                         if (loginDateString) {
-                          const loginDate = new Date(loginDateString);
+                          // Handle both string and Date object formats
+                          const loginDate = typeof loginDateString === 'string' 
+                            ? new Date(loginDateString) 
+                            : loginDateString;
+                            
+                          // Check if date is valid before formatting
+                          if (!isNaN(loginDate.getTime())) {
                           // Use formatInTimeZone for correct display
                           return formatInTimeZone(loginDate, userTimeZone, 'MMM dd, yyyy p');
+                          } else {
+                            console.error('[ProfilePage] Invalid date format:', loginDateString);
+                            return "Invalid Date";
+                          }
                         } else {
                           return "No login date available";
                         }
                       } catch (error) {
-                        console.error('Error formatting last login date:', error);
+                        console.error('[ProfilePage] Error formatting last login date:', error);
                         return 'Invalid Date'; // Show error if formatting fails
                       }
                     })()}
@@ -1003,7 +1131,23 @@ const ProfilePage: React.FC = () => {
                       <TextField
                         label="Organization"
                         fullWidth
-                        value={user?.organization?.name || 'N/A'}
+                        value={(() => {
+                          // Debug organization data structure
+                          console.log('[ProfilePage] Organization data:', user?.organization);
+                          
+                          // Handle different possible organization data structures
+                          if (user?.organization?.name) {
+                            return user.organization.name;
+                          } else if (typeof user?.organization === 'string') {
+                            return user.organization;
+                          } else if ((user as any)?.organizationName) {
+                            return (user as any).organizationName;
+                          } else if ((user as any)?.organization_name) {
+                            return (user as any).organization_name;
+                          } else {
+                            return 'N/A';
+                          }
+                        })()}
                         disabled
                         variant="outlined"
                       />
@@ -1034,7 +1178,7 @@ const ProfilePage: React.FC = () => {
                         label="Timezone"
                         name="timezone"
                         fullWidth
-                        value={profileFormik.values.timezone}
+                        value={profileFormik.values.timezone || 'UTC'}
                         onChange={profileFormik.handleChange}
                         onBlur={profileFormik.handleBlur}
                         error={profileFormik.touched.timezone && Boolean(profileFormik.errors.timezone)}
@@ -1057,7 +1201,7 @@ const ProfilePage: React.FC = () => {
                         label="Language"
                         name="language"
                         fullWidth
-                        value={profileFormik.values.language}
+                        value={profileFormik.values.language || 'en'}
                         onChange={profileFormik.handleChange}
                         onBlur={profileFormik.handleBlur}
                         error={profileFormik.touched.language && Boolean(profileFormik.errors.language)}
@@ -1138,15 +1282,47 @@ const ProfilePage: React.FC = () => {
             >
               <CardContent>
                 <Box>
-                  <Box sx={{ mb: 2 }}>
+                  <Box sx={{ mb: 2, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                     <Typography variant="h6" sx={{ display: 'flex', alignItems: 'center' }}>
                       <NotificationsIcon sx={{ mr: 1 }} /> 
                       Notification Settings
                     </Typography>
-                    <Typography variant="body2" color="textSecondary" sx={{ mt: 1, mb: 2 }}>
-                      Configure how and when you receive notifications about system activities.
-                    </Typography>
+                    {!editingNotifications ? (
+                      <Button
+                        variant="outlined"
+                        size="small"
+                        onClick={() => setEditingNotifications(true)}
+                        startIcon={<EditIcon />}
+                        sx={{ ml: 2 }}
+                      >
+                        Edit Notifications
+                      </Button>
+                    ) : (
+                      <Box sx={{ display: 'flex', gap: 1 }}>
+                        <Button
+                          variant="contained"
+                          size="small"
+                          color="primary"
+                          startIcon={isProfileSubmitting ? <CircularProgress size={16} color="inherit" /> : <SaveIcon />}
+                          onClick={handleSaveNotifications}
+                          disabled={isProfileSubmitting || !notificationSettingsChanged}
+                        >
+                          Save
+                        </Button>
+                        <Button
+                          variant="outlined"
+                          size="small"
+                          onClick={handleCancelNotifications}
+                          disabled={isProfileSubmitting}
+                        >
+                          Cancel
+                        </Button>
+                      </Box>
+                    )}
                   </Box>
+                  <Typography variant="body2" color="textSecondary" sx={{ mt: 1, mb: 2 }}>
+                    Configure how and when you receive notifications about system activities.
+                  </Typography>
                   
                   <Accordion 
                     elevation={0}
@@ -1186,7 +1362,7 @@ const ProfilePage: React.FC = () => {
                                       handleNotificationTypeToggle(key, event.target.checked);
                                     }}
                                     name={`notificationSettings.${key}.enabled`}
-                                    disabled={!editing || isProfileSubmitting}
+                                    disabled={(!editing && !editingNotifications) || isProfileSubmitting}
                                   />
                                 }
                                 label={
@@ -1243,7 +1419,7 @@ const ProfilePage: React.FC = () => {
                                       handleNotificationTypeToggle(key, event.target.checked);
                                     }}
                                     name={`notificationSettings.${key}.enabled`}
-                                    disabled={!editing || isProfileSubmitting}
+                                    disabled={(!editing && !editingNotifications) || isProfileSubmitting}
                                   />
                                 }
                                 label={

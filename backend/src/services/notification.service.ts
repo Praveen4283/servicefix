@@ -248,30 +248,94 @@ class NotificationService {
   async getUserNotifications(
     userId: string, 
     options: { limit?: number; offset?: number; unreadOnly?: boolean } = {}
-  ): Promise<{ notifications: Notification[]; total: number }> {
+  ): Promise<{ notifications: any[]; total: number }> {
     try {
+      // Set default options
+      const limit = options.limit || 20;
+      const offset = options.offset || 0;
+      const unreadOnly = options.unreadOnly || false;
+      
+      // Get repository
       const notificationRepository = AppDataSource.getRepository(Notification);
-      const { limit = 20, offset = 0, unreadOnly = false } = options;
       
       // Build query
-      const queryBuilder = notificationRepository
-        .createQueryBuilder('notification')
+      let queryBuilder = notificationRepository.createQueryBuilder('notification')
         .where('notification.userId = :userId', { userId: parseInt(userId, 10) })
-        .orderBy('notification.createdAt', 'DESC')
-        .take(limit)
-        .skip(offset);
+        .andWhere('notification.isDeleted = :isDeleted', { isDeleted: false });
       
-      // Add filter for unread only if specified
+      // Add read filter if needed
       if (unreadOnly) {
-        queryBuilder.andWhere('notification.isRead = false');
+        queryBuilder = queryBuilder.andWhere('notification.isRead = :isRead', { isRead: false });
       }
       
-      // Execute query
-      const [notifications, total] = await queryBuilder.getManyAndCount();
+      // First get total count
+      const total = await queryBuilder.getCount();
       
-      return { notifications, total };
+      // Then get paginated results
+      const notifications = await queryBuilder
+        .orderBy('notification.createdAt', 'DESC')
+        .skip(offset)
+        .take(limit)
+        .getMany();
+      
+      // Debug output for notification fetch
+      logger.debug(`Fetched ${notifications.length} notifications for user ${userId}, total: ${total}`);
+      
+      // Always log notification data when there's a discrepancy
+      if (total > 0 && notifications.length === 0) {
+        logger.warn(`Notification count mismatch for user ${userId}: total=${total}, fetched=0`);
+        
+        // Try a direct query without pagination
+        const allNotifications = await notificationRepository
+          .createQueryBuilder('notification')
+          .where('notification.userId = :userId', { userId: parseInt(userId, 10) })
+          .andWhere('notification.isDeleted = :isDeleted', { isDeleted: false })
+          .getMany();
+        
+        logger.info(`Direct fetch found ${allNotifications.length} notifications for user ${userId}`);
+        
+        // Use direct query results if available
+        if (allNotifications.length > 0) {
+          logger.info('Using direct fetch results for notification response');
+          return {
+            notifications: allNotifications.map(notification => ({
+              id: notification.id,
+              userId: notification.userId,
+              title: notification.title,
+              message: notification.message,
+              link: notification.link,
+              is_read: notification.isRead,
+              isRead: notification.isRead, // Include both formats for compatibility
+              type: notification.type,
+              created_at: notification.createdAt,
+              createdAt: notification.createdAt, // Include both formats for compatibility
+              metadata: notification.metadata
+            })),
+            total: allNotifications.length
+          };
+        }
+      }
+      
+      // Map to response format
+      return {
+        notifications: notifications.map(notification => ({
+          id: notification.id,
+          userId: notification.userId,
+          title: notification.title,
+          message: notification.message,
+          link: notification.link,
+          is_read: notification.isRead,
+          isRead: notification.isRead, // Include both formats for compatibility
+          type: notification.type,
+          created_at: notification.createdAt,
+          createdAt: notification.createdAt, // Include both formats for compatibility
+          metadata: notification.metadata
+        })),
+        total
+      };
     } catch (error) {
-      console.error('Error fetching user notifications:', error);
+      logger.error('Error fetching notifications:', error);
+      // Return empty result on error
       return { notifications: [], total: 0 };
     }
   }
@@ -353,7 +417,7 @@ class NotificationService {
   }
 
   /**
-   * Delete a notification
+   * Delete a notification (soft delete)
    * @param notificationId ID of the notification to delete
    * @param userId User ID for verification
    * @returns Promise resolving to success status
@@ -362,22 +426,31 @@ class NotificationService {
     try {
       const notificationRepository = AppDataSource.getRepository(Notification);
       
-      // Delete the notification
-      const result = await notificationRepository.delete({
+      // Find the notification
+      const notification = await notificationRepository.findOneBy({
         id: parseInt(notificationId, 10),
-        userId: userId
+        userId: userId,
+        isDeleted: false // Only update non-deleted notifications
       });
       
-      // Check if any row was affected
-      return result.affected !== undefined && result.affected !== null && result.affected > 0;
+      if (!notification) {
+        return false;
+      }
+      
+      // Soft delete - set isDeleted flag
+      notification.isDeleted = true;
+      await notificationRepository.save(notification);
+      
+      // Check if update was successful
+      return true;
     } catch (error) {
-      console.error(`Error deleting notification ${notificationId} for user ${userId}:`, error);
+      console.error(`Error soft-deleting notification ${notificationId} for user ${userId}:`, error);
       return false;
     }
   }
 
   /**
-   * Delete all notifications for a specific user
+   * Delete all notifications for a specific user (soft delete)
    * @param userId User ID whose notifications should be deleted
    * @returns Promise resolving to success status
    */
@@ -391,13 +464,18 @@ class NotificationService {
         return false;
       }
       
-      // Delete all notifications for the user
-      const result = await notificationRepository.delete({ userId: userIdNum });
+      // Soft delete all notifications for the user
+      const result = await notificationRepository
+        .createQueryBuilder()
+        .update(Notification)
+        .set({ isDeleted: true })
+        .where('userId = :userId AND isDeleted = false', { userId: userIdNum })
+        .execute();
       
-      console.log(`Deleted ${result.affected ?? 0} notifications for user ${userId}`);
+      console.log(`Soft-deleted ${result.affected ?? 0} notifications for user ${userId}`);
       return true; // Return true even if 0 were deleted
     } catch (error) {
-      console.error(`Error deleting all notifications for user ${userId}:`, error);
+      console.error(`Error soft-deleting all notifications for user ${userId}:`, error);
       return false;
     }
   }

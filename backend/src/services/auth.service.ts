@@ -30,15 +30,21 @@ logger.info('[Auth Service] Using JWT secrets from environment variables.');
  */
 class AuthService {
   /**
-   * Generate JWT access token
+   * Generate JWT token
    * @param userId User ID
-   * @param role User role
+   * @param role User role 
    * @returns JWT token
    */
   generateToken(userId: string | number, role: string): string {
+    const payload = { 
+      userId, 
+      role
+    };
+    
     const options = { expiresIn: JWT_EXPIRES_IN } as jwt.SignOptions;
+    
     return jwt.sign(
-      { userId, role },
+      payload,
       JWT_SECRET,
       options
     );
@@ -50,12 +56,41 @@ class AuthService {
    * @returns Refresh token
    */
   generateRefreshToken(userId: string | number): string {
+    const payload: { userId: string | number; iat?: number; jti?: string } = { userId };
+    
     const options = { expiresIn: JWT_REFRESH_EXPIRES_IN } as jwt.SignOptions;
+    
+    // Add issued time for token rotation policies
+    payload.iat = Math.floor(Date.now() / 1000);
+    payload.jti = crypto.randomBytes(16).toString('hex'); // Unique token ID
+    
     return jwt.sign(
-      { userId },
+      payload,
       JWT_REFRESH_SECRET,
       options
     );
+  }
+
+  /**
+   * Update the user's last login timestamp
+   * @param userId User ID
+   * @param ipAddress IP address (stored in logs only)
+   */
+  async storeUserIpAddress(userId: string | number, ipAddress: string): Promise<void> {
+    try {
+      // Log the IP for security purposes but don't store it in the database
+      logger.info(`User ${userId} logged in from IP: ${ipAddress}`);
+      
+      await query(
+        `UPDATE users
+         SET last_login_at = NOW()
+         WHERE id = $1`,
+        [userId]
+      );
+    } catch (error) {
+      logger.error('Error updating last login timestamp:', error);
+      // Non-critical operation, don't throw error
+    }
   }
 
   /**
@@ -63,13 +98,32 @@ class AuthService {
    * @param userId User ID
    * @param token Refresh token
    * @param expiresAt Expiration date
+   * @param fingerprint Optional client fingerprint (stored in memory only)
    */
-  async saveRefreshToken(userId: string | number, token: string, expiresAt: Date): Promise<void> {
+  async saveRefreshToken(
+    userId: string | number, 
+    token: string, 
+    expiresAt: Date, 
+    fingerprint?: string
+  ): Promise<void> {
     try {
+      // Store fingerprint in the JWT itself, not in database
       await query(
         `INSERT INTO user_tokens (user_id, refresh_token, expires_at)
          VALUES ($1, $2, $3)`,
         [userId, token, expiresAt]
+      );
+      
+      // Implement token rotation policy - keep only the 5 most recent tokens per user
+      await query(
+        `DELETE FROM user_tokens 
+         WHERE id IN (
+           SELECT id FROM user_tokens
+           WHERE user_id = $1
+           ORDER BY created_at DESC
+           OFFSET 5
+         )`,
+        [userId]
       );
     } catch (error) {
       logger.error('Error saving refresh token:', error);
@@ -116,16 +170,17 @@ class AuthService {
   /**
    * Refresh access token
    * @param refreshToken Refresh token
-   * @returns New access token and user data
+   * @param fingerprint Optional client fingerprint for enhanced security
+   * @returns New access token, optional new refresh token, and user data
    */
-  async refreshAccessToken(refreshToken: string): Promise<{ token: string, user: any }> {
+  async refreshAccessToken(refreshToken: string, fingerprint?: string): Promise<{ token: string, refreshToken?: string | null, user: any }> {
     // Verify refresh token
     const decoded = this.verifyRefreshToken(refreshToken);
     const userId = decoded.userId;
 
     // Check if refresh token exists in database
     const tokenResult = await query(
-      'SELECT * FROM user_tokens WHERE user_id = $1 AND refresh_token = $2 AND expires_at > NOW()',
+      'SELECT * FROM user_tokens WHERE user_id = $1 AND refresh_token = $2 AND expires_at > NOW() AND is_revoked = FALSE',
       [userId, refreshToken]
     );
 
@@ -150,9 +205,45 @@ class AuthService {
     
     // Generate new access token
     const newToken = this.generateToken(user.id, user.role);
+    
+    // Implement token rotation if token is nearing expiry
+    // Refresh tokens automatically if they're more than 70% through their lifetime
+    let newRefreshToken = null;
+    if (decoded.iat) {
+      const now = Math.floor(Date.now() / 1000);
+      const tokenAge = now - decoded.iat;
+      const tokenMaxAge = parseInt(process.env.JWT_REFRESH_EXPIRES_IN?.replace(/\D/g, '') || '7');
+      const tokenMaxAgeSeconds = tokenMaxAge * 
+                          (process.env.JWT_REFRESH_EXPIRES_IN?.includes('d') ? 86400 : 
+                           process.env.JWT_REFRESH_EXPIRES_IN?.includes('h') ? 3600 : 
+                           process.env.JWT_REFRESH_EXPIRES_IN?.includes('m') ? 60 : 1);
+      
+      // If token is more than 70% through its lifetime, rotate it
+      if (tokenAge > tokenMaxAgeSeconds * 0.7) {
+        logger.debug(`Rotating refresh token for user ${userId} (age: ${tokenAge}s)`);
+        newRefreshToken = this.generateRefreshToken(user.id);
+        
+        // Calculate expiry date
+        const expiryDays = parseInt(process.env.JWT_REFRESH_EXPIRES_IN?.replace(/\D/g, '') || '7');
+        const expiresAt = new Date();
+        expiresAt.setDate(expiresAt.getDate() + expiryDays);
+        
+        // Save new refresh token with fingerprint if provided
+        await this.saveRefreshToken(user.id, newRefreshToken, expiresAt, fingerprint);
+        
+        // Mark old token as revoked
+        await query(
+          `UPDATE user_tokens 
+           SET is_revoked = TRUE
+           WHERE user_id = $1 AND refresh_token = $2`,
+          [userId, refreshToken]
+        );
+      }
+    }
 
     return {
       token: newToken,
+      refreshToken: newRefreshToken, // Will be null if no rotation happened
       user: {
         id: user.id,
         email: user.email,

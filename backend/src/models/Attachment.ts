@@ -1,6 +1,7 @@
 import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, ManyToOne, JoinColumn } from 'typeorm';
 import { User } from './User';
 import { Ticket } from './Ticket';
+import { TicketComment } from './TicketComment';
 
 @Entity('ticket_attachments')
 export class Attachment {
@@ -19,15 +20,19 @@ export class Attachment {
   @Column({ name: 'file_path' })
   filePath: string;
 
-  @Column({ nullable: true, name: 'content_id' })
-  contentId: string;
-
   @ManyToOne(() => Ticket, ticket => ticket.attachments)
   @JoinColumn({ name: 'ticket_id' })
   ticket: Ticket;
 
   @Column({ name: 'ticket_id', type: 'bigint' })
   ticketId: number;
+
+  @ManyToOne(() => TicketComment, comment => comment.attachments, { nullable: true })
+  @JoinColumn({ name: 'comment_id' })
+  comment: TicketComment;
+
+  @Column({ name: 'comment_id', type: 'bigint', nullable: true })
+  commentId: number;
 
   @ManyToOne(() => User, user => user.attachments)
   @JoinColumn({ name: 'uploaded_by' })

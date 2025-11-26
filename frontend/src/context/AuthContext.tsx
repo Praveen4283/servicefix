@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useEffect, useState, ReactNode, useCallback, useRef } from 'react';
+import React, { createContext, useContext, useEffect, useState, ReactNode, useCallback, useRef, useMemo } from 'react';
 import apiClient from '../services/apiClient';
 import { useNavigate, useLocation } from 'react-router-dom';
 import notificationService from '../services/notificationService';
@@ -200,269 +200,457 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   const navigate = useNavigate();
   const location = useLocation();
   const notificationIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const socketInitializedRef = useRef<boolean>(false);
+  const validatingSessionRef = useRef<boolean>(false);
+  const sessionValidationPromiseRef = useRef<Promise<void> | null>(null);
+  
+  // Memoize user object to prevent unnecessary re-renders
+  const user = useMemo(() => state.user, [state.user]);
+  
+  // Initialize socket connection after successful auth
+  const initializeSocketIfNeeded = useCallback(() => {
+    if (socketInitializedRef.current) {
+      return;
+    }
+
+    const authToken = localStorage.getItem('authToken');
+    if (!authToken) {
+      console.warn('[AuthContext] Cannot initialize socket: No auth token in localStorage');
+      return;
+    }
+    
+    console.log('[AuthContext] Initializing socket connection after successful auth');
+    import('../services/socketService').then(({ default: socketService }) => {
+      socketService.initializeSocket(authToken)
+        .then(() => {
+          console.log('[AuthContext] Socket initialized successfully');
+          socketInitializedRef.current = true;
+        })
+        .catch(err => {
+          console.error('[AuthContext] Error initializing socket:', err);
+          // Reset flag to allow future reconnection attempts
+          setTimeout(() => {
+            socketInitializedRef.current = false;
+          }, 30000); // Wait 30 seconds before allowing another attempt
+        });
+    });
+  }, []);
+
+  // Handle session expired with debouncing to prevent multiple redirects
+  const handleSessionExpired = useCallback(() => {
+    // Clear authentication state
+    setState({
+      isAuthenticated: false,
+      user: null,
+      isLoading: false,
+      error: null,
+      registrationSuccess: false
+    });
+    
+    // Clear stored authentication data
+    localStorage.removeItem('authToken');
+    localStorage.removeItem('refreshToken');
+    localStorage.removeItem('user');
+    
+    // Reset socket connection status
+    socketInitializedRef.current = false;
+    
+    // Disconnect from socket if connected
+    import('../services/socketService').then(({ default: socketService }) => {
+      socketService.disconnect();
+    });
+    
+    // Redirect to login page if not already there
+    if (!location.pathname.includes('/login')) {
+      // Add session expired parameter to show appropriate message
+      navigate('/login?session=expired');
+    }
+  }, [navigate, location.pathname]);
+
+  // Validate user session with debouncing to prevent multiple calls
+  const validateSession = useCallback(async (): Promise<boolean> => {
+    // If already validating, return the existing promise
+    if (validatingSessionRef.current && sessionValidationPromiseRef.current) {
+      try {
+        await sessionValidationPromiseRef.current;
+        return true;
+      } catch (error) {
+        return false;
+      }
+    }
+    
+    // Set validating flag and create a new promise
+    validatingSessionRef.current = true;
+    
+    const validationPromise = new Promise<boolean>(async (resolve, reject) => {
+      try {
+        // Ensure CSRF token is available or fetched
+        try {
+          await apiClient.fetchCsrfToken();
+        } catch (csrfError) {
+          console.warn('[AuthContext] Failed to fetch/ensure CSRF token before validation:', csrfError);
+          // Continue anyway, the API call will handle CSRF errors
+        }
+        
+        // Validate the session
+        const response = await apiClient.get('/auth/validate');
+        
+        if (response && response.user) {
+          // Update user data and authentication state
+          const user = formatUserResponse(response.user);
+          localStorage.setItem('user', JSON.stringify(user));
+          
+          setState(prevState => ({
+            ...prevState,
+            isAuthenticated: true,
+            user,
+            isLoading: false,
+            error: null,
+          }));
+          
+          // Initialize socket connection
+          initializeSocketIfNeeded();
+          
+          resolve(true);
+          return;
+        } else {
+          console.warn('[AuthContext] /auth/validate did not return a user or unexpected response');
+          handleSessionExpired();
+          reject(new Error('Invalid session validation response'));
+          return;
+        }
+      } catch (error) {
+        console.error('[AuthContext] Error validating session:', error);
+        handleSessionExpired();
+        reject(error);
+        return;
+      } finally {
+        // Reset validation state after a small delay to prevent immediate retries
+        setTimeout(() => {
+          validatingSessionRef.current = false;
+          sessionValidationPromiseRef.current = null;
+        }, 1000);
+      }
+    });
+    
+    // Store the promise for potential concurrent calls
+    sessionValidationPromiseRef.current = validationPromise.then(() => {}).catch(() => {});
+    
+    return validationPromise;
+  }, [handleSessionExpired, initializeSocketIfNeeded]);
 
   // Initialize the auth state
   useEffect(() => {
     const initializeAuth = async () => {
-      // If we already have a cached user, update state immediately to avoid flicker
+      let proceedToValidate = true;
+      let loadedFromCacheAndComplete = false;
+
       const cachedUserJson = localStorage.getItem('user');
       if (cachedUserJson) {
         try {
-          const cachedUser = JSON.parse(cachedUserJson);
-          console.log('[AuthContext] Found cached user data:', cachedUser.id);
+          const cachedUser = JSON.parse(cachedUserJson) as User;
           
-          // Update state with cached user data immediately
-          setState(prevState => ({
-            ...prevState,
-            isAuthenticated: true,
-            user: cachedUser,
-            isLoading: false // Set to false to avoid loading spinner
-          }));
-        } catch (e) {
-          console.error('[AuthContext] Error parsing cached user data:', e);
-          localStorage.removeItem('user'); // Remove invalid JSON
-        }
-      }
-      
-      // Check if we're on a public route
-      const isPublicRoute = ['/', '/login', '/register', '/forgot-password', '/reset-password', '/cookies'].some(
-        route => location.pathname === route || location.pathname.startsWith(route)
-      );
+          if (process.env.NODE_ENV !== 'production') {
+            console.log('[AuthContext] Found cached user data:', cachedUser.id);
+          }
 
-      // Check for fresh login - if we have a recent login timestamp, consider it a fresh login
-      const lastLoginTimestamp = localStorage.getItem('lastLoginTimestamp');
-      const isFreshLogin = lastLoginTimestamp && 
-        (Date.now() - parseInt(lastLoginTimestamp, 10)) < 5000; // Within last 5 seconds
-      
-      // Check if we're in a redirect cycle by examining location state
-      const isRedirecting = location.state?.isRedirecting;
-      
-      // Log initialization details for debugging
-      console.log('[AuthContext] Initializing auth state:', {
-        path: location.pathname,
-        isPublicRoute,
-        isFreshLogin,
-        isRedirecting
-      });
-      
-      // If we're on a public route or currently redirecting, skip the validation 
-      if (isPublicRoute || isRedirecting) {
-        console.log('[AuthContext] On public route or redirecting, skipping auth validation');
-        setState(prevState => ({ ...prevState, isLoading: false }));
-        return;
-      }
-      
-      // For protected routes, validate with server in background
-      // without blocking the UI render
-      if (!isRedirecting) {
-        try {
-          console.log('[AuthContext] Validating auth with server');
-          const response = await apiClient.get<any>('/auth/validate');
-          console.log('[AuthContext] Validate response:', response);
-          
-          if (response?.user) {
-            console.log('[AuthContext] Server validation successful, updating state with server data');
-            
-            // Format user data to ensure consistent structure
-            const formattedUser = formatUserResponse(response.user);
-            
-            // Store user data in localStorage for persistence
-            localStorage.setItem('user', JSON.stringify(formattedUser));
-            
+          const hasCriticalData = cachedUser.designation && cachedUser.phoneNumber && cachedUser.organization;
+
+          if (hasCriticalData) {
+            if (process.env.NODE_ENV !== 'production') {
+              console.log('[AuthContext] Cached user has critical data, using it.');
+            }
             setState(prevState => ({
               ...prevState,
               isAuthenticated: true,
-              user: formattedUser,
-              isLoading: false,
-              error: null,
+              user: cachedUser,
+              isLoading: false
             }));
+            proceedToValidate = false;
+            loadedFromCacheAndComplete = true;
           } else {
-            // Authentication failed, clean up and redirect
-            console.log('[AuthContext] Server validation failed, cleaning up auth state');
-            localStorage.removeItem('user');
-            localStorage.removeItem('csrfToken');
-            localStorage.removeItem('csrfTokenExpiry');
-            localStorage.removeItem('lastLoginTimestamp');
-            
-            setState({
-              isAuthenticated: false,
-              user: null,
-              isLoading: false,
-              error: null,
-              registrationSuccess: false
-            });
+            if (process.env.NODE_ENV !== 'production') {
+              console.log('[AuthContext] Cached user is missing critical data, will proceed to validate session.');
+            }
+            setState(prevState => ({
+              ...prevState,
+              isAuthenticated: true, // Assume authenticated if cache exists, but data is incomplete
+              user: cachedUser, // Set partial user
+              isLoading: true // Keep isLoading true until validation for this protected route
+            }));
+          }
+        } catch (e) {
+          console.error('[AuthContext] Error parsing cached user data:', e);
+          localStorage.removeItem('user');
+          setState(prevState => ({ ...prevState, isLoading: true }));
+        }
+      } else {
+        setState(prevState => ({ ...prevState, isLoading: true }));
+      }
+      
+      // Determine if the current route is public
+      const currentPath = location.pathname;
+      const publicRoutes = ['/', '/login', '/register', '/forgot-password', '/reset-password', '/cookies'];
+      const isCurrentRoutePublic = publicRoutes.some(
+        route => currentPath === route || (route !== '/' && currentPath.startsWith(route))
+      );
+
+      // Handle public routes: skip validation and ensure isLoading is false.
+      if (isCurrentRoutePublic) {
+        console.log(`[AuthContext] Current route ${currentPath} is public. Skipping auth validation.`);
+        
+        if (state.isLoading || !loadedFromCacheAndComplete) {
+          setState(prevState => ({ ...prevState, isLoading: false }));
+        }
+        return;
+      }
+
+      // For NON-PUBLIC routes: validate session if needed
+      if (proceedToValidate) {
+        try {
+          console.log(`[AuthContext] Validating auth session for protected route: ${currentPath}`);
+          
+          // Use the validateSession helper with debouncing
+          const isValid = await validateSession();
+          
+          if (!isValid) {
+            // Session validation failed, handleSessionExpired was already called
+            console.warn('[AuthContext] Session validation failed for protected route.');
+          } else {
+            console.log('[AuthContext] Session validated successfully for protected route.');
           }
         } catch (error) {
           console.error('[AuthContext] Error during auth initialization:', error);
-          
-          // Don't clear user data immediately on network errors
-          // This allows the app to work offline with cached data
-          setState(prevState => ({
-            ...prevState,
-            isLoading: false
-          }));
+          // handleSessionExpired was already called in validateSession
         }
+      } else if (loadedFromCacheAndComplete) {
+        console.log(`[AuthContext] Using complete cached user for protected route: ${currentPath}`);
+        initializeSocketIfNeeded();
+      } else {
+        console.warn('[AuthContext] Reached unexpected state in initializeAuth for protected route.');
+        setState(prevState => ({ ...prevState, isLoading: false }));
       }
     };
     
     initializeAuth();
-  }, [location.pathname, location.state]);
+  }, [location.pathname, location.state?.isRedirecting, handleSessionExpired, initializeSocketIfNeeded, validateSession]);
 
-  // Login function
-  const login = async (email: string, password: string): Promise<boolean> => {
-    // Clear any existing errors and show loading state
-    setState({ 
-      ...state, 
-      isLoading: true, 
-      error: null,
-      registrationSuccess: false 
-    });
+  // Listen for auth events
+  useEffect(() => {
+    // Listen for forced logout events (triggered by API client or socketService)
+    const handleForceLogout = () => {
+      console.log('[AuthContext] Forced logout detected');
+      handleSessionExpired();
+    };
     
+    // Listen for session refresh events (when API client successfully refreshes tokens)
+    const handleSessionRefreshed = () => {
+      console.log('[AuthContext] Session refreshed event detected');
+      // Refresh user data if needed after token refresh
+      validateSession().catch(error => {
+        console.error('[AuthContext] Error validating session after refresh:', error);
+      });
+    };
+    
+    // Register event listeners
+    window.addEventListener('user:force-logout', handleForceLogout);
+    window.addEventListener('auth:session-refreshed', handleSessionRefreshed);
+    
+    // Clean up
+    return () => {
+      window.removeEventListener('user:force-logout', handleForceLogout);
+      window.removeEventListener('auth:session-refreshed', handleSessionRefreshed);
+    };
+  }, [handleSessionExpired, validateSession]);
+
+  const login = async (email: string, password: string): Promise<boolean> => {
     try {
-      // Clear any existing tokens before login
-      localStorage.removeItem('csrfToken');
-      localStorage.removeItem('csrfTokenExpiry');
-      localStorage.removeItem('authToken');
-      localStorage.removeItem('refreshToken');
+      setState(prevState => ({ ...prevState, isLoading: true, error: null }));
       
-      // Actual API call with correct API path without duplicate /api prefix
-      const response = await apiClient.post<any>('/auth/login', { email, password });
-      
-      // Detailed logging of the response
+      // Make login request
+      const response = await apiClient.post('/auth/login', { email, password });
       console.log('[AuthContext] Login response:', response);
       
-      // Extract user data from the response, handling different response structures
-      let userData;
-      
-      if (response?.user) {
-        // Direct user property in response
-        userData = response.user;
-      } else if (response?.data?.user) {
-        // Nested user property in data
-        userData = response.data.user;
-      } else if (response?.data) {
-        // Assume the data itself is the user object
-        userData = response.data;
-      } else {
-        // Default case - use the entire response as user data
-        userData = response;
-      }
-      
-      if (!userData) {
-        throw new Error('Invalid response format: No user data found');
-      }
-      
-      // Store tokens from the response if available
-      if (response.token) {
+      if (response.status === 'success' && response.user && response.token) {
+        // Format user response 
+        const user = formatUserResponse(response.user);
+        
+        // Store the access token and refresh token in localStorage for now
+        // This allows socket.io to use the token for authentication
+        // But we primarily rely on HttpOnly cookies for API authentication
         console.log('[AuthContext] Storing auth token in localStorage');
         localStorage.setItem('authToken', response.token);
-      }
-      
-      if (response.refreshToken) {
-        console.log('[AuthContext] Storing refresh token in localStorage');
-        localStorage.setItem('refreshToken', response.refreshToken);
-      }
-      
-      // Format user data
-      const formattedUser: User = {
-        id: userData.id || '',
-        email: userData.email || '',
-        firstName: userData.firstName || userData.first_name || '',
-        lastName: userData.lastName || userData.last_name || '',
-        role: userData.role || 'customer',
-        ...(userData.avatarUrl && { avatarUrl: userData.avatarUrl }),
-        ...(userData.organizationId && { organizationId: userData.organizationId }),
-        ...(userData.organization && { organization: userData.organization })
-      };
-      
-      // After successful login, always fetch a fresh CSRF token for subsequent API calls
-      // Using optimized retry logic
-      let csrfFetchSuccessful = false;
-      let attempts = 0;
-      const maxAttempts = 3;
-      
-      // Retry mechanism with shorter interval
-      while (!csrfFetchSuccessful && attempts < maxAttempts) {
+        
+        if (response.refreshToken) {
+          console.log('[AuthContext] Storing refresh token in localStorage');
+          localStorage.setItem('refreshToken', response.refreshToken);
+        }
+        
+        // Store the login timestamp to detect fresh logins
+        localStorage.setItem('lastLoginTimestamp', Date.now().toString());
+        
+        // Set a flag for fresh login that other services can check
+        // @ts-ignore - Adding custom property to window
+        window.__freshLogin = true;
+        
+        // Auto-clear the fresh login flag after some time
+        setTimeout(() => {
+          // @ts-ignore - Clearing custom property from window
+          window.__freshLogin = false;
+        }, 10000); // Clear after 10 seconds
+        
+        // Cache user data to avoid flicker during page loads
+        localStorage.setItem('user', JSON.stringify(user));
+        
+        // Before setting auth state, ensure we have a CSRF token ready for subsequent API calls
+        console.log('[AuthContext] CSRF token fetch attempt 1');
         try {
-          console.log(`[AuthContext] CSRF token fetch attempt ${attempts + 1}`);
-          
-          // Shorter wait on first attempt, longer on subsequent retries
-          if (attempts > 0) {
-            await new Promise(resolve => setTimeout(resolve, 150 * attempts));
-          }
-          
-          // Make a request to fetch the CSRF token
-          await apiClient.get('/auth/csrf-token');
-          console.log(`[AuthContext] CSRF token refreshed after login (attempt ${attempts + 1})`);
-          csrfFetchSuccessful = true;
-        } catch (error) {
-          attempts++;
-          if (attempts >= maxAttempts) {
-            console.error('[AuthContext] Failed to fetch CSRF token after multiple attempts:', error);
+          await apiClient.fetchCsrfToken();
+          console.log('[AuthContext] CSRF token refreshed after login (attempt 1)');
+        } catch (e) {
+          console.warn('[AuthContext] Failed to fetch CSRF token on login (attempt 1), retrying...');
+          try {
+            // Wait a bit and try again
+            await new Promise(resolve => setTimeout(resolve, 500));
+            await apiClient.fetchCsrfToken();
+            console.log('[AuthContext] CSRF token refreshed after login (attempt 2)');
+          } catch (e2) {
+            console.error('[AuthContext] Failed to fetch CSRF token on login (attempt 2):', e2);
+            // Continue anyway, the apiClient will retry when needed
           }
         }
+        
+        // Update auth state with user data
+        setState({
+          isAuthenticated: true,
+          user,
+          isLoading: false,
+          error: null,
+          registrationSuccess: false
+        });
+        
+        // Show welcome notification
+        dispatchNotificationEvent(NotificationEventType.AUTH_SUCCESS, {
+          title: 'Login Successful',
+          message: `Welcome back, ${user.firstName}!`,
+          type: 'success',
+        });
+        
+        // Initialize socket only after successful authentication
+        initializeSocketIfNeeded();
+        
+        // Set up session timeout check if enabled
+        setupSessionTimeoutHandler();
+        
+        return true;
+      } else {
+        // Login failed with unexpected response format
+        setState(prevState => ({ 
+          ...prevState, 
+          isLoading: false, 
+          error: 'Login failed. Please try again.' 
+        }));
+        return false;
       }
-      
-      if (!csrfFetchSuccessful) {
-        console.warn('[AuthContext] Failed to obtain CSRF token after multiple attempts. Some features may not work correctly.');
-      }
-      
-      // Update auth state
-      setState({
-        ...state,
-        isAuthenticated: true,
-        user: formattedUser,
-        isLoading: false,
-        error: null
-      });
-      
-      // Store user data in localStorage for persistence across refreshes
-      localStorage.setItem('user', JSON.stringify(formattedUser));
-      
-      // Log authentication state for debugging
-      console.log('[AuthContext] Authentication state updated:', {
-        isAuthenticated: true,
-        user: formattedUser ? { ...formattedUser, id: formattedUser.id } : null
-      });
-
-      // Add a timestamp to help identify fresh login during redirect
-      localStorage.setItem('lastLoginTimestamp', Date.now().toString());
-
-      // Show success notification
-      dispatchNotificationEvent(NotificationEventType.AUTH_SUCCESS, {
-        message: `Welcome back, ${formattedUser.firstName}!`,
-        type: 'success',
-        title: 'Login Successful'
-      });
-      
-      // Add event listener for session timeout
-      setupSessionTimeoutHandler();
-      
-      return true;
     } catch (error: any) {
-      // Handle login error
-      console.error('[AuthContext] Login error:', error);
+      // Handle API error
+      const errorMessage = error.message || 'Login failed. Please check your credentials.';
       
-      // Extract error message
-      const errorMessage = error.message || 'Login failed. Please try again.';
-      
-      // Update state with error
-      setState({
-        ...state,
-        isAuthenticated: false,
-        user: null,
+      setState(prevState => ({ 
+        ...prevState, 
         isLoading: false,
         error: errorMessage
-      });
+      }));
       
-      // Show error notification
       dispatchNotificationEvent(NotificationEventType.AUTH_ERROR, {
+        title: 'Login Failed',
         message: errorMessage,
-        type: 'error',
-        title: 'Login Error'
+        type: 'error'
       });
       
       return false;
+    }
+  };
+
+  // Logout function
+  const logout = useCallback(async (): Promise<void> => {
+    try {
+      // First, clear local notifications to prevent stale data on next login
+      console.log('[AuthContext] Clearing notification storage on logout');
+      
+      // Import and use notification service to clear storage
+      import('../services/notificationService').then(({ default: notificationService }) => {
+        notificationService.clearLocalStorage();
+      });
+      
+      // Disconnect socket
+      import('../services/socketService').then(({ default: socketService }) => {
+        socketService.disconnect();
+      });
+      
+      // Call logout endpoint
+      await apiClient.post('/auth/logout');
+    } catch (error) {
+      console.error('[AuthContext] Error during logout:', error);
+    } finally {
+      // Clean up resources
+      if (notificationIntervalRef.current) {
+        clearInterval(notificationIntervalRef.current);
+        notificationIntervalRef.current = null;
+      }
+      
+      socketInitializedRef.current = false;
+      
+      // Clear local storage
+      localStorage.removeItem('authToken');
+      localStorage.removeItem('refreshToken');
+      localStorage.removeItem('user');
+      localStorage.removeItem('lastLoginTimestamp');
+      
+      // Update state
+      setState({
+        isAuthenticated: false,
+        user: null,
+        isLoading: false,
+        error: null,
+        registrationSuccess: false
+      });
+      
+      // Redirect to login
+      navigate('/login');
+      
+      // Fire logout event
+      window.dispatchEvent(new CustomEvent('user:logout'));
+    }
+  }, [navigate]);
+
+  // Add session timeout handler
+  const setupSessionTimeoutHandler = () => {
+    // Listen for visibility changes to detect when user returns to the tab
+    document.addEventListener('visibilitychange', checkSessionStatus);
+    
+    // Check session status periodically (every 5 minutes)
+    const intervalId = setInterval(checkSessionStatus, 5 * 60 * 1000);
+    
+    // Store the interval ID to clear it later
+    return () => {
+      document.removeEventListener('visibilitychange', checkSessionStatus);
+      clearInterval(intervalId);
+    };
+  };
+  
+  // Check if the session is still valid
+  const checkSessionStatus = async () => {
+    // Only check if the document is visible and user is authenticated
+    if (document.visibilityState === 'visible' && state.isAuthenticated) {
+      try {
+        // Validate the session
+        await apiClient.get('/auth/validate');
+      } catch (error) {
+        // If validation fails, logout the user
+        console.warn('[AuthContext] Session validation failed, logging out');
+        logout();
+      }
     }
   };
 
@@ -529,90 +717,6 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       return false; // Indicate failure
     }
   };
-
-  // Add session timeout handler
-  const setupSessionTimeoutHandler = () => {
-    // Listen for visibility changes to detect when user returns to the tab
-    document.addEventListener('visibilitychange', checkSessionStatus);
-    
-    // Check session status periodically (every 5 minutes)
-    const intervalId = setInterval(checkSessionStatus, 5 * 60 * 1000);
-    
-    // Store the interval ID to clear it later
-    return () => {
-      document.removeEventListener('visibilitychange', checkSessionStatus);
-      clearInterval(intervalId);
-    };
-  };
-  
-  // Check if the session is still valid
-  const checkSessionStatus = async () => {
-    // Only check if the document is visible and user is authenticated
-    if (document.visibilityState === 'visible' && state.isAuthenticated) {
-      try {
-        // Validate the session
-        await apiClient.get('/auth/validate');
-      } catch (error) {
-        // If validation fails, logout the user
-        console.warn('[AuthContext] Session validation failed, logging out');
-        logout();
-      }
-    }
-  };
-
-  /**
-   * Logout the current user
-   */
-  const logout = useCallback(() => {
-    console.log('[AuthContext] Logging out user');
-    
-    // Call logout endpoint to clear server-side cookies
-    apiClient.post('/auth/logout', {})
-      .then(() => {
-        console.log('[AuthContext] Logout API call successful');
-      })
-      .catch(error => {
-        console.error('[AuthContext] Logout API error:', error);
-      })
-      .finally(() => {
-        // Clear all authentication data regardless of API success
-        console.log('[AuthContext] Clearing auth state and localStorage');
-        localStorage.removeItem('user');
-        localStorage.removeItem('csrfToken');
-        localStorage.removeItem('csrfTokenExpiry');
-        localStorage.removeItem('lastLoginTimestamp');
-        localStorage.removeItem('authToken');
-        localStorage.removeItem('refreshToken');
-        
-        // Also remove any legacy tokens
-        localStorage.removeItem('token');
-
-        // Update auth state
-        setState({
-          isAuthenticated: false,
-          user: null,
-          isLoading: false,
-          error: null,
-          registrationSuccess: false
-        });
-        
-        // Clear any session timeouts
-        if (notificationIntervalRef.current) {
-          clearInterval(notificationIntervalRef.current);
-          notificationIntervalRef.current = null;
-        }
-        
-        // Navigate to login page
-        navigate('/login');
-        
-        // Show notification
-        dispatchNotificationEvent(NotificationEventType.GENERAL, {
-          message: 'You have been logged out',
-          type: 'info',
-          title: 'Logged Out'
-        });
-      });
-  }, [navigate, dispatchNotificationEvent]);
 
   // Reset password function
   const resetPassword = async (email: string): Promise<void> => {
@@ -940,69 +1044,36 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
 
   // Refresh user data function
   const refreshUserData = useCallback(async (): Promise<void> => {
-    if (!state.user) throw new Error('User not authenticated');
-    setState({ ...state, isLoading: true, error: null });
-    
     try {
-      console.log('[AuthContext] Refreshing user data for user ID:', state.user.id);
-      // Actual API call
-      const updatedUserFromApi = await apiClient.getUser(state.user.id);
+      setState(prevState => ({ ...prevState, isLoading: true }));
       
-      console.log('[AuthContext] Refreshed user data from API:', JSON.stringify(updatedUserFromApi));
+      const response = await apiClient.get('/auth/validate');
       
-      // Update the state with the latest user data
-      setState({
-        ...state,
-        user: updatedUserFromApi,
-        isLoading: false
-      });
-      
-      // Also update localStorage
-      localStorage.setItem('user', JSON.stringify(updatedUserFromApi));
-      console.log('[AuthContext] User data refreshed and stored successfully');
-      
-      // Dispatch event to notify components about the user data refresh
-      window.dispatchEvent(new CustomEvent('user:profile-updated'));
+      if (response && response.user) {
+        const user = formatUserResponse(response.user);
+        
+        // Update cache
+        localStorage.setItem('user', JSON.stringify(user));
+        
+        setState(prevState => ({
+          ...prevState,
+          isAuthenticated: true,
+          user,
+          isLoading: false,
+          error: null
+        }));
+      } else {
+        setState(prevState => ({ ...prevState, isLoading: false }));
+      }
     } catch (error) {
       console.error('[AuthContext] Error refreshing user data:', error);
-      setState({
-        ...state,
-        isLoading: false,
-        error: error instanceof Error ? error.message : 'Failed to refresh user data'
-      });
-      throw error;
+      setState(prevState => ({ ...prevState, isLoading: false }));
     }
-  }, [state]);
+  }, []);
 
-  // Listen for forced logout (token expiration)
-  useEffect(() => {
-    const handleForceLogout = () => {
-      console.log('Force logout triggered');
-      // Perform logout, but with a specific "session expired" message
-      logout();
-      // No need to notify here, as the NotificationContext already does this
-    };
-    
-    // Listen for session refresh events from the API client
-    const handleSessionRefreshed = () => {
-      console.log('[AuthContext] Session was refreshed by API client');
-      refreshUserData().catch(err => {
-        console.error('[AuthContext] Failed to refresh user data after token refresh:', err);
-      });
-    };
-    
-    window.addEventListener('user:force-logout', handleForceLogout);
-    window.addEventListener('auth:session-refreshed', handleSessionRefreshed);
-    
-    return () => {
-      window.removeEventListener('user:force-logout', handleForceLogout);
-      window.removeEventListener('auth:session-refreshed', handleSessionRefreshed);
-    };
-  }, [logout, refreshUserData]); // Make sure logout and refreshUserData are in dependency array
-
-  // Provide auth context
-  const contextValue: AuthContextType = {
-    isAuthenticated: !!state.user,
+  // Value for the context provider, memoized to prevent unnecessary rerenders
+  const authContextValue = React.useMemo(() => ({
+    isAuthenticated: state.isAuthenticated,
     user: state.user,
     isLoading: state.isLoading,
     error: state.error,
@@ -1016,9 +1087,23 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     clearError,
     resetRegistrationSuccess,
     state
-  };
+  }), [
+    state.isAuthenticated, 
+    state.user, 
+    state.isLoading, 
+    state.error, 
+    login, 
+    register, 
+    logout, 
+    resetPassword, 
+    updateProfile, 
+    changePassword, 
+    refreshUserData, 
+    clearError, 
+    resetRegistrationSuccess
+  ]);
 
-  return <AuthContext.Provider value={contextValue}>{children}</AuthContext.Provider>;
+  return <AuthContext.Provider value={authContextValue}>{children}</AuthContext.Provider>;
 };
 
 // Custom hook for using auth context

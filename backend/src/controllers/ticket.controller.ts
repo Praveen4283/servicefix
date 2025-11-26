@@ -12,6 +12,7 @@ import slaService from '../services/sla.service';
 import { isPendingStatus, isInProgressStatus, logStatusChange } from '../utils/ticketUtils';
 import { Ticket } from '../models/Ticket';
 import { idToString, idToNumber } from '../utils/idUtils';
+import slaApplicationService from '../services/slaApplicationService';
 
 // Initialize Supabase client for direct operations
 const bucketName = process.env.SUPABASE_BUCKET || 'ticket-attachments';
@@ -155,6 +156,7 @@ export const createTicket = async (
       typeId,
       dueDate,
       tags,
+      source,
     } = req.body;
     
     // Revert back to Express.Multer.File
@@ -228,7 +230,7 @@ export const createTicket = async (
           dueDate || null, // Due date will be set by the trigger
           sentimentScore,
           aiSummary,
-          'web',
+          source || 'web',
         ]
       );
       
@@ -555,93 +557,67 @@ export const updateTicket = async (
 ): Promise<void> => {
   try {
     const { id } = req.params;
-    const {
-      subject,
-      description,
-      assigneeId,
-      departmentId,
-      priorityId,
-      statusId,
-      typeId,
-      dueDate,
-      tags,
-    } = req.body;
+    const updateData = req.body;
     
-    if (!id) {
-      throw new AppError('Ticket ID is required', 400);
+    // Get current ticket data before update
+    const currentTicket = await ticketService.getTicketById(id);
+    if (!currentTicket) {
+      throw new AppError('Ticket not found', 404);
     }
     
-    // Get ticket to check access
-    const ticket = await ticketService.getTicketById(id.toString());
-    
-    // Check if user has access to update this ticket
-    const ticketOrgId = ticket.organization?.id;
-    const userOrgId = idToNumber(req.user.organizationId);
-    if (req.user.role !== 'admin' && ticketOrgId && 
-        userOrgId && ticketOrgId !== userOrgId) {
+    // Check permissions
+    if (req.user.role !== 'admin' && currentTicket.organization?.id !== idToString(req.user.organizationId)) {
       throw new AppError('You do not have permission to update this ticket', 403);
     }
     
-    // Customers can only update their own tickets
-    const requesterId = ticket.requester?.id; 
-    const userId = idToNumber(req.user.id) || 0;
-    if (req.user.role === 'customer' && 
-        requesterId && userId && 
-        requesterId !== userId) {
-      throw new AppError('You can only update tickets you created', 403);
+    // Update the ticket using the service
+    const updatedTicket = await ticketService.updateTicket(Number(id), updateData);
+    
+    // Handle SLA logic in application layer instead of database triggers
+    let slaResult = null;
+    
+    // Handle status change
+    if (updateData.statusId && currentTicket.status?.id !== updateData.statusId) {
+      slaResult = await slaApplicationService.handleStatusChange(
+        Number(id),
+        Number(currentTicket.status?.id),
+        updateData.statusId
+      );
     }
     
-    // Store the old status for comparison
-    const oldStatusId = ticket.status?.id;
-    
-    // Create update data object
-    const updateData: Partial<Ticket> = {};
-    
-    if (subject !== undefined) updateData.subject = subject;
-    if (description !== undefined) updateData.description = description;
-    if (assigneeId !== undefined) updateData.assigneeId = assigneeId || null;
-    if (departmentId !== undefined) updateData.departmentId = departmentId || null;
-    if (priorityId !== undefined) updateData.priorityId = priorityId || null;
-    if (statusId !== undefined) updateData.statusId = statusId || null;
-    if (typeId !== undefined) updateData.typeId = typeId || null;
-    if (dueDate !== undefined) updateData.dueDate = dueDate ? new Date(dueDate) : undefined;
-
-    // Update ticket using the service
-    const updatedTicket = await ticketService.updateTicket(parseInt(id), updateData);
-    
-    // After update: Check if status changed for special handling
-    if (statusId && statusId !== oldStatusId) {
-      // Get the new and old status names
-      const newStatusPromise = statusId ? ticketService.getStatusById(statusId) : Promise.resolve(null);
-      const oldStatusPromise = oldStatusId ? ticketService.getStatusById(oldStatusId) : Promise.resolve(null);
+    // Handle priority change
+    if (updateData.priorityId && currentTicket.priority?.id !== updateData.priorityId) {
+      const priorityResult = await slaApplicationService.handlePriorityChange(
+        Number(id),
+        Number(currentTicket.priority?.id),
+        updateData.priorityId
+      );
       
-      const [newStatus, oldStatus] = await Promise.all([newStatusPromise, oldStatusPromise]);
-      
-      if (newStatus && oldStatus) {
-          // Log the status change
-        logStatusChange(parseInt(id), oldStatus.name, newStatus.name);
-        
-        // Handle resolved status
-        if (newStatus.isResolved && !oldStatus.isResolved) {
-          // Mark ticket as resolved
-          const resolveData: Partial<Ticket> = {
-            resolvedAt: new Date()
-          };
-          await ticketService.updateTicket(parseInt(id), resolveData);
-        }
+      // If status change didn't trigger SLA action, use priority result
+      if (!slaResult || slaResult.action === 'none') {
+        slaResult = priorityResult;
       }
     }
     
-    // Invalidate cache for this ticket
-    ticketService.invalidateTicketCache(id.toString());
+    // Invalidate cache
+    ticketService.invalidateTicketCache(id);
     
-    // Return the updated ticket
-      res.status(200).json({
-        status: 'success',
-          message: 'Ticket updated successfully',
+    // Prepare response
+    const response: any = {
+      status: 'success',
       data: { ticket: updatedTicket }
-      });
-    } catch (error) {
+    };
+    
+    // Add SLA information to response if there was an SLA action
+    if (slaResult && slaResult.action !== 'none') {
+      response.slaAction = {
+        action: slaResult.action,
+        message: slaResult.message
+      };
+    }
+    
+    res.status(200).json(response);
+  } catch (error) {
     logger.error('[updateTicket] Error:', error);
     next(error);
   }

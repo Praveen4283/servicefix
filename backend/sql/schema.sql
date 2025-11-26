@@ -339,6 +339,7 @@ CREATE TABLE IF NOT EXISTS notifications (
   message TEXT NOT NULL,
   link VARCHAR(255),
   is_read BOOLEAN DEFAULT FALSE,
+  is_deleted BOOLEAN DEFAULT FALSE,
   type VARCHAR(50) NOT NULL, -- ticket_assigned, ticket_updated, mention, etc.
   metadata JSONB,
   created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
@@ -428,6 +429,38 @@ VALUES (
 )
 ON CONFLICT (category) DO NOTHING;
 
+-- Add initial default general settings
+INSERT INTO settings (category, settings_data) 
+VALUES (
+    'general', 
+    '{"companyName": "ServiceFix", "supportEmail": "support@servicefix.com", "maxFileSize": 5, "allowGuestTickets": true, "defaultTimeZone": "UTC"}'
+)
+ON CONFLICT (category) DO NOTHING;
+
+-- Add initial default ticket settings
+INSERT INTO settings (category, settings_data) 
+VALUES (
+    'ticket', 
+    '{"defaultPriority": "medium", "closedTicketReopen": 7, "autoCloseResolved": 3, "enableCustomerSatisfaction": true, "requireCategory": true, "enableSLA": false}'
+)
+ON CONFLICT (category) DO NOTHING;
+
+-- Add initial default integration settings
+INSERT INTO settings (category, settings_data) 
+VALUES (
+    'integration', 
+    '{"slackEnabled": false, "slackWebhookUrl": "", "slackChannel": "", "slackNotifyOnNewTicket": true, "slackNotifyOnTicketUpdates": false, "teamsEnabled": false, "teamsWebhookUrl": "", "teamsNotifyOnNewTicket": true, "teamsNotifyOnTicketUpdates": false, "jiraEnabled": false, "jiraUrl": "", "jiraUsername": "", "jiraApiToken": "", "jiraProject": "", "jiraCreateIssuesForTickets": true, "githubEnabled": false, "githubAccessToken": "", "githubRepository": "", "githubCreateIssuesForTickets": true}'
+)
+ON CONFLICT (category) DO NOTHING;
+
+-- Add initial default advanced settings
+INSERT INTO settings (category, settings_data) 
+VALUES (
+    'advanced', 
+    '{"apiEnabled": true, "apiRateLimitPerHour": 1000, "apiRateLimitWindowMinutes": 15, "enableApiDocumentation": true, "maxLoginAttempts": 5, "passwordExpiryDays": 90, "sessionTimeoutMinutes": 60, "enforceMfa": false, "cacheDurationMinutes": 15, "maxConcurrentFileUploads": 5, "enableCustomFields": true, "maxCustomFieldsPerTicket": 10, "enableAiSuggestions": true, "enableAutoTagging": true, "enableSentimentAnalysis": true, "aiModelName": "gpt-3.5-turbo"}'
+)
+ON CONFLICT (category) DO NOTHING;
+
 -- Add indexes for performance
 CREATE INDEX IF NOT EXISTS idx_tickets_requester_id ON tickets(requester_id);
 CREATE INDEX IF NOT EXISTS idx_tickets_assignee_id ON tickets(assignee_id);
@@ -440,6 +473,7 @@ CREATE INDEX IF NOT EXISTS idx_kb_articles_category_id ON kb_articles(category_i
 CREATE INDEX IF NOT EXISTS idx_kb_articles_organization_id ON kb_articles(organization_id);
 CREATE INDEX IF NOT EXISTS idx_notifications_user_id ON notifications(user_id);
 CREATE INDEX IF NOT EXISTS idx_notifications_is_read ON notifications(is_read);
+CREATE INDEX IF NOT EXISTS idx_notifications_is_deleted ON notifications(is_deleted);
 CREATE INDEX IF NOT EXISTS idx_chatbot_messages_conversation_id ON chatbot_messages(conversation_id);
 CREATE INDEX IF NOT EXISTS idx_chatbot_conversations_user_id ON chatbot_conversations(user_id);
 CREATE INDEX IF NOT EXISTS idx_sla_policy_tickets_ticket_id ON sla_policy_tickets(ticket_id);
@@ -1433,3 +1467,53 @@ BEFORE UPDATE OF status_id ON tickets
 FOR EACH ROW
 WHEN (OLD.status_id IS DISTINCT FROM NEW.status_id)
 EXECUTE FUNCTION handle_sla_pause_on_status_change();
+
+-- Function to add default notification preferences when a new user is created
+CREATE OR REPLACE FUNCTION add_default_notification_preferences()
+RETURNS TRIGGER AS $$
+DECLARE
+  -- Default notification types with their channel settings
+  default_types TEXT[][] := '{
+    {"newTicketAssigned", TRUE, TRUE, TRUE},
+    {"ticketUpdated", TRUE, TRUE, FALSE}, 
+    {"mentionInComment", TRUE, TRUE, TRUE},
+    {"newKbArticle", FALSE, TRUE, FALSE},
+    {"systemUpdates", TRUE, TRUE, FALSE},
+    {"ticketDueReminder", TRUE, TRUE, FALSE},
+    {"ticketEscalation", TRUE, TRUE, TRUE}
+  }';
+  notification_type TEXT[];
+BEGIN
+  -- For each notification type, create default preferences
+  FOREACH notification_type SLICE 1 IN ARRAY default_types
+  LOOP
+    INSERT INTO notification_preferences (
+      user_id, 
+      event_type, 
+      email_enabled, 
+      in_app_enabled, 
+      push_enabled,
+      created_at,
+      updated_at
+    )
+    VALUES (
+      NEW.id,
+      notification_type[1],
+      notification_type[2]::BOOLEAN,
+      notification_type[3]::BOOLEAN,
+      notification_type[4]::BOOLEAN,
+      CURRENT_TIMESTAMP,
+      CURRENT_TIMESTAMP
+    );
+  END LOOP;
+  
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+-- Create trigger to call function after user insert
+DROP TRIGGER IF EXISTS trg_add_default_notification_preferences ON users;
+CREATE TRIGGER trg_add_default_notification_preferences
+AFTER INSERT ON users
+FOR EACH ROW
+EXECUTE FUNCTION add_default_notification_preferences();

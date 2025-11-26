@@ -85,15 +85,113 @@ app.set('trust proxy', 1); // Trust first proxy - needed for Render deployment
 const PORT = process.env.PORT || 4000;
 const server = http.createServer(app);
 
-// Rate limiting configuration
-const apiLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
-  max: process.env.NODE_ENV === 'production' ? 100 : 1000, // Higher limit for non-production
+// Function to get dynamic rate limit settings from database
+const getRateLimitSettings = async (): Promise<{ enabled: boolean, limit: number, windowMinutes: number }> => {
+  try {
+    // Default values (only used if database is unavailable)
+    let enabled = true;
+    let limitPerHour = 1000;
+    let windowMinutes = 15;
+    
+    // Try to get settings from database
+    const { pool } = require('./config/database');
+    const result = await pool.query(
+      'SELECT settings_data FROM settings WHERE category = $1 LIMIT 1',
+      ['advanced']
+    );
+    
+    if (result.rows.length > 0) {
+      const settings = result.rows[0].settings_data;
+      if (settings && typeof settings === 'object') {
+        enabled = settings.apiEnabled !== undefined ? settings.apiEnabled : true;
+        
+        // Get rate limit from settings
+        if (settings.apiRateLimitPerHour && settings.apiRateLimitPerHour > 0) {
+          limitPerHour = settings.apiRateLimitPerHour;
+        }
+        
+        // Get window time from settings if available, otherwise use default
+        if (settings.apiRateLimitWindowMinutes && settings.apiRateLimitWindowMinutes > 0) {
+          windowMinutes = settings.apiRateLimitWindowMinutes;
+        }
+      }
+    }
+    
+    // Calculate the limit for the specified window
+    const windowHours = windowMinutes / 60;
+    const limit = Math.ceil(limitPerHour * windowHours);
+    
+    // Cache settings in memory variables for faster access
+    process.env.API_ENABLED = enabled ? 'true' : 'false';
+    process.env.DYNAMIC_RATE_LIMIT = limit.toString();
+    process.env.RATE_LIMIT_WINDOW_MINUTES = windowMinutes.toString();
+    
+    logger.info(`Rate limit settings loaded from database: enabled=${enabled}, limit=${limitPerHour}/hour (${limit}/${windowMinutes}min)`);
+    
+    return { enabled, limit, windowMinutes };
+  } catch (error) {
+    logger.error('Error getting rate limit settings from database:', error);
+    // Return default values if database is unavailable
+    return { 
+      enabled: true, 
+      limit: 250, // Default to 250 requests per 15 minutes (1000/hour)
+      windowMinutes: 15
+    };
+  }
+};
+
+// Initialize rate limiter with temporary default settings
+let apiLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes by default
+  max: 250, // Conservative default limit until settings are loaded
   message: { status: 'error', message: 'Too many requests, please try again later.' },
-  standardHeaders: true, // Return rate limit info in the `RateLimit-*` headers
-  legacyHeaders: false, // Disable the `X-RateLimit-*` headers
-  skipSuccessfulRequests: false // Count all requests against the limit
+  standardHeaders: true,
+  legacyHeaders: false,
+  skipSuccessfulRequests: false
 });
+
+// Function to update rate limiter with current settings
+const updateRateLimiter = async () => {
+  try {
+    const settings = await getRateLimitSettings();
+    
+    // Update the rate limiter with the dynamic settings
+    apiLimiter = rateLimit({
+      windowMs: settings.windowMinutes * 60 * 1000, // Convert minutes to ms
+      max: settings.limit,
+      message: { status: 'error', message: 'Too many requests, please try again later.' },
+      standardHeaders: true,
+      legacyHeaders: false,
+      skipSuccessfulRequests: false
+    });
+    
+    logger.info(`Rate limiter updated: ${settings.limit} requests per ${settings.windowMinutes} minutes`);
+    return true;
+  } catch (error) {
+    logger.error('Failed to update rate limiter:', error);
+    return false;
+  }
+};
+
+// Export updateRateLimiter for use in settings controller
+export { updateRateLimiter };
+
+// Middleware to check if API is enabled based on settings
+const checkApiEnabled = (req: Request, res: Response, next: NextFunction) => {
+  // Skip this check for settings endpoints to allow admins to re-enable API if disabled
+  if (req.path.startsWith('/settings/') || req.path === '/health') {
+    return next();
+  }
+  
+  const apiEnabled = process.env.API_ENABLED !== 'false';
+  if (!apiEnabled) {
+    return res.status(503).json({
+      status: 'error',
+      message: 'API access is currently disabled by administrator'
+    });
+  }
+  next();
+};
 
 // Middleware
 app.use(helmet({
@@ -140,7 +238,7 @@ app.use(cors({
   },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'X-CSRF-Token']
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-CSRF-Token', 'x-post-login']
 }));
 
 app.use(express.json({ limit: '10mb' }));
@@ -149,8 +247,12 @@ app.use(cookieParser());
 app.use(morgan(process.env.MORGAN_FORMAT || 'combined', { stream: morganStream }));
 app.use(compression());
 
-// Apply rate limiting to API routes
-app.use('/api/', apiLimiter);
+// Apply API enabled check and rate limiting to API routes
+app.use('/api/', checkApiEnabled);
+app.use('/api/', (req, res, next) => {
+  // Use the current rate limiter instance (which may have been updated)
+  apiLimiter(req, res, next);
+});
 
 // Apply CSRF protection
 app.use('/api/', csrfSkipper);
@@ -218,6 +320,9 @@ const startServer = async () => {
       logger.error('Failed to initialize application. Exiting...');
       process.exit(1);
     }
+    
+    // Now that database is connected, update rate limiter with settings from database
+    await updateRateLimiter();
     
     // Initialize Supabase storage bucket
     await initBucket();

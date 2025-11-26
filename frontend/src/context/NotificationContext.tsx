@@ -87,7 +87,7 @@ interface NotificationContextValue {
   isNotificationMenuOpen: boolean;
   notificationMenuAnchorEl: HTMLElement | null;
   loading: boolean;
-  fetchNotifications: (options?: { limit?: number; offset?: number; unreadOnly?: boolean }) => Promise<void>;
+  fetchNotifications: (options?: { limit?: number; offset?: number; unreadOnly?: boolean; forceRefresh?: boolean; timestamp?: number }) => Promise<void>;
   networkStatus: NetworkStatusType;
   temporaryToasts: Notification[];
 }
@@ -269,7 +269,21 @@ export const NotificationProvider: React.FC<NotificationProviderProps> = ({ chil
   }, []); // No dependencies after removing isAuthenticated dependency
 
   // Calculate unread count - only for app notifications
-  const unreadCount = notifications.filter(notification => !notification.isRead && notification.category === 'app').length;
+  const unreadCount = useMemo(() => {
+    const count = notifications.filter(notification => !notification.isRead && notification.category === 'app').length;
+    
+    // Add debugging output for notification state
+    if (process.env.NODE_ENV === 'development') {
+      console.log('[NotificationContext] Calculating unread count:', {
+        total: notifications.length,
+        unread: count,
+        appNotifications: notifications.filter(n => n.category === 'app'),
+        unreadAppNotifications: notifications.filter(n => !n.isRead && n.category === 'app')
+      });
+    }
+    
+    return count;
+  }, [notifications]);
 
   // Toggle notification menu (stable reference needed)
   const toggleNotificationMenu = useCallback((event: React.MouseEvent<HTMLElement>): void => {
@@ -290,94 +304,87 @@ export const NotificationProvider: React.FC<NotificationProviderProps> = ({ chil
     setNotificationMenuAnchorEl(null);
   }, []); // No external dependencies
   
-  // Fetch notifications - from both API and local storage
-  const fetchNotifications = useCallback(async (options: { limit?: number; offset?: number; unreadOnly?: boolean } = {}): Promise<void> => {
+  // Fetch notifications from server
+  const fetchNotifications = useCallback(async (options: {
+    limit?: number;
+    offset?: number;
+    unreadOnly?: boolean;
+    forceRefresh?: boolean;
+    timestamp?: number;
+  } = {}): Promise<void> => {
+    if (!isAuthenticated) return;
+
     setLoading(true);
-
     try {
-      // If authenticated, fetch from server and update local storage
-      if (isAuthenticated) {
-        // Fetch notifications from the service (which now handles deduplication internally)
-        const serverResponse: any = await notificationService.fetchNotifications(options);
+      console.log('[NotificationContext] Fetching notifications from server');
+      const serverNotifications = await notificationService.fetchNotifications({
+        ...options,
+        forceRefresh: true // Always force refresh to avoid caching issues
+      });
 
-        // Correctly extract notifications array based on the actual API response structure
-        let serverNotifications: Notification[] = [];
+      // Always log the result for debugging
+      console.log(`[NotificationContext] Server returned ${serverNotifications.length} notifications`);
+
+      // Check local storage for notifications if server returns none but says there are notifications
+      if (serverNotifications.length === 0 && notificationService.getUnreadCountFromLocalStorage() > 0) {
+        console.log('[NotificationContext] Server returned 0 notifications but local storage has unread notifications');
         
-        // Handle different response formats
-        if (serverResponse && serverResponse.data && Array.isArray(serverResponse.data.notifications)) {
-          // Format: {success: true, data: {notifications: []}}
-          serverNotifications = serverResponse.data.notifications;
-        } else if (serverResponse && Array.isArray(serverResponse.notifications)) {
-          // Format: {notifications: []}
-          serverNotifications = serverResponse.notifications;
-        } else if (Array.isArray(serverResponse)) {
-          // Direct array format
-          serverNotifications = serverResponse;
-        } else if (serverResponse && serverResponse.success && serverResponse.data && Array.isArray(serverResponse.data.notifications)) {
-          // Format: {success: true, data: {notifications: []}} - from the actual API response
-          serverNotifications = serverResponse.data.notifications;
-          console.log('Extracted notifications from nested response:', serverNotifications.length);
-        } else {
-          console.error('Unexpected notification response format:', serverResponse);
-          serverNotifications = [];
-        }
-
-        // For the notification panel, we want to show all notifications including login ones
-        // No need to filter login notifications for the panel display
-        const notificationsForPanel = serverNotifications.map(notification => ({
-          ...notification,
-          category: 'app' as 'app' | 'system' // Ensure all backend notifications are treated as app notifications with proper type
-        }));
-
-        // Merge with existing system notifications, ensuring uniqueness
-        setNotifications(prev => {
-          // Keep existing system notifications
-            const prevSystemNotifications = prev.filter(n => n.category === 'system');
+        // Get notifications from local storage
+        const localNotifications = notificationService.getNotificationsFromLocalStorage();
+        
+        if (localNotifications.length > 0) {
+          console.log(`[NotificationContext] Using ${localNotifications.length} notifications from local storage`);
           
-          // Add server notifications (without filtering login ones)
-          const merged = [...prevSystemNotifications, ...notificationsForPanel];
-          merged.sort((a, b) => b.timestamp - a.timestamp);
-
-          if (process.env.NODE_ENV === 'development') {
-            console.log('[NotificationContext] fetchNotifications - merged notifications for main state:', JSON.stringify(merged));
+          // Merge with any server notifications (though there are likely none)
+          const mergedNotifications = [...serverNotifications, ...localNotifications]
+            // Filter out duplicates by ID
+            .filter((notification, index, self) => 
+              index === self.findIndex(n => n.id === notification.id)
+            )
+            // Sort by timestamp, newest first
+            .sort((a, b) => b.timestamp - a.timestamp);
+          
+          // Sync merged notifications to local storage
+          console.log(`[NotificationContext] Syncing ${mergedNotifications.length} merged notifications to local storage`);
+          notificationService.syncNotificationsToLocalStorage(mergedNotifications);
+          
+          // Update state with merged notifications
+          setNotifications(mergedNotifications);
+          console.log(`[NotificationContext] Updated notification state with merged data: ${mergedNotifications.length} total notifications`);
+          
+          // Try to fetch from server one more time with a forced refresh
+          if (!options.forceRefresh) {
+            setTimeout(() => {
+              fetchNotifications({ ...options, forceRefresh: true });
+            }, 2000);
           }
-          return merged;
-        });
-      } else {
-        // If not authenticated, just load from local storage
-        const localNotifications = notificationService.getLocalNotifications();
-
-        // For notification panel, show all app notifications including login ones
-        const appNotifications = localNotifications.filter(n => n.category === 'app');
-
-        // Merge with existing system notifications (ensuring uniqueness)
-        setNotifications(prev => {
-            const existingNotificationsMap = new Map<string, Notification>();
-
-            // Keep existing system notifications
-            prev.filter(n => n.category === 'system').forEach(n => {
-                existingNotificationsMap.set(n.id, n);
-            });
-
-            // Add all app notifications for the panel
-            appNotifications.forEach(n => {
-                existingNotificationsMap.set(n.id, n);
-            });
-
-            // Convert map values back to an array and sort
-            const merged = Array.from(existingNotificationsMap.values());
-            merged.sort((a, b) => b.timestamp - a.timestamp);
-            return merged;
-        });
+          
+          setLoading(false);
+          return;
+        }
       }
+
+      // Handle normal case - server has notifications
+      console.log(`[NotificationContext] Syncing ${serverNotifications.length} server notifications to local storage, replacing stale data`);
+      notificationService.syncNotificationsToLocalStorage(serverNotifications);
+      
+      setNotifications(serverNotifications);
+      console.log(`[NotificationContext] Updated notification state with server data: ${serverNotifications.length} total notifications`);
     } catch (error) {
-      console.error('Error fetching or processing notifications:', error);
-      // Use notification manager for error notification
-      notificationManager.showError('Failed to load notifications.', { duration: 5000 });
+      console.error('[NotificationContext] Error fetching notifications:', error);
+      
+      // On error, try to use cached notifications from local storage
+      const cachedNotifications = notificationService.getNotificationsFromLocalStorage();
+      console.log(`[NotificationContext] Using ${cachedNotifications.length} cached notifications from local storage due to fetch error`);
+      
+      // Only update state if we have cached notifications and the state is empty
+      if (cachedNotifications.length > 0 && notifications.length === 0) {
+        setNotifications(cachedNotifications);
+      }
     } finally {
       setLoading(false);
     }
-  }, [isAuthenticated]); // Only depend on isAuthenticated
+  }, [isAuthenticated, notifications.length]);
 
   // Connect our context methods to the notification manager
   useEffect(() => {
@@ -412,8 +419,11 @@ export const NotificationProvider: React.FC<NotificationProviderProps> = ({ chil
     // Set up login event listener to refresh notifications when user logs in
     const handleLoginSuccess = () => {
       console.log('User logged in, fetching notifications immediately.');
-      // Remove the delay
-      fetchNotifications();
+      // Add a short delay to ensure the notification is fully processed on the backend
+      setTimeout(() => {
+        console.log('Fetching notifications after login delay');
+        fetchNotifications();
+      }, 1000); // 1 second delay
     };
     
     window.addEventListener('user:login-success', handleLoginSuccess);
@@ -435,53 +445,115 @@ export const NotificationProvider: React.FC<NotificationProviderProps> = ({ chil
     };
   }, [isAuthenticated, fetchNotifications]);
 
+  // Setup socket listeners once on mount, properly cleaning up on unmount
+  useEffect(() => {
+    let cleanup = () => {};
+    
+    if (isAuthenticated) {
+      // Set up notification handlers for socket events
+      const handleNotification = (notification: any) => {
+        if (!notification) return;
+        
+        _addPersistentNotification({
+          id: notification.id?.toString() || generateId(),
+          message: notification.message || 'New notification received',
+          type: (notification.type as NotificationType) || 'info',
+          timestamp: notification.timestamp || Date.now(),
+          title: notification.title,
+          duration: 0, // Persistent
+          isRead: false,
+          category: 'app'
+        });
+        
+        // Also show temporary toast for real-time feedback
+        _addTemporaryToast(
+          notification.message || 'New notification received',
+          (notification.type as NotificationType) || 'info',
+          {
+            title: notification.title,
+            duration: 5000,
+            id: `toast-${notification.id}`
+          }
+        );
+      };
+      
+      // Register and get cleanup function
+      cleanup = socketService.onNotification(handleNotification);
+    }
+    
+    // Clean up listeners when component unmounts or auth state changes
+    return cleanup;
+  }, [isAuthenticated, _addPersistentNotification, _addTemporaryToast]);
+
   // Handle online/offline status changes
   useEffect(() => {
     const handleOnline = () => {
       setNetworkStatus('online');
-      notificationManager.showSuccess('You are back online. Syncing notifications...', { duration: 3000 });
-      // Refetch notifications when back online
-      fetchNotifications();
+      _addTemporaryToast('Network connection restored', 'success');
+      
+      // Refresh notifications after reconnection
+      fetchNotifications({ forceRefresh: true });
     };
     
     const handleOffline = () => {
       setNetworkStatus('offline');
-      notificationManager.showWarning(
-        'You are offline. Some notification features may be limited.',
-        { duration: 0 } // Don't auto-dismiss this important message
-      );
+      _addTemporaryToast('Network connection lost', 'error', { duration: 0 });
     };
     
-    // Listen for connection status changes
+    // Setup event listeners
     window.addEventListener('online', handleOnline);
     window.addEventListener('offline', handleOffline);
     
-    // Listen for force logout event (from token expiration)
-    const handleForceLogout = () => {
-      notificationManager.showError(
-        'Your session has expired. Please log in again.',
-        { duration: 0 }
-      );
-      // The actual logout will be handled by AuthContext listening to same event
-    };
-    
-    window.addEventListener('user:force-logout', handleForceLogout);
-    
-    // Initial check
-    if (!navigator.onLine) {
-      setNetworkStatus('offline');
-    }
-    
-    // Clean up event listeners
+    // Clean up
     return () => {
       window.removeEventListener('online', handleOnline);
       window.removeEventListener('offline', handleOffline);
-      window.removeEventListener('user:force-logout', handleForceLogout);
     };
-  }, [fetchNotifications]);
+  }, [_addTemporaryToast, fetchNotifications]);
 
-  // Context value
-  const value: NotificationContextValue = {
+  // Force a refresh of notification state after login
+  useEffect(() => {
+    if (isAuthenticated) {
+      // This is a special effect to force re-check local storage for notifications
+      // after the login process completes
+      const checkLocalStorageForNotifications = () => {
+        console.log('[NotificationContext] Checking local storage for notifications after login');
+        const localNotifications = notificationService.getLocalNotifications();
+        const appNotifications = localNotifications.filter(n => n.category === 'app');
+        
+        if (appNotifications.length > 0) {
+          console.log(`[NotificationContext] Found ${appNotifications.length} app notifications in storage after login`);
+          setNotifications(prev => {
+            // Keep existing system notifications
+            const systemNotifications = prev.filter(n => n.category === 'system');
+            // Merge with app notifications from storage
+            return [...systemNotifications, ...appNotifications];
+          });
+        }
+      };
+      
+      // Check after a short delay to allow login notification to be saved
+      setTimeout(checkLocalStorageForNotifications, 2000);
+    }
+  }, [isAuthenticated]);
+
+  // Clear notifications on logout
+  useEffect(() => {
+    const handleLogout = () => {
+      console.log('[NotificationContext] User logged out, clearing notification state');
+      setNotifications([]);
+      setTemporaryToasts([]);
+    };
+    
+    window.addEventListener('user:logout', handleLogout);
+    
+    return () => {
+      window.removeEventListener('user:logout', handleLogout);
+    };
+  }, []);
+
+  // Memoize the context value to prevent unnecessary re-renders
+  const contextValue = useMemo<NotificationContextValue>(() => ({
     notifications,
     addNotification,
     removeNotification,
@@ -497,9 +569,30 @@ export const NotificationProvider: React.FC<NotificationProviderProps> = ({ chil
     fetchNotifications,
     networkStatus,
     temporaryToasts
-  };
+  }), [
+    notifications,
+    addNotification,
+    removeNotification,
+    clearNotifications,
+    markAllAsRead,
+    markAsRead,
+    unreadCount,
+    toggleNotificationMenu,
+    closeNotificationMenu,
+    isNotificationMenuOpen,
+    notificationMenuAnchorEl,
+    loading,
+    fetchNotifications,
+    networkStatus,
+    temporaryToasts
+  ]);
 
-  return <NotificationContext.Provider value={value}>{children}</NotificationContext.Provider>;
+  return (
+    <NotificationContext.Provider value={contextValue}>
+      {children}
+      <NotificationContainerInternal />
+    </NotificationContext.Provider>
+  );
 };
 
 // Custom hook for using notification context

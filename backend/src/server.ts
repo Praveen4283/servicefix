@@ -7,6 +7,7 @@ import path from 'path';
 import http from 'http';
 import cookieParser from 'cookie-parser';
 import rateLimit from 'express-rate-limit';
+import slaScheduler from './utils/slaScheduler';
 
 // Load environment variables
 dotenv.config();
@@ -26,12 +27,45 @@ const app = express();
 const server = http.createServer(app);
 
 // Middleware
-app.use(helmet()); // Security headers
-app.use(cors({
-  origin: process.env.FRONTEND_URL || '*',
+app.use(helmet({
+  contentSecurityPolicy: {
+    directives: {
+      defaultSrc: ["'self'"],
+      scriptSrc: ["'self'", "'unsafe-inline'", "'unsafe-eval'"],
+      connectSrc: ["'self'", process.env.FRONTEND_URL || '*'],
+      imgSrc: ["'self'", "data:", "blob:"],
+      styleSrc: ["'self'", "'unsafe-inline'"],
+      fontSrc: ["'self'", "data:"]
+    }
+  },
+  xssFilter: true,
+  noSniff: true,
+  referrerPolicy: { policy: 'strict-origin-when-cross-origin' }
+})); // Security headers
+
+// Configure CORS with proper credentials support
+const corsOptions = {
+  origin: (origin: string | undefined, callback: (err: Error | null, allow?: boolean) => void) => {
+    const allowedOrigins = [
+      process.env.FRONTEND_URL || 'http://localhost:3000',
+      // Add other trusted origins as needed
+    ];
+    
+    // Allow requests with no origin (like mobile apps, curl, postman)
+    if (!origin || allowedOrigins.includes(origin)) {
+      callback(null, true);
+    } else {
+      logger.warn(`CORS blocked request from origin: ${origin}`);
+      callback(new Error('Not allowed by CORS'));
+    }
+  },
   credentials: true,
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS']
-}));
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-CSRF-Token', 'x-post-login'],
+  exposedHeaders: ['Set-Cookie']
+};
+
+app.use(cors(corsOptions));
 app.use(json({ limit: '10mb' })); // Parse JSON bodies
 app.use(urlencoded({ extended: true, limit: '10mb' })); // Parse URL-encoded bodies
 app.use(cookieParser()); // Parse cookies
@@ -62,44 +96,72 @@ app.use((req: Request, res: Response, next: NextFunction) => {
 // Error handling middleware
 app.use(errorHandler);
 
-// Get port from environment or use default
-const PORT = process.env.PORT || 4000;
-
-// Initialize application and start server
-const startServer = async () => {
+// Initialize the application
+async function initializeApp() {
   try {
-    // Initialize application
-    const initSuccess = await initializeApp();
-    
-    if (!initSuccess) {
-      logger.error('Failed to initialize application. Exiting...');
-      process.exit(1);
-    }
-    
-    // Initialize Socket.IO service
-    initializeSocketService(server);
-    
-    // Start server
-    server.listen(PORT, () => {
-      logger.info(`Server running on port ${PORT}`);
-      
-      // Start SLA checker
-      startSLAChecker().then(success => {
-        if (success) {
-          logger.info('SLA checker successfully initialized');
-        } else {
-          logger.error('Failed to initialize SLA checker');
-        }
-      });
+    // Initialize database connection
+    await AppDataSource.initialize();
+    console.log('✅ Database connection established');
+
+    // Initialize cache service
+    await cacheService.initialize();
+    console.log('✅ Cache service initialized');
+
+    // Start SLA scheduler (replaces database triggers)
+    slaScheduler.start();
+    console.log('✅ SLA Scheduler started');
+
+    // Initialize other services
+    await notificationService.initialize();
+    console.log('✅ Notification service initialized');
+
+    // Start the server
+    const PORT = process.env.PORT || 3001;
+    app.listen(PORT, () => {
+      console.log(`🚀 Server running on port ${PORT}`);
+      console.log(`📊 API Documentation available at http://localhost:${PORT}/api-docs`);
     });
   } catch (error) {
-    logger.error('Error starting server:', error);
+    console.error('❌ Failed to initialize application:', error);
     process.exit(1);
   }
-};
+}
 
-// Start the server
-startServer();
+// Graceful shutdown
+process.on('SIGTERM', async () => {
+  console.log('🛑 Received SIGTERM, shutting down gracefully...');
+  
+  // Stop SLA scheduler
+  slaScheduler.stop();
+  console.log('✅ SLA Scheduler stopped');
+  
+  // Close database connection
+  if (AppDataSource.isInitialized) {
+    await AppDataSource.destroy();
+    console.log('✅ Database connection closed');
+  }
+  
+  process.exit(0);
+});
+
+process.on('SIGINT', async () => {
+  console.log('🛑 Received SIGINT, shutting down gracefully...');
+  
+  // Stop SLA scheduler
+  slaScheduler.stop();
+  console.log('✅ SLA Scheduler stopped');
+  
+  // Close database connection
+  if (AppDataSource.isInitialized) {
+    await AppDataSource.destroy();
+    console.log('✅ Database connection closed');
+  }
+  
+  process.exit(0);
+});
+
+// Start the application
+initializeApp();
 
 // Export for testing
 export { app, server }; 

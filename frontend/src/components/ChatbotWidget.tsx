@@ -164,6 +164,25 @@ const FeedbackBar = styled(Box)(({ theme }) => ({
   justifyContent: 'flex-end'
 }));
 
+// Add these styled components for consistent list styling
+const StyledOrderedList = styled('ol')(({ theme }) => ({
+  paddingLeft: theme.spacing(3),
+  marginTop: theme.spacing(1),
+  marginBottom: theme.spacing(1),
+  '& li': {
+    marginBottom: theme.spacing(0.5),
+  }
+}));
+
+const StyledUnorderedList = styled('ul')(({ theme }) => ({
+  paddingLeft: theme.spacing(3),
+  marginTop: theme.spacing(1),
+  marginBottom: theme.spacing(1),
+  '& li': {
+    marginBottom: theme.spacing(0.5),
+  }
+}));
+
 // Interface for message objects
 interface Message {
   id: string;
@@ -185,9 +204,10 @@ type ConversationState =
   | 'awaiting_intent'
   | 'creating_ticket_subject'
   | 'creating_ticket_description'
-  | 'getting_department'         // Added state
-  | 'getting_ticket_type'        // Added state
-  | 'getting_tags'               // Added state
+  | 'getting_department'
+  | 'getting_ticket_type'
+  | 'getting_priority'
+  | 'getting_tags'
   | 'getting_ticket_id_for_status'
   | 'getting_ticket_id_for_comment'
   | 'getting_comment_text';
@@ -201,6 +221,61 @@ interface PendingTicketData {
   typeId?: number;
   tags?: string[];
   [key: string]: any; // Allow for any additional properties
+}
+
+// Add these helper functions near the top of the file, before the ChatbotWidget component
+const MAX_API_RETRIES = 2;
+const RETRY_DELAY = 1000; // ms
+
+/**
+ * Wrapper for API calls with automatic retries and proper error handling
+ * @param apiCall - Function that returns a promise with the API call
+ * @param errorMessage - User-friendly error message to show on failure
+ */
+async function executeWithRetry<T>(
+  apiCall: () => Promise<T>,
+  errorMessage: string
+): Promise<T> {
+  let lastError: any;
+  
+  for (let attempt = 0; attempt <= MAX_API_RETRIES; attempt++) {
+    try {
+      // Add increasing delay for each retry attempt
+      if (attempt > 0) {
+        await new Promise(resolve => setTimeout(resolve, RETRY_DELAY * attempt));
+      }
+      return await apiCall();
+    } catch (error: any) {
+      console.error(`API call failed (attempt ${attempt + 1}/${MAX_API_RETRIES + 1}):`, error);
+      lastError = error;
+      
+      // Don't retry if error is related to authentication or authorization
+      if (error.status === 401 || error.status === 403) {
+        break;
+      }
+    }
+  }
+  
+  throw new Error(`${errorMessage}: ${lastError?.message || 'Unknown error'}`);
+}
+
+/**
+ * Sanitizes user input to prevent injection or problematic inputs
+ * @param input - Raw user input
+ */
+function sanitizeInput(input: string): string {
+  // Remove any script tags or potentially harmful content
+  let sanitized = input
+    .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '')
+    .trim();
+  
+  // Limit length to prevent abuse
+  const MAX_LENGTH = 1000;
+  if (sanitized.length > MAX_LENGTH) {
+    sanitized = sanitized.substring(0, MAX_LENGTH);
+  }
+  
+  return sanitized;
 }
 
 // Root component
@@ -217,11 +292,12 @@ const ChatbotWidget: React.FC = () => {
         <>
           Hello! I'm your AI support assistant. How can I help you today? 
           <br />You can ask me to:
-          <ul>
+          <StyledOrderedList>
             <li>Create a ticket</li>
             <li>Check ticket status [ID]</li>
             <li>Add comment to ticket [ID]</li>
-          </ul>
+          </StyledOrderedList>
+          Please enter the number (1-3) or type your request.
         </>
       ),
       sender: 'bot',
@@ -243,6 +319,9 @@ const ChatbotWidget: React.FC = () => {
 
   const navigate = useNavigate();
 
+  // Add a new state for tracking API calls in progress
+  const [apiCallsInProgress, setApiCallsInProgress] = useState<{[key: string]: boolean}>({});
+
   // Scroll to bottom of messages container
   const scrollToBottom = useCallback(() => {
     // Add a slight delay to ensure the DOM is updated before scrolling
@@ -255,7 +334,7 @@ const ChatbotWidget: React.FC = () => {
     scrollToBottom();
   }, [messages, scrollToBottom]);
 
-  // Ensure conversation exists before saving message
+  // Replace the ensureConversation function with a more robust version
   const ensureConversation = async (): Promise<string> => {
     if (conversationId) {
       return conversationId;
@@ -266,15 +345,23 @@ const ChatbotWidget: React.FC = () => {
       throw new Error('Authentication required');
     }
     
+    // Set API call in progress
+    setApiCallsInProgress(prev => ({...prev, startConversation: true}));
+    
     try {
       // Add metadata to link this conversation to relevant context
       const metadata = {
         source: 'web-widget',
         userAgent: navigator.userAgent,
-        path: window.location.pathname
+        path: window.location.pathname,
+        timestamp: new Date().toISOString()
       };
       
-      const response = await chatbotService.startConversation(metadata);
+      const response = await executeWithRetry(
+        () => chatbotService.startConversation(metadata),
+        'Could not start chat session'
+      );
+      
       console.log('API Response for startConversation:', JSON.stringify(response));
       
       // Handle different possible response structures
@@ -283,11 +370,11 @@ const ChatbotWidget: React.FC = () => {
       if (response && typeof response === 'object') {
         // Standard API response structure { status: "success", data: { id: '...' } }
         if (response.data && typeof response.data === 'object' && 'id' in response.data) {
-          newConversationId = (response.data as any).id;
+          newConversationId = String((response.data as any).id);
         }
         // Direct data structure without wrapper { id: '...' }
         else if ('id' in response) {
-          newConversationId = (response as any).id;
+          newConversationId = String((response as any).id);
         }
         // If the response is another structure, try to extract ID
         else {
@@ -317,12 +404,15 @@ const ChatbotWidget: React.FC = () => {
       const errorMessage = error.message || 'Could not start chat session. Please try again later.';
       addNotification(errorMessage, 'error');
       throw new Error(errorMessage); // Propagate error
+    } finally {
+      // Clear API call in progress
+      setApiCallsInProgress(prev => ({...prev, startConversation: false}));
     }
   };
 
-  // Add a message to the chat UI and save it to the backend
+  // Enhance addMessage function with better error handling and retries
   const addMessage = async (text: string | React.ReactNode, sender: 'user' | 'bot', extraData?: Partial<Message>) => {
-    const messageContent = typeof text === 'string' ? text : '[Rich Content]'; // Get string representation for saving
+    const messageContent = typeof text === 'string' ? sanitizeInput(text) : '[Rich Content]'; // Get string representation for saving
     
     // 1. Add message to UI state immediately for better UX
     const newMessageId = `${sender}-${Date.now()}`;
@@ -359,14 +449,23 @@ const ChatbotWidget: React.FC = () => {
         return; 
       }
       
-      // 4. Save message to backend
-      const response = await chatbotService.saveMessage(currentConversationId, { 
+      // Set API call in progress
+      setApiCallsInProgress(prev => ({...prev, saveMessage: true}));
+      
+      // 4. Save message to backend with retry logic
+      const response = await executeWithRetry(
+        () => chatbotService.saveMessage(currentConversationId, { 
         senderType: sender,
         content: messageContent,
-        metadata: extraData?.ticketInfo ? { ticketId: (extraData.ticketInfo as Ticket).id } : undefined
-      });
+          metadata: extraData?.ticketInfo ? { 
+            ticketId: (extraData.ticketInfo as Ticket).id,
+            timestamp: new Date().toISOString() 
+          } : undefined
+        }),
+        'Failed to save message'
+      );
       
-      // 5. Optional: Update message with server-generated ID if needed
+      // 5. Update message with server-generated ID if needed
       if (response && response.data && typeof response.data === 'object' && 'id' in response.data) {
         const messageId = (response.data as any).id;
         // Update the message ID in the UI to match the server ID
@@ -385,6 +484,9 @@ const ChatbotWidget: React.FC = () => {
       if (sender === 'user') {
         addNotification('Failed to save your message. You may continue chatting, but history might not be preserved.', 'warning');
       }
+    } finally {
+      // Clear API call in progress
+      setApiCallsInProgress(prev => ({...prev, saveMessage: false}));
     }
   };
 
@@ -403,13 +505,21 @@ const ChatbotWidget: React.FC = () => {
     }
   };
 
-  // Load conversation history
+  // Enhance loadConversationHistory with retry logic
   const loadConversationHistory = async () => {
     if (!conversationId || !isAuthenticated) return;
     
+    // Set API call in progress
+    setApiCallsInProgress(prev => ({...prev, loadHistory: true}));
+    
     try {
       setIsTyping(true); // Show loading indicator
-      const response = await chatbotService.getConversationHistory(conversationId);
+      
+      const response = await executeWithRetry(
+        () => chatbotService.getConversationHistory(conversationId),
+        'Could not load conversation history'
+      );
+      
       const history = response.data || [];
       
       if (history && history.length > 0) {
@@ -445,6 +555,8 @@ const ChatbotWidget: React.FC = () => {
       addNotification('Could not load conversation history', 'warning');
     } finally {
       setIsTyping(false);
+      // Clear API call in progress
+      setApiCallsInProgress(prev => ({...prev, loadHistory: false}));
     }
   };
 
@@ -460,13 +572,23 @@ const ChatbotWidget: React.FC = () => {
     setInputValue(e.target.value);
   };
 
-  // Handle form submission - Main logic loop
+  // Enhance handleSubmit with input sanitization
   const handleSubmit = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
     const currentInput = inputValue.trim();
     if (!currentInput) return;
 
-    const userMessageText = currentInput; // Store before clearing
+    // Sanitize input before processing
+    const sanitizedInput = sanitizeInput(currentInput);
+    
+    // If input was potentially harmful and completely sanitized away, don't proceed
+    if (!sanitizedInput) {
+      setInputValue('');
+      addNotification('Invalid input detected', 'warning');
+      return;
+    }
+
+    const userMessageText = sanitizedInput; // Store before clearing
     setInputValue(''); // Clear input immediately for better UX
     setIsTyping(true);
     
@@ -495,14 +617,15 @@ const ChatbotWidget: React.FC = () => {
     switch (conversationState) {
       case 'idle':
       case 'awaiting_intent':
-        const lowerInput = input.toLowerCase();
-        // --- Intent: Create Ticket ---
-        if (lowerInput.includes('create') && lowerInput.includes('ticket')) {
+        const lowerInput = input.toLowerCase().trim();
+        
+        // --- Intent: Create Ticket (Option 1) ---
+        if (lowerInput === "1" || lowerInput.includes('create') && lowerInput.includes('ticket')) {
           setConversationState('creating_ticket_subject');
           botResponse = "Okay, I can help create a ticket. What should the subject be?";
         } 
-        // --- Intent: Check Status ---
-        else if (lowerInput.includes('status') || lowerInput.includes('check ticket')) {
+        // --- Intent: Check Status (Option 2) ---
+        else if (lowerInput === "2" || lowerInput.includes('status') || lowerInput.includes('check ticket')) {
           // Try to extract ID with regex
           const match = lowerInput.match(/([a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12})/i); // Basic UUID regex
           if (match && match[1]) {
@@ -511,11 +634,11 @@ const ChatbotWidget: React.FC = () => {
             setConversationState('idle'); 
           } else {
             setConversationState('getting_ticket_id_for_status');
-            botResponse = "Sure, I can check a ticket's status. What is the ticket ID?";
+            botResponse = "Sure, I can check a ticket's status. Please enter the ticket ID (format: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx).";
           }
         }
-        // --- Intent: Add Comment ---
-        else if (lowerInput.includes('comment') || lowerInput.includes('add note')) {
+        // --- Intent: Add Comment (Option 3) ---
+        else if (lowerInput === "3" || lowerInput.includes('comment') || lowerInput.includes('add note')) {
            // Try to extract ID with regex
            const match = lowerInput.match(/([a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12})/i); // Basic UUID regex
            if (match && match[1]) {
@@ -524,7 +647,7 @@ const ChatbotWidget: React.FC = () => {
              botResponse = `Okay, adding a comment to ticket ${match[1]}. What would you like to say?`;
            } else {
             setConversationState('getting_ticket_id_for_comment');
-            botResponse = "Okay, I can add a comment. What is the ticket ID you want to comment on?";
+            botResponse = "Okay, I can add a comment. Please enter the ticket ID (format: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx).";
            }
         } 
         // --- Default / Help ---
@@ -532,12 +655,12 @@ const ChatbotWidget: React.FC = () => {
            botResponse = (
             <>
               Sorry, I didn't quite catch that. You can ask me to:
-              <ul>
+              <StyledOrderedList>
                 <li>Create a ticket</li>
                 <li>Check ticket status [ID]</li>
                 <li>Add comment to ticket [ID]</li>
-              </ul>
-              How can I help?
+              </StyledOrderedList>
+              Please enter the number (1-3) or type your request.
             </>
            );
            setConversationState('idle'); // Stay idle or reset
@@ -546,56 +669,134 @@ const ChatbotWidget: React.FC = () => {
 
       // --- Create Ticket Flow ---
       case 'creating_ticket_subject':
+        // Allow canceling the operation
+        if (input.toLowerCase() === 'cancel' || input.toLowerCase() === 'back' || input.toLowerCase() === 'menu') {
+          botResponse = (
+            <>
+              Ticket creation cancelled. What would you like to do instead?
+              <StyledOrderedList>
+                <li>Create a ticket</li>
+                <li>Check ticket status [ID]</li>
+                <li>Add comment to ticket [ID]</li>
+              </StyledOrderedList>
+              Please enter the number (1-3) or type your request.
+            </>
+          );
+          setConversationState('idle');
+          break;
+        }
+
         setPendingData({ subject: input });
         setConversationState('creating_ticket_description');
-        botResponse = "Got it. Now, please provide a description for the ticket.";
+        botResponse = "Got it. Now, please provide a description for the ticket. (Type 'cancel' to abort)";
         break;
 
       case 'creating_ticket_description':
+        // Allow canceling the operation
+        if (input.toLowerCase() === 'cancel' || input.toLowerCase() === 'back' || input.toLowerCase() === 'menu') {
+          botResponse = (
+            <>
+              Ticket creation cancelled. What would you like to do instead?
+              <StyledOrderedList>
+                <li>Create a ticket</li>
+                <li>Check ticket status [ID]</li>
+                <li>Add comment to ticket [ID]</li>
+              </StyledOrderedList>
+              Please enter the number (1-3) or type your request.
+            </>
+          );
+          setConversationState('idle');
+          setPendingData({});
+          break;
+        }
+
         // Store description
         setPendingData((prev: PendingTicketData) => ({ ...prev, description: input }));
         
         // Ask for department
         if (departments && departments.length > 0) {
-          const departmentOptions = departments.map(d => <li key={d.id}>{d.name}</li>);
+          const departmentOptions = departments.map((d, index) => (
+            <li key={d.id}>{index + 1}. {d.name}</li>
+          ));
           botResponse = (
             <>
-              Okay, which department should handle this ticket?
-              <ul>{departmentOptions}</ul>
+              Okay, which department should handle this ticket? Please enter either the number or the full name of the department:
+              <StyledUnorderedList>{departmentOptions}</StyledUnorderedList>
+              (Type 'cancel' to abort ticket creation)
             </>
           );
           setConversationState('getting_department');
         } else {
           // If no departments loaded, skip to type or directly to tags/creation
-          botResponse = "Could not load departments. Let's proceed. Which type of issue is this? (e.g., Incident, Question)";
+          botResponse = "Could not load departments. Let's proceed. Which type of issue is this? (e.g., Incident, Question) (Type 'cancel' to abort)";
           setConversationState('getting_ticket_type'); // Or handle error/skip
         }
         break;
 
       case 'getting_department':
-        const chosenDept = departments.find(d => d.name.toLowerCase() === input.toLowerCase());
+        // Allow canceling the operation
+        if (input.toLowerCase() === 'cancel' || input.toLowerCase() === 'back' || input.toLowerCase() === 'menu') {
+          botResponse = (
+            <>
+              Ticket creation cancelled. What would you like to do instead?
+              <StyledOrderedList>
+                <li>Create a ticket</li>
+                <li>Check ticket status [ID]</li>
+                <li>Add comment to ticket [ID]</li>
+              </StyledOrderedList>
+              Please enter the number (1-3) or type your request.
+            </>
+          );
+          setConversationState('idle');
+          setPendingData({});
+          break;
+        }
+        
+        // Handle both number selection and name selection
+        let chosenDept: typeof departments[0] | null = null;
+        const deptInput = input.trim();
+        
+        // Check if input is a number
+        const deptNumber = parseInt(deptInput);
+        if (!isNaN(deptNumber) && deptNumber > 0 && deptNumber <= departments.length) {
+          // User entered a valid number
+          chosenDept = departments[deptNumber - 1];
+        } else {
+          // Try to match by name (case-insensitive)
+          chosenDept = departments.find(d => 
+            d.name.toLowerCase() === deptInput.toLowerCase()
+          ) || null;
+        }
+        
         if (chosenDept) {
-          setPendingData((prev: PendingTicketData) => ({ ...prev, departmentId: chosenDept.id }));
+          setPendingData((prev: PendingTicketData) => ({ ...prev, departmentId: chosenDept!.id }));
           // Ask for type
           if (ticketTypes && ticketTypes.length > 0) {
-            const typeOptions = ticketTypes.map(t => <li key={t.id}>{t.name}</li>);
+            const typeOptions = ticketTypes.map((t, index) => (
+              <li key={t.id}>{index + 1}. {t.name}</li>
+            ));
             botResponse = (
               <>
-                Understood. And what type of issue is this?
-                <ul>{typeOptions}</ul>
+                Understood. And what type of issue is this? Please enter either the number or the full name of the type:
+                <StyledUnorderedList>{typeOptions}</StyledUnorderedList>
+                (Type 'cancel' to abort ticket creation)
               </>
             );
             setConversationState('getting_ticket_type');
           } else {
-            botResponse = "Could not load ticket types. Please add any relevant tags (optional, comma-separated), or just press Enter to skip.";
+            botResponse = "Could not load ticket types. Please add any relevant tags (optional, comma-separated), or type 'skip' or leave empty to skip. (Type 'cancel' to abort)";
             setConversationState('getting_tags');
           }
         } else {
-          const departmentOptions = departments.map(d => <li key={d.id}>{d.name}</li>);
+          const departmentOptions = departments.map((d, index) => (
+            <li key={d.id}>{index + 1}. {d.name}</li>
+          ));
           botResponse = (
             <>
               Sorry, I didn't recognize that department. Please choose from:
-              <ul>{departmentOptions}</ul>
+              <StyledUnorderedList>{departmentOptions}</StyledUnorderedList>
+              Enter either the number (1-{departments.length}) or the exact name.
+              (Type 'cancel' to abort ticket creation)
             </>
           );
           // Stay in getting_department state
@@ -603,26 +804,154 @@ const ChatbotWidget: React.FC = () => {
         break;
 
       case 'getting_ticket_type':
-        const chosenType = ticketTypes.find(t => t.name.toLowerCase() === input.toLowerCase());
-        if (chosenType) {
-          setPendingData((prev: PendingTicketData) => ({ ...prev, typeId: chosenType.id }));
-          botResponse = "Great. You can add some tags to help categorize this ticket (optional, comma-separated), or press Enter to skip.";
-          setConversationState('getting_tags');
+        // Allow canceling the operation
+        if (input.toLowerCase() === 'cancel' || input.toLowerCase() === 'back' || input.toLowerCase() === 'menu') {
+          botResponse = (
+            <>
+              Ticket creation cancelled. What would you like to do instead?
+              <StyledOrderedList>
+                <li>Create a ticket</li>
+                <li>Check ticket status [ID]</li>
+                <li>Add comment to ticket [ID]</li>
+              </StyledOrderedList>
+              Please enter the number (1-3) or type your request.
+            </>
+          );
+          setConversationState('idle');
+          setPendingData({});
+          break;
+        }
+        
+        // Handle both number selection and name selection
+        let chosenType: typeof ticketTypes[0] | null = null;
+        const typeInput = input.trim();
+        
+        // Check if input is a number
+        const typeNumber = parseInt(typeInput);
+        if (!isNaN(typeNumber) && typeNumber > 0 && typeNumber <= ticketTypes.length) {
+          // User entered a valid number
+          chosenType = ticketTypes[typeNumber - 1];
         } else {
-          const typeOptions = ticketTypes.map(t => <li key={t.id}>{t.name}</li>);
+          // Try to match by name (case-insensitive)
+          chosenType = ticketTypes.find(t => 
+            t.name.toLowerCase() === typeInput.toLowerCase()
+          ) || null;
+        }
+        
+        if (chosenType) {
+          setPendingData((prev: PendingTicketData) => ({ ...prev, typeId: chosenType!.id }));
+          
+          // Changed: Now we ask for priority instead of tags
+          if (priorities && priorities.length > 0) {
+            const priorityOptions = priorities.map((p, index) => (
+              <li key={p.id}>{index + 1}. {p.name}</li>
+            ));
+            botResponse = (
+              <>
+                What priority should this ticket have? Please choose one:
+                <StyledUnorderedList>{priorityOptions}</StyledUnorderedList>
+                Enter either the number (1-{priorities.length}) or the exact name.
+                (Type 'cancel' to abort ticket creation)
+              </>
+            );
+            setConversationState('getting_priority');
+          } else {
+            // Fallback if priorities aren't loaded
+            botResponse = "Great. You can add some tags to help categorize this ticket (optional, comma-separated), or type 'skip' or leave empty to skip. (Type 'cancel' to abort)";
+          setConversationState('getting_tags');
+          }
+        } else {
+          const typeOptions = ticketTypes.map((t, index) => (
+            <li key={t.id}>{index + 1}. {t.name}</li>
+          ));
           botResponse = (
             <>
               Sorry, I didn't recognize that type. Please choose from:
-              <ul>{typeOptions}</ul>
+              <StyledUnorderedList>{typeOptions}</StyledUnorderedList>
+              Enter either the number (1-{ticketTypes.length}) or the exact name.
+              (Type 'cancel' to abort ticket creation)
             </>
           );
           // Stay in getting_ticket_type state
         }
         break;
 
+      case 'getting_priority':
+        // Allow canceling the operation
+        if (input.toLowerCase() === 'cancel' || input.toLowerCase() === 'back' || input.toLowerCase() === 'menu') {
+          botResponse = (
+            <>
+              Ticket creation cancelled. What would you like to do instead?
+              <StyledOrderedList>
+                <li>Create a ticket</li>
+                <li>Check ticket status [ID]</li>
+                <li>Add comment to ticket [ID]</li>
+              </StyledOrderedList>
+              Please enter the number (1-3) or type your request.
+            </>
+          );
+          setConversationState('idle');
+          setPendingData({});
+          break;
+        }
+        
+        // Handle both number selection and name selection
+        let chosenPriority: typeof priorities[0] | null = null;
+        const priorityInput = input.trim();
+        
+        // Check if input is a number
+        const priorityNumber = parseInt(priorityInput);
+        if (!isNaN(priorityNumber) && priorityNumber > 0 && priorityNumber <= priorities.length) {
+          // User entered a valid number
+          chosenPriority = priorities[priorityNumber - 1];
+        } else {
+          // Try to match by name (case-insensitive)
+          chosenPriority = priorities.find(p => 
+            p.name.toLowerCase() === priorityInput.toLowerCase()
+          ) || null;
+        }
+        
+        if (chosenPriority) {
+          setPendingData((prev: PendingTicketData) => ({ ...prev, priorityId: chosenPriority!.id }));
+          botResponse = "Great. You can add some tags to help categorize this ticket (optional, comma-separated), or type 'skip' or leave empty to skip. (Type 'cancel' to abort)";
+          setConversationState('getting_tags');
+        } else {
+          const priorityOptions = priorities.map((p, index) => (
+            <li key={p.id}>{index + 1}. {p.name}</li>
+          ));
+          botResponse = (
+            <>
+              Sorry, I didn't recognize that priority. Please choose from:
+              <StyledUnorderedList>{priorityOptions}</StyledUnorderedList>
+              Enter either the number (1-{priorities.length}) or the exact name.
+              (Type 'cancel' to abort ticket creation)
+            </>
+          );
+          // Stay in getting_priority state
+        }
+        break;
+
       case 'getting_tags':
+        // Allow canceling the operation
+        if (input.toLowerCase() === 'cancel' || input.toLowerCase() === 'back' || input.toLowerCase() === 'menu') {
+          botResponse = (
+            <>
+              Ticket creation cancelled. What would you like to do instead?
+              <StyledOrderedList>
+                <li>Create a ticket</li>
+                <li>Check ticket status [ID]</li>
+                <li>Add comment to ticket [ID]</li>
+              </StyledOrderedList>
+              Please enter the number (1-3) or type your request.
+            </>
+          );
+          setConversationState('idle');
+          setPendingData({});
+          break;
+        }
+        
         // Ensure user is logged in before final creation attempt
-        if (!user) {
+        if (!user || !user.id) {
           addNotification('You must be logged in to create a ticket.', 'error');
           botResponse = "Authentication error. Please log in to finalize ticket creation.";
           setConversationState('idle');
@@ -630,23 +959,38 @@ const ChatbotWidget: React.FC = () => {
           break;
         }
 
-        // Parse tags if provided
-        const tags = input.trim() ? input.split(',').map(tag => tag.trim()).filter(tag => tag) : [];
+        // Parse tags if provided - handle skip case
+        const tagInput = input.trim();
+        let tags: string[] = [];
         
-        // Prepare final ticket data
-        const finalTicketData = { 
+        // Allow empty input or "skip" keyword to skip tags
+        if (tagInput === "" || tagInput.toLowerCase() === "skip") {
+          // User chose to skip tags
+          tags = [];
+        } else {
+          // User provided tags
+          tags = tagInput.split(',').map(tag => tag.trim()).filter(tag => tag);
+        }
+        
+        // Prepare final ticket data - ensure consistent structure with form
+        const finalTicketData: any = { 
             subject: pendingData.subject, 
             description: pendingData.description, 
-            requesterId: user.id, // From auth context
+            requesterId: user.id, // Use direct access now that we've verified it exists
             departmentId: pendingData.departmentId,
             typeId: pendingData.typeId,
-            priorityId: 1002, // Defaulting to Medium (ensure this ID exists)
-            tags: tags // Add parsed tags
+            priorityId: pendingData.priorityId || (priorities && priorities.length > 0 ? priorities[1].id : 1002), // Use selected priority or default to Medium
+            tags: tags, // Add parsed tags
+            source: 'chat' // Set the source to 'chat' for proper tracking in the database
         };
         
         try {
             console.log("Attempting to create ticket with data:", finalTicketData);
             const newTicket = await ticketService.createTicket(finalTicketData);
+          
+          // Get priority name for display
+          const priorityName = priorities.find(p => p.id === finalTicketData.priorityId)?.name || 'Medium';
+          
             botResponse = (
               <React.Fragment>
                 Ticket created successfully! <br />
@@ -657,6 +1001,7 @@ const ChatbotWidget: React.FC = () => {
                     ? newTicket.status.name.toUpperCase() 
                     : String(newTicket.status || 'N/A').toUpperCase()
                 } <br />
+              Priority: {priorityName} <br />
                 Department: {departments.find(d => d.id === finalTicketData.departmentId)?.name || 'N/A'} <br />
                 Type: {ticketTypes.find(t => t.id === finalTicketData.typeId)?.name || 'N/A'}
                 {finalTicketData.tags.length > 0 && (
@@ -679,6 +1024,23 @@ const ChatbotWidget: React.FC = () => {
       // --- Get Status Flow ---
       case 'getting_ticket_id_for_status':
          try {
+            // Handle special case if user wants to go back to main menu
+            if (input.toLowerCase() === 'cancel' || input.toLowerCase() === 'back' || input.toLowerCase() === 'menu') {
+              botResponse = (
+                <>
+                  Returning to main menu. What would you like to do?
+                  <StyledOrderedList>
+                    <li>Create a ticket</li>
+                    <li>Check ticket status [ID]</li>
+                    <li>Add comment to ticket [ID]</li>
+                  </StyledOrderedList>
+                  Please enter the number (1-3) or type your request.
+                </>
+              );
+              setConversationState('idle');
+              break;
+            }
+
             // Attempt to fetch the ticket
             console.log(`[ChatbotWidget] Calling ticketService.getTicketById with ID: ${input}`);
             const ticketData = await ticketService.getTicketById(input);
@@ -746,6 +1108,23 @@ const ChatbotWidget: React.FC = () => {
 
       // --- Add Comment Flow ---
       case 'getting_ticket_id_for_comment':
+        // Handle special case if user wants to go back to main menu
+        if (input.toLowerCase() === 'cancel' || input.toLowerCase() === 'back' || input.toLowerCase() === 'menu') {
+          botResponse = (
+            <>
+              Returning to main menu. What would you like to do?
+              <StyledOrderedList>
+                <li>Create a ticket</li>
+                <li>Check ticket status [ID]</li>
+                <li>Add comment to ticket [ID]</li>
+              </StyledOrderedList>
+              Please enter the number (1-3) or type your request.
+            </>
+          );
+          setConversationState('idle');
+          break;
+        }
+
         setPendingData({ ticketId: input });
         setConversationState('getting_comment_text');
         botResponse = `Okay, adding a comment to ticket ${input}. What would you like to say?`;
@@ -777,10 +1156,15 @@ const ChatbotWidget: React.FC = () => {
     }
   };
 
-  // Helper function to fetch and display ticket status
+  // Enhance fetchAndShowTicketStatus with retry logic
   const fetchAndShowTicketStatus = async (ticketId: string) => {
+    setIsTyping(true);
+    
     try {
-      const ticketData = await ticketService.getTicketById(ticketId);
+      const ticketData = await executeWithRetry(
+        () => ticketService.getTicketById(ticketId),
+        `Could not find ticket ${ticketId}`
+      );
 
       // Check if ticket data is valid and contains the nested ticket object
       if (!ticketData || typeof ticketData !== 'object' || !ticketData.ticket) {
@@ -800,7 +1184,7 @@ const ChatbotWidget: React.FC = () => {
         }
       }
 
-      addMessage(
+      await addMessage(
         (
           <React.Fragment>
             Ticket Found: <br />
@@ -836,6 +1220,8 @@ const ChatbotWidget: React.FC = () => {
        }
        
       addMessage(`Could not find or load ticket ${ticketId}. ${userMessage}`, 'bot');
+    } finally {
+      setIsTyping(false);
     }
   };
   
@@ -863,19 +1249,38 @@ const ChatbotWidget: React.FC = () => {
       // Show processing message
       addMessage("Creating your ticket...", 'bot');
       
-      // Prepare ticket data with required fields
-      const createTicketRequest = {
+      // Check if user is authenticated
+      if (!user || !user.id) {
+        addMessage("You need to be logged in to create a ticket.", 'bot');
+        return;
+      }
+      
+      // Get default priority if none is selected
+      let priorityId: number;
+      if (typeof ticketData.priority === 'object' && ticketData.priority?.id) {
+        priorityId = Number(ticketData.priority.id);
+      } else if (priorities && priorities.length > 0) {
+        // Default to Medium priority if available (usually index 1)
+        priorityId = priorities.length > 1 ? Number(priorities[1].id) : Number(priorities[0].id);
+      } else {
+        // Fallback to 1002 (Medium) if no priorities are loaded
+        priorityId = 1002;
+      }
+      
+      // Prepare ticket data with required fields - use consistent format with main form
+      const createTicketRequest: any = {
         subject: ticketData.subject || 'Support request from chat',
         description: ticketData.description || 'No description provided',
-        priority: ticketData.priority || 'medium',
-        status: 'open',
-        requesterId: user?.id,
-        type: ticketData.type || 'question',
-        tags: ticketData.tags || []
+        requesterId: user.id, // Now guaranteed to exist
+        priorityId: priorityId,
+        departmentId: ticketData.department?.id,
+        typeId: ticketData.type?.id,
+        tags: ticketData.tags || [],
+        source: 'chat' // Set the source to 'chat' for proper tracking in the database
       };
       
-      // Call API to create the ticket
-      const response = await apiClient.post<Ticket>('/tickets', createTicketRequest);
+      // Use the same ticketService method as the form flow
+      const response = await ticketService.createTicket(createTicketRequest);
       
       if (response && response.id) {
         // Success message with a link to the created ticket

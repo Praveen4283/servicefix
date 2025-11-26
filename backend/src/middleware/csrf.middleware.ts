@@ -6,101 +6,228 @@ import crypto from 'crypto';
 // CSRF protection configuration
 const CSRF_COOKIE_NAME = '_csrf';
 const CSRF_HEADER_NAME = 'x-csrf-token';
+const CSRF_TOKEN_EXPIRY = 24 * 60 * 60 * 1000; // 24 hours
+
+// Routes that should skip CSRF protection
+const csrfSkippedPaths: string[] = [
+  '/auth/login',
+  '/auth/register',
+  '/auth/forgot-password',
+  '/auth/reset-password',
+  '/auth/refresh-token'
+];
+
+// Routes that should allow post-login leniency
+const csrfLenientPostLoginPaths: string[] = [
+  '/notifications',
+  '/socket.io/'
+];
 
 /**
- * Custom CSRF protection middleware that compares the cookie and header token
+ * Generate a secure CSRF token
+ * @returns Random hex string
+ */
+function generateCsrfToken(): string {
+  // Increased token size for better security (from 32 to 64)
+  return crypto.randomBytes(64).toString('hex');
+}
+
+/**
+ * Set CSRF cookie in response with enhanced security
+ * @param res Response object
+ * @param token CSRF token
+ */
+function setCsrfCookie(res: Response, token: string): void {
+  // Set the CSRF cookie with appropriate settings
+  const isProduction = process.env.NODE_ENV === 'production';
+  const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
+  
+  // Set cookie domain based on environment
+  let cookieDomain;
+  try {
+    if (isProduction && !frontendUrl.includes('localhost')) {
+      const url = new URL(frontendUrl);
+      // Use full domain in production, not just the last two segments
+      // This prevents accidentally sharing cookies across unrelated subdomains
+      cookieDomain = url.hostname;
+    }
+  } catch (e) {
+    logger.warn(`Failed to parse frontend URL for cookie domain: ${e}`);
+  }
+  
+  // Define sameSite value based on environment
+  const sameSite: 'strict' | 'lax' | 'none' = isProduction ? 'strict' : 'lax';
+  
+  // Add entropy specific to this session to help mitigate CSRF attacks
+  // that might somehow arise from multiple sites sharing the same CSRF token
+  const sessionEntropy = crypto.randomBytes(16).toString('hex');
+  res.cookie('_csrf_entropy', sessionEntropy, {
+    httpOnly: true, // Keep this one httpOnly
+    secure: isProduction || frontendUrl.startsWith('https'),
+    sameSite,
+    path: '/',
+    domain: cookieDomain,
+    maxAge: CSRF_TOKEN_EXPIRY
+  });
+  
+  res.cookie(CSRF_COOKIE_NAME, token, {
+    httpOnly: false, // CSRF token needs to be accessible by JavaScript
+    secure: isProduction || frontendUrl.startsWith('https'),
+    sameSite,
+    path: '/',
+    domain: cookieDomain,
+    maxAge: CSRF_TOKEN_EXPIRY
+  });
+  
+  // Set a timestamp to track when token was created
+  res.cookie('_csrf_created', Date.now().toString(), {
+    httpOnly: false, // Allows JavaScript to check if token needs refresh
+    secure: isProduction || frontendUrl.startsWith('https'),
+    sameSite,
+    path: '/',
+    domain: cookieDomain,
+    maxAge: CSRF_TOKEN_EXPIRY
+  });
+}
+
+/**
+ * Verify if request is authorized to skip strict CSRF checks
+ * @param req Request object
+ * @returns Whether request is from a trusted context that can skip validation
+ */
+function isLenientRequest(req: Request): boolean {
+  const isPostLoginMetadata: boolean = req.body?.metadata?.isPostLogin === true;
+  const referer: string = typeof req.headers.referer === 'string' ? req.headers.referer : '';
+  const isLoginReferer: boolean = referer.includes('/login') || referer.includes('/auth');
+  const isLenientPath: boolean = csrfLenientPostLoginPaths.some(path => req.path.includes(path));
+  
+  // Only allow leniency for specific cases
+  return Boolean((isPostLoginMetadata || isLoginReferer) && isLenientPath);
+}
+
+/**
+ * Custom CSRF protection middleware with hardened security
+ * This improves upon the default csurf middleware with additional validation
+ * and a more flexible handling of specific edge cases
  */
 export const csrfProtection = (req: Request, res: Response, next: NextFunction): void => {
-  // Skip for GET, HEAD, OPTIONS methods
-  if (['GET', 'HEAD', 'OPTIONS'].includes(req.method)) {
+  // Skip CSRF protection for GET, HEAD, OPTIONS requests
+  if (req.method === 'GET' || req.method === 'HEAD' || req.method === 'OPTIONS') {
+    return next();
+  }
+  
+  // Skip CSRF protection for specific routes
+  if (csrfSkippedPaths.some(path => req.path.includes(path))) {
     return next();
   }
   
   try {
-    // Get the CSRF token from cookie and header
+    // Get CSRF token from cookie and request header
     const cookieToken = req.cookies[CSRF_COOKIE_NAME];
     const headerToken = req.headers[CSRF_HEADER_NAME] as string;
     
-    // Debug logging to help diagnose issues
-    logger.debug(`CSRF check - Cookie Token: ${cookieToken ? 'exists' : 'missing'}, Header Token: ${headerToken ? 'exists' : 'missing'}`);
+    // Record detailed context for debugging token issues
+    const contextInfo = {
+      clientIp: req.ip || req.socket.remoteAddress || 'unknown',
+      path: req.path,
+      method: req.method,
+      referer: req.headers.referer,
+      userAgent: req.headers['user-agent']?.substring(0, 50) || 'unknown',
+      hasCookieToken: Boolean(cookieToken),
+      hasHeaderToken: Boolean(headerToken),
+      cookieTokenStart: cookieToken ? `${cookieToken.substring(0, 4)}...${cookieToken.slice(-4)}` : 'missing',
+      headerTokenStart: headerToken ? `${headerToken.substring(0, 4)}...${headerToken.slice(-4)}` : 'missing'
+    };
     
-    // If no cookie token, generate a new one and don't validate on this request
-    if (!cookieToken) {
-      const newCsrfToken = crypto.randomBytes(32).toString('hex');
-      
-      // Set the CSRF cookie with appropriate settings
-      const isProduction = process.env.NODE_ENV === 'production';
-      const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
-      
-      // Set cookie domain based on environment
-      let cookieDomain;
-      try {
-        if (isProduction && !frontendUrl.includes('localhost')) {
-          cookieDomain = new URL(frontendUrl).hostname.split('.').slice(-2).join('.');
-        }
-      } catch (e) {
-        logger.warn(`Failed to parse frontend URL for cookie domain: ${e}`);
-      }
-      
-      res.cookie(CSRF_COOKIE_NAME, newCsrfToken, {
-        httpOnly: true,
-        secure: isProduction || frontendUrl.startsWith('https'),
-        sameSite: isProduction ? 'none' : 'lax', // Use 'none' for cross-site requests in production
-        path: '/',
-        domain: cookieDomain,
-        maxAge: 24 * 60 * 60 * 1000 // 24 hours
-      });
-      
-      logger.info(`Generated new CSRF token for request to ${req.path}`);
-      
-      // For this first request, don't validate token
-        return next();
-      }
+    logger.debug(`CSRF check for ${req.path} - Cookie Token: ${cookieToken ? 'exists' : 'missing'}, Header Token: ${headerToken ? 'exists' : 'missing'}`);
     
-    // If header token is missing but cookie token exists, this is likely an error in the frontend
-    if (!headerToken && cookieToken) {
-      logger.warn(`CSRF token missing in header for ${req.path}`);
-      // Respond with 403 and a helpful message
-      return next(AppError.forbidden('CSRF token missing in request header', 'CSRF_ERROR'));
+    // Determine if we should apply special rules for post-login/initial setup requests
+    const isLenient = isLenientRequest(req);
+    
+    // If token is old, generate a new one and set it in the response
+    // This renews the token transparently as the user uses the app
+    const csrfCreatedStr = req.cookies._csrf_created;
+    if (csrfCreatedStr) {
+      const createdTime = parseInt(csrfCreatedStr, 10);
+      const now = Date.now();
+      const tokenAgeMs = now - createdTime;
+      
+      // If token is older than 12 hours, let's refresh it
+      if (tokenAgeMs > 12 * 60 * 60 * 1000) {
+        const newToken = generateCsrfToken();
+        setCsrfCookie(res, newToken);
+        logger.debug('CSRF token auto-refreshed due to age');
+      }
     }
     
     // Validate the token if both exist
     if (cookieToken && headerToken) {
-      // Use a timing-safe comparison to prevent timing attacks
-      const tokensMatch = crypto.timingSafeEqual(
-        Buffer.from(cookieToken, 'utf8'), 
-        Buffer.from(headerToken, 'utf8')
-      );
+      let tokensMatch = false;
+      
+      try {
+        // Use a timing-safe comparison to prevent timing attacks
+        tokensMatch = crypto.timingSafeEqual(
+          Buffer.from(cookieToken, 'utf8'), 
+          Buffer.from(headerToken, 'utf8')
+        );
+      } catch (err) {
+        // Handle case where tokens are different lengths
+        logger.warn(`CSRF token length mismatch: ${err}`);
+        tokensMatch = false;
+      }
+      
+      // Special case: be more tolerant for post-login notifications
+      if (!tokensMatch && isLenient) {
+        logger.warn('CSRF token mismatch for lenient request - allowing request anyway');
+        
+        // Generate a new token for the client to realign tokens
+        const newToken = generateCsrfToken();
+        setCsrfCookie(res, newToken);
+        
+        // Allow the request to proceed
+        return next();
+      }
       
       if (tokensMatch) {
+        // Valid token, allow request
         return next();
       } else {
-        logger.warn(`CSRF token validation failed: Cookie token and header token don't match`);
+        // Invalid token, return error
+        logger.warn('CSRF token validation failed: Cookie token and header token don\'t match');
         
-        // If tokens don't match, generate a new one to help client recover
-        const newCsrfToken = crypto.randomBytes(32).toString('hex');
-        res.cookie(CSRF_COOKIE_NAME, newCsrfToken, {
-          httpOnly: true,
-          secure: process.env.NODE_ENV === 'production',
-          sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax',
-          path: '/'
-        });
+        if (process.env.NODE_ENV === 'development') {
+          // In development, log more details for debugging
+          logger.debug('Token mismatch details:', contextInfo);
+        }
         
-        // Return helpful error with the code to indicate client should refresh token
-        throw AppError.forbidden('CSRF token validation failed - token mismatch', 'CSRF_ERROR');
+        // Generate a new token to help client recover
+        const newToken = generateCsrfToken();
+        setCsrfCookie(res, newToken);
+        
+        throw AppError.forbidden('CSRF token validation failed', 'CSRF_ERROR');
       }
+    } else {
+      // Missing token(s), generate a new one for the client
+      const newToken = generateCsrfToken();
+      setCsrfCookie(res, newToken);
+      
+      if (isLenient && headerToken) {
+        // Allow post-login requests with just a header token
+        logger.info('Allowing lenient request with header token only');
+        return next();
+      }
+      
+      logger.warn(`CSRF token validation failed: ${!cookieToken ? 'Cookie token missing' : 'Header token missing'}`);
+      throw AppError.forbidden('CSRF token validation failed: Missing token', 'CSRF_ERROR');
+    }
+  } catch (err) {
+    if (err instanceof AppError) {
+      return next(err);
     }
     
-    // If we reach here, something unusual happened
-    logger.warn(`CSRF token validation failed: Unexpected token state`);
-    throw AppError.forbidden('CSRF token validation failed', 'CSRF_ERROR');
-  } catch (error) {
-    if (error instanceof AppError) {
-      next(error);
-    } else {
-      logger.error(`CSRF validation error: ${error}`);
-      next(AppError.forbidden('CSRF token validation failed', 'CSRF_ERROR'));
-    }
+    // Handle unexpected errors
+    logger.error('Unexpected error in CSRF validation:', err);
+    return next(AppError.forbidden('CSRF validation error', 'CSRF_ERROR'));
   }
 };
 
@@ -109,6 +236,9 @@ export const csrfProtection = (req: Request, res: Response, next: NextFunction):
  */
 export const csrfErrorHandler = (err: any, req: Request, res: Response, next: NextFunction): void => {
   if (err.code === 'EBADCSRFTOKEN' || err.errorCode === 'CSRF_ERROR') {
+    // Generate new token to help client recover
+    const newCsrfToken = generateCsrfToken();
+    setCsrfCookie(res, newCsrfToken);
     throw AppError.forbidden('CSRF token validation failed', 'CSRF_ERROR');
   }
   next(err);

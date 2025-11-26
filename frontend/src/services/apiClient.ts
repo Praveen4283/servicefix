@@ -24,22 +24,64 @@ import { withRetry } from '../utils/apiUtils';
 // import { JsonObject, MetadataObject } from '../types/common'; - Commented out unused imports
 import { ProfileUpdateData } from '../models/UserDTO';
 
-// Define response type for consistent response structure
-export interface ApiResponse<T = any> {
-  status: 'success' | 'error';
-  data?: T;
-  message?: string;
-  errors?: Record<string, string[]>;
-  code?: string; // Add code field for error codes like CSRF_ERROR
+// Extend AxiosRequestConfig to allow custom properties
+declare module 'axios' {
+  export interface AxiosRequestConfig {
+    _csrfRetry?: boolean;
+    _retry?: boolean;
+    _skipAuthRetry?: boolean;
+  }
 }
 
-// Define error type
-export interface ApiError {
+// Define refresh token response interface
+interface RefreshTokenResponse {
+  token: string;
+  refreshToken?: string;
+  user?: any;
+  csrfToken?: string;
+  status?: string;
+  data?: any;
+}
+
+// For API responses
+interface ApiResponse<T = any> {
+  status: string;
+  data?: T;
+  message?: string;
+  code?: string;
+  errors?: any[];
+}
+
+// For error handling
+interface ApiError {
   message: string;
-  errors?: Record<string, string[]>;
-  status?: number;
+  errors?: any;
+  status: number;
   code?: string;
 }
+
+// For CSRF error handling
+const createErrorResponse = (status: number, message: string): AxiosError => {
+  return {
+    name: 'AxiosError',
+    message,
+    isAxiosError: true,
+    toJSON: () => ({}),
+    response: {
+      status,
+      statusText: status === 403 ? 'Forbidden' : 'Unauthorized',
+      headers: {},
+      config: {
+        headers: {} as any
+      } as any,
+      data: { message, code: status === 403 ? 'CSRF_ERROR' : 'AUTH_ERROR' }
+    } as AxiosResponse
+  } as AxiosError;
+};
+
+// Debounce token refresh to prevent multiple simultaneous requests
+let refreshTokenPromise: Promise<RefreshTokenResponse> | null = null;
+let isRefreshingToken = false;
 
 /**
  * Interface for API user response data with inconsistent property names
@@ -85,10 +127,13 @@ class ApiClient {
   protected client: AxiosInstance;
   private baseURL: string;
   private csrfToken: string | null = null;
-  private fetchingCsrfToken: Promise<void> | null = null;
+  private fetchingCsrfToken: Promise<string> | null = null;
+  private lastCsrfFetchTime: number = 0;
+  private csrfTokenCacheTime: number = 10000; // 10 second cache time
   private isInitialized: boolean = false;
   private authToken: string | null = null;
   private refreshToken: string | null = null;
+  private csrfDebounceTimer: NodeJS.Timeout | null = null;
 
   constructor() {
     // Use environment variable for the API URL to make it configurable for different environments
@@ -116,9 +161,10 @@ class ApiClient {
         console.log(`[API Client] Request URL: ${config.url}`);
         
         // Skip CSRF token for login, logout, and register
-        if (config.url?.includes('/auth/login') || 
-            config.url?.includes('/auth/logout') || 
-            config.url?.includes('/auth/register')) {
+        const authEndpoints = ['/auth/login', '/auth/logout', '/auth/register', '/auth/forgot-password', '/auth/reset-password'];
+        const isAuthEndpoint = authEndpoints.some(endpoint => config.url?.includes(endpoint));
+        
+        if (isAuthEndpoint) {
           console.log(`[API Client] Skipping CSRF token for auth endpoint: ${config.url}`);
           return config;
         }
@@ -135,15 +181,20 @@ class ApiClient {
         
         // Only add CSRF token for non-GET methods
         if (config.method && ['post', 'put', 'patch', 'delete'].includes(config.method)) {
-            try {
-            // Always fetch a fresh CSRF token for POST/PUT/PATCH/DELETE requests 
-            // after successful login to ensure we have a valid token
-                await this.fetchCsrfToken();
+          try {
+            // Check if we have a valid token already
+            const needsNewToken = !this.csrfToken || (Date.now() - this.lastCsrfFetchTime > this.csrfTokenCacheTime);
+            
+            if (needsNewToken) {
+              await this.fetchCsrfToken();
+            } else {
+              console.log(`[API Client] Using cached CSRF token (age: ${Math.floor((Date.now() - this.lastCsrfFetchTime)/1000)}s)`);
+            }
 
-          // Add CSRF token to header if available
-          if (this.csrfToken && config.headers) {
+            // Add CSRF token to header if available
+            if (this.csrfToken && config.headers) {
               console.log(`[API Client] Adding CSRF token to ${config.url}`);
-            config.headers['x-csrf-token'] = this.csrfToken;
+              config.headers['x-csrf-token'] = this.csrfToken;
             } else {
               console.warn(`[API Client] No CSRF token available for ${config.url}`);
             }
@@ -164,30 +215,38 @@ class ApiClient {
     this.client.interceptors.response.use(
       (response) => response.data,
       async (error) => {
-        // Handle 401 Unauthorized errors
         const originalRequest = error.config;
         
         // Handle CSRF token errors
         if (error.response?.status === 403 && 
-            error.response?.data?.code === 'CSRF_ERROR') {
+            (error.response?.data?.code === 'CSRF_ERROR' || 
+             error.response?.data?.message?.includes('CSRF'))) {
           console.log('[API Client] CSRF token error, fetching new token and retrying');
           
-          if (!originalRequest._retry) {
-            originalRequest._retry = true;
+          if (!originalRequest._csrfRetry) {
+            originalRequest._csrfRetry = true;
             
             // Force refresh the CSRF token
             this.csrfToken = null;
+            this.lastCsrfFetchTime = 0;
             localStorage.removeItem('csrfToken');
             localStorage.removeItem('csrfTokenExpiry');
             
             try {
-              await this.fetchCsrfToken();
-              if (this.csrfToken && originalRequest.headers) {
-                originalRequest.headers['x-csrf-token'] = this.csrfToken;
+              // Wait a bit before retrying to avoid race conditions
+              await new Promise(resolve => setTimeout(resolve, 300));
+              const newCsrfToken = await this.fetchCsrfToken();
+              
+              // Apply the new CSRF token to the original request
+              if (newCsrfToken && originalRequest.headers) {
+                originalRequest.headers['x-csrf-token'] = newCsrfToken;
                 return this.client(originalRequest);
               }
             } catch (csrfError) {
               console.error('[API Client] Failed to refresh CSRF token:', csrfError);
+              return Promise.reject(this.formatError(
+                createErrorResponse(403, 'CSRF token refresh failed')
+              ));
             }
           }
         }
@@ -197,72 +256,146 @@ class ApiClient {
           console.log('[API Client] 401 on public route, skipping token refresh');
           return Promise.reject(error);
         }
-        
-        // Attempt to refresh token on 401 Unauthorized errors
-        if (error.response && error.response.status === 401 && !originalRequest._retry) {
-          originalRequest._retry = true;
-          console.log('[API Client] Attempting to refresh token for 401 response');
 
-          try {
-            // Get refreshToken from localStorage
-            this.refreshToken = localStorage.getItem('refreshToken');
+        // Handle expired tokens with a single refresh attempt across multiple requests
+        if (error.response?.status === 401 && !originalRequest._retry) {
+          console.log('[API Client] 401 Unauthorized - attempting token refresh');
+          originalRequest._retry = true;
+          
+          // Debounce token refresh - if a refresh is already in progress, use that promise
+          // instead of starting a new refresh
+          if (isRefreshingToken) {
+            console.log('[API Client] Token refresh already in progress, waiting for completion');
             
-            // Check if refresh token is available
-            if (!this.refreshToken) {
-              console.log('[API Client] No refresh token in localStorage, trying cookie-based refresh');
-              // Try cookie-based refresh as fallback
-              const response = await this.post('/auth/refresh-token', {});
-              
-              if (response && response.token) {
-                // Update the stored tokens
-                this.authToken = response.token;
-                localStorage.setItem('authToken', response.token);
-                
-                // If there's a new refresh token, update that too
-                if (response.refreshToken) {
-                  this.refreshToken = response.refreshToken;
-                  localStorage.setItem('refreshToken', response.refreshToken);
-                }
-                
-                // Update the original request and retry
-                if (originalRequest.headers) {
-                  originalRequest.headers['Authorization'] = `Bearer ${this.authToken}`;
-                }
-                
-                return this.client(originalRequest);
-              }
-            } else {
-              // Call refresh token endpoint with the token in request body
-              const response = await this.post('/auth/refresh-token', { refreshToken: this.refreshToken });
-              
-              if (response && response.token) {
-                // Update the stored tokens
-                this.authToken = response.token;
-                localStorage.setItem('authToken', response.token);
-                
-                // If there's a new refresh token, update that too
-                if (response.refreshToken) {
-                  this.refreshToken = response.refreshToken;
-                  localStorage.setItem('refreshToken', response.refreshToken);
-                }
-                
-                // Update the original request and retry
-                if (originalRequest.headers) {
-                  originalRequest.headers['Authorization'] = `Bearer ${this.authToken}`;
-                }
-                
-                return this.client(originalRequest);
-              }
+            if (!refreshTokenPromise) {
+              return Promise.reject(new Error('Token refresh inconsistent state'));
             }
-          } catch (refreshError) {
-            console.error('[API Client] Error refreshing token:', refreshError);
-            // Handle auth error (logout user)
-            this.handleAuthError();
-            return Promise.reject(refreshError);
+            
+            try {
+              // Wait for the existing refresh to complete
+              await refreshTokenPromise;
+              
+              // Get fresh CSRF token after successful token refresh
+              await this.fetchCsrfToken();
+              
+              // Update the headers with the new tokens
+              if (this.authToken && originalRequest.headers) {
+                originalRequest.headers['Authorization'] = `Bearer ${this.authToken}`;
+              }
+              if (this.csrfToken && originalRequest.headers) {
+                originalRequest.headers['x-csrf-token'] = this.csrfToken;
+              }
+              
+              // Retry the request with new tokens
+              return this.client(originalRequest);
+            } catch (error) {
+              return Promise.reject(error);
+            }
+          }
+          
+          // Set flag and create a new refresh promise
+          isRefreshingToken = true;
+          
+          // Store the promise for other requests to use
+          refreshTokenPromise = (async () => {
+            try {
+              // Check if we have a valid refresh token
+              const refreshToken = localStorage.getItem('refreshToken');
+              
+              if (!refreshToken) {
+                console.warn('[API Client] No refresh token available');
+                this.handleAuthError();
+                throw new Error('No refresh token available. Please log in again.');
+              }
+              
+              console.log('[API Client] Attempting to refresh token');
+              
+              // Call token refresh endpoint with proper error handling
+              const response = await this.client.post('/auth/refresh-token', { 
+                refreshToken 
+              }, {
+                _skipAuthRetry: true
+              });
+              
+              // Safely extract the token data regardless of response structure
+              let responseData: RefreshTokenResponse;
+
+              if (response && typeof response === 'object') {
+                // Handle both direct response and nested data property
+                if ('token' in response) {
+                  responseData = response as unknown as RefreshTokenResponse;
+                } else if (response.data && typeof response.data === 'object' && 'token' in response.data) {
+                  responseData = response.data as unknown as RefreshTokenResponse;
+                } else {
+                  console.error('[API Client] Unexpected response format:', response);
+                  throw new Error('Invalid response format from refresh token endpoint');
+                }
+              } else {
+                throw new Error('Invalid response from refresh token endpoint');
+              }
+              
+              if (!responseData || !responseData.token) {
+                throw new Error('Invalid response from refresh token endpoint');
+              }
+              
+              console.log('[API Client] Token refreshed successfully');
+              
+              // Update stored tokens
+              this.authToken = responseData.token;
+              localStorage.setItem('authToken', responseData.token);
+              
+              // Update refresh token if provided
+              if (responseData.refreshToken) {
+                this.refreshToken = responseData.refreshToken;
+                localStorage.setItem('refreshToken', responseData.refreshToken);
+              }
+              
+              // Update the authorization header
+              this.client.defaults.headers.common['Authorization'] = `Bearer ${this.authToken}`;
+              
+              // Dispatch event to notify that session was refreshed
+              window.dispatchEvent(new Event('auth:session-refreshed'));
+              
+              return responseData;
+            } catch (error) {
+              console.error('[API Client] Token refresh failed:', error);
+              this.handleAuthError();
+              throw new Error('Session expired. Please log in again.');
+            } finally {
+              // Reset the refresh flag
+              isRefreshingToken = false;
+              // Clear the promise after a short delay in case there are multiple
+              // pending requests waiting on it
+              setTimeout(() => {
+                refreshTokenPromise = null;
+              }, 100);
+            }
+          })();
+          
+          try {
+            // Wait for the refresh to complete
+            await refreshTokenPromise;
+            
+            // Get a fresh CSRF token after successful token refresh
+            await this.fetchCsrfToken();
+            
+            // Update the headers with the new tokens
+            if (this.authToken && originalRequest.headers) {
+              originalRequest.headers['Authorization'] = `Bearer ${this.authToken}`;
+            }
+            if (this.csrfToken && originalRequest.headers) {
+              originalRequest.headers['x-csrf-token'] = this.csrfToken;
+            }
+            
+            // Retry the request with new tokens
+            return this.client(originalRequest);
+          } catch (error) {
+            return Promise.reject(error);
           }
         }
         
-        return Promise.reject(error);
+        // For all other errors, use the formatError helper
+        return Promise.reject(this.formatError(error));
       }
     );
     
@@ -311,73 +444,116 @@ class ApiClient {
   }
 
   /**
-   * Fetch a new CSRF token
+   * Fetch CSRF token from the server
+   * Only fetch a new token if the current token is expired or not available
    */
-  private async fetchCsrfToken(): Promise<void> {
-    // If we're already fetching a token, wait for that promise to resolve
+  async fetchCsrfToken(): Promise<string> {
+    // Implement debouncing for CSRF token requests to prevent multiple simultaneous requests
     if (this.fetchingCsrfToken) {
-      return this.fetchingCsrfToken;
+      console.log('[API Client] CSRF token fetch already in progress, waiting for completion');
+      try {
+        return await this.fetchingCsrfToken;
+      } catch (error) {
+        console.error('[API Client] Error while waiting for existing CSRF token fetch:', error);
+        // Fall through to fresh fetch below
+      }
     }
     
-    // Create a new promise for fetching the token
-    this.fetchingCsrfToken = (async () => {
-    try {
-      console.log('[API Client] Fetching CSRF token...');
+    // Check if we have a cached token that's still valid
+    const cachedToken = localStorage.getItem('csrfToken');
+    const cachedTokenExpiryStr = localStorage.getItem('csrfTokenExpiry');
+    const cachedTokenExpiry = cachedTokenExpiryStr ? parseInt(cachedTokenExpiryStr, 10) : 0;
+    
+    // If token is cached and not expired (with 10% time buffer), return it
+    if (cachedToken && Date.now() < cachedTokenExpiry - this.csrfTokenCacheTime * 0.1) {
+      console.log('[API Client] Using cached CSRF token');
+      this.csrfToken = cachedToken;
+      return Promise.resolve(cachedToken);
+    }
+    
+    // If current time is too close to last fetch time, debounce
+    if (Date.now() - this.lastCsrfFetchTime < 1000) {
+      console.log('[API Client] Debouncing CSRF token request');
       
-      // Check if we have a cached token first
-      const cachedToken = localStorage.getItem('csrfToken');
-      const tokenExpiry = localStorage.getItem('csrfTokenExpiry');
-      
-      // Use cached token if it exists and isn't expired
-      if (cachedToken && tokenExpiry && parseInt(tokenExpiry) > Date.now()) {
-        console.log('[API Client] Using cached CSRF token');
-        this.csrfToken = cachedToken;
-        return;
+      // Clear any existing timer
+      if (this.csrfDebounceTimer) {
+        clearTimeout(this.csrfDebounceTimer);
       }
       
-      // Otherwise fetch a new token
-      const response = await axios.get(`${this.baseURL}/auth/csrf-token`, {
-        withCredentials: true,
-        timeout: 5000 // 5 second timeout
+      // Set up a new fetch with delay
+      return new Promise<string>((resolve) => {
+        this.csrfDebounceTimer = setTimeout(() => {
+          this.fetchCsrfToken().then(resolve);
+        }, 1000);
       });
-      
-      if (response.data && response.data.csrfToken) {
-        this.csrfToken = response.data.csrfToken;
+    }
+    
+    console.log('[API Client] Fetching new CSRF token');
+    this.lastCsrfFetchTime = Date.now();
+    
+    // Create a new fetch promise that we'll store for deduplication
+    this.fetchingCsrfToken = (async (): Promise<string> => {
+      try {
+        // Improved token extraction from response
+        const response = await this.client.get('/auth/csrf-token', {
+          withCredentials: true
+        });
         
-          // Cache the token for a shorter time to ensure freshness
-        if (this.csrfToken) {
-          localStorage.setItem('csrfToken', this.csrfToken);
-            localStorage.setItem('csrfTokenExpiry', (Date.now() + 5 * 60 * 1000).toString()); // 5 minutes
-          
-        console.log('[API Client] CSRF token fetched successfully');
+        // Type assertion to allow property access
+        const responseObj = response as any;
+        
+        // Enhanced response parsing with multiple fallback paths
+        let csrfToken: string | null = null;
+        
+        // Try to extract token from different possible response formats
+        if (typeof responseObj.csrfToken === 'string') {
+          csrfToken = responseObj.csrfToken;
+        } 
+        // Try data property next
+        else if (responseObj.data && typeof responseObj.data === 'object') {
+          const dataObj = responseObj.data;
+          if (typeof dataObj.csrfToken === 'string') {
+            csrfToken = dataObj.csrfToken;
+          } else if (dataObj.data && typeof dataObj.data.csrfToken === 'string') {
+            csrfToken = dataObj.data.csrfToken;
+          }
         }
-      } else {
-        console.error('[API Client] CSRF token response missing token:', response.data);
-          // Clear any existing token to avoid using stale tokens
-          this.csrfToken = null;
-          localStorage.removeItem('csrfToken');
-          localStorage.removeItem('csrfTokenExpiry');
-      }
-    } catch (error) {
-      console.error('[API Client] Error fetching CSRF token:', error);
-      
-      // Try to use cached token even if expired as fallback
-      const cachedToken = localStorage.getItem('csrfToken');
-      if (cachedToken) {
-        console.log('[API Client] Using expired cached CSRF token as fallback');
-        this.csrfToken = cachedToken;
-        } else {
-          // If no cached token available, clear token state
-          this.csrfToken = null;
-          localStorage.removeItem('csrfToken');
-          localStorage.removeItem('csrfTokenExpiry');
-      }
+        // Try status/data pattern
+        else if (responseObj.status && responseObj.status === 'success' && responseObj.data && 
+                typeof responseObj.data === 'object' && typeof responseObj.data.csrfToken === 'string') {
+          csrfToken = responseObj.data.csrfToken;
+        }
         
+        console.log(`[API Client] CSRF token extraction result: ${csrfToken ? 'found' : 'not found'}`);
+        
+        if (!csrfToken) {
+          throw new Error('No CSRF token in response');
+        }
+        
+        // Ensure consistent token format and length (64 hex chars)
+        if (!/^[a-f0-9]{64}$/i.test(csrfToken)) {
+          console.warn(`[API Client] CSRF token format invalid, regenerating`);
+          // Generate a valid token format if the server didn't provide one
+          csrfToken = Array.from(crypto.getRandomValues(new Uint8Array(32)))
+            .map(b => b.toString(16).padStart(2, '0'))
+            .join('');
+        }
+        
+        // Update and store the token
+        this.csrfToken = csrfToken;
+        localStorage.setItem('csrfToken', csrfToken);
+        localStorage.setItem('csrfTokenExpiry', (Date.now() + this.csrfTokenCacheTime).toString());
+        
+        return csrfToken;
+      } catch (error) {
+        console.error('[API Client] Error extracting CSRF token:', error);
         throw error;
       } finally {
-        // Clear the fetching promise when done
-        this.fetchingCsrfToken = null;
-    }
+        // Clear the promise after completion
+        setTimeout(() => {
+          this.fetchingCsrfToken = null;
+        }, 100);
+      }
     })();
     
     return this.fetchingCsrfToken;
@@ -527,11 +703,19 @@ class ApiClient {
 
         // Specific handling for /users list
         if (url.includes('/users') && !url.includes('/stats')) {
-          if (responseData && typeof responseData === 'object' && 'users' in responseData && Array.isArray((responseData as any).users)) {
+          if (url.includes('/roles/agent')) {
+            // Special case for /users/roles/agent endpoint
+            console.log(`[API Client] _get: Agent roles endpoint at ${url}. Returning data as is.`);
+            return responseData as T;
+          } else if (responseData && typeof responseData === 'object' && 'users' in responseData && Array.isArray((responseData as any).users)) {
             console.log(`[API Client] _get: Matched /users structure for ${url}. Returning data as is.`);
-            return responseData as T; // responseData is already UsersResponse
+          } else if (url.match(/\/users\/\d+$/) && responseData && typeof responseData === 'object') {
+            // This is a single user endpoint (e.g., /users/1001), just return the data as is
+            console.log(`[API Client] _get: Single user endpoint for ${url}. Returning data as is.`);
+            return responseData as T;
+          } else {
+            console.warn(`[API Client] _get: /users at ${url} did NOT match expected structure. Data:`, responseData);
           }
-          console.warn(`[API Client] _get: /users at ${url} did NOT match expected structure. Data:`, responseData);
           // Fallthrough to generic or error if structure is wrong for /users
         }
         // Specific handling for /users/stats
@@ -573,37 +757,50 @@ class ApiClient {
     data?: any,
     config?: AxiosRequestConfig
   ): Promise<T> {
-    return this.client
-      .post<ApiResponse<T> | T>(url, data, config)
-      .then((response) => {
-        // Debug the response structure
-        console.log(`[API Client] POST Response for ${url}:`, response);
-        
-        // For auth endpoints, just return the whole response without further processing
-        if (url.includes('/auth/')) {
-          console.log(`[API Client] Returning auth response for ${url}:`, response);
-          return response as unknown as T;
-        }
-        
-        // For non-auth endpoints, handle the standard structure
-        const responseData = response as any; // Cast to any to avoid type checking errors
-        
-        if (responseData && typeof responseData === 'object') {
-          if ('status' in responseData && responseData.status === 'success') {
-            // If it has data property, return that
-            if ('data' in responseData) {
-              return responseData.data as T;
-            }
-            // Otherwise return the whole response
-            return responseData as unknown as T;
-          } else if ('status' in responseData && responseData.status === 'error') {
-            throw new Error(responseData.message || 'Request failed');
+    // Additional check for post-login notification requests
+    const isPostLoginNotification = url.includes('/notifications') && 
+      // @ts-ignore - Accessing custom property on window
+      window.__freshLogin === true;
+    
+    const postWithToken = async (): Promise<T> => {
+      // For post-login notifications, always fetch a fresh token first
+      if (isPostLoginNotification) {
+        console.log('[API Client] Post-login notification detected, fetching fresh token');
+        await this.fetchCsrfToken();
+        // Add a small extra delay for cookie propagation
+        await new Promise(resolve => setTimeout(resolve, 100));
+      }
+      
+      return this.client
+        .post<ApiResponse<T> | T>(url, data, config)
+        .then((response) => {
+          // Debug the response structure
+          console.log(`[API Client] POST Response for ${url}:`, response);
+          
+          // For auth endpoints, just return the whole response without further processing
+          if (url.includes('/auth/')) {
+            console.log(`[API Client] Returning auth response for ${url}:`, response);
+            return response as unknown as T;
           }
-        }
-        
-        // Fallback for unexpected response format
-        return responseData as T;
-      });
+          
+          // Extract and return data
+          const responseData = response?.data;
+          
+          if (!responseData) {
+            return {} as T;
+          }
+          
+          // Handle standard API response format
+          if (typeof responseData === 'object' && 'data' in responseData && responseData.status === 'success') {
+            return responseData.data as T;
+          }
+          
+          // If not in standard format, return as is
+          return responseData as T;
+        });
+    };
+    
+    return postWithToken();
   }
 
   // PUT request
@@ -700,12 +897,15 @@ class ApiClient {
   public getUser(userId: string): Promise<User> {
     return this.get<any>(`/users/${userId}`)
       .then(response => {
+        console.log('[API Client] getUser raw response:', response);
         // Use normalizeUserResponse to handle potential inconsistencies
         const userDTO = this.normalizeUserResponse(response); 
         const user = mapUserDTOToUser(userDTO);
+        console.log('[API Client] getUser transformed user:', user);
         return user;
       })
       .catch(error => {
+        console.error('[API Client] getUser error:', error);
         throw error;
       });
   }
@@ -962,6 +1162,29 @@ class ApiClient {
       currentPath === route || 
       (route !== '/' && currentPath.startsWith(route))
     );
+  }
+
+  // Add these lines near the top of the class, after the client initialization
+  private formatError(error: AxiosError): ApiError {
+    const status = error.response?.status || 500;
+    let message = error.message || 'An unknown error occurred';
+    let errors: Record<string, string[]> | undefined = undefined;
+    let code: string | undefined = undefined;
+    
+    // Handle the response data with proper type casting
+    if (error.response?.data) {
+      const errorData = error.response.data as any;
+      if (errorData.message) message = errorData.message;
+      if (errorData.errors) errors = errorData.errors;
+      if (errorData.code) code = errorData.code;
+    }
+    
+    return {
+      message,
+      errors,
+      status,
+      code
+    };
   }
 }
 

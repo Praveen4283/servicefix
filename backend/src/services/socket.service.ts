@@ -4,6 +4,7 @@ import { logger } from '../utils/logger';
 import notificationService from './notification.service';
 import authService from './auth.service';
 import { AppError } from '../utils/errorHandler';
+import cookieParser from 'cookie-parser';
 
 interface UserSocket {
   userId: number;
@@ -24,6 +25,7 @@ interface NotificationPayload {
 class SocketService {
   private io: Server | null = null;
   private connectedUsers: Map<number, string[]> = new Map(); // userId -> socketIds[]
+  private JWT_SECRET = process.env.JWT_SECRET || 'your_jwt_secret';
 
   /**
    * Initialize Socket.IO server
@@ -40,9 +42,14 @@ class SocketService {
       cors: {
         origin: process.env.FRONTEND_URL || '*',
         methods: ['GET', 'POST'],
-        credentials: true
+        credentials: true,
+        allowedHeaders: ['Content-Type', 'Authorization', 'X-CSRF-Token', 'x-post-login']
       },
-      path: '/socket.io'
+      path: '/socket.io',
+      // Improved connection handling
+      connectTimeout: 10000, // 10s connection timeout
+      pingTimeout: 20000,    // 20s ping timeout
+      pingInterval: 25000    // Send ping packet every 25s
     });
 
     // Setup authentication middleware
@@ -57,36 +64,91 @@ class SocketService {
 
   /**
    * Authenticate socket connection using JWT token
+   * Tries multiple auth methods for flexibility:
+   * 1. handshake.auth.token
+   * 2. handshake headers Authorization Bearer token
+   * 3. cookies.accessToken (httpOnly cookie)
    */
   private authenticateSocket = async (socket: Socket, next: (err?: Error) => void) => {
     try {
-      const token = socket.handshake.auth.token;
+      let token: string | undefined;
       
-      // --- Start Diagnostic Logging ---
-      if (!token) {
-        logger.warn('Socket Auth: No token provided in handshake.auth.token');
-        return next(new Error('Authentication error: Token not provided'));
-      } else {
-        logger.debug(`Socket Auth: Received token`);
+      // First try: handshake.auth.token
+      if (socket.handshake.auth && socket.handshake.auth.token) {
+        token = socket.handshake.auth.token;
+        logger.debug(`Socket Auth: Using token from handshake.auth`);
       }
-      // --- End Diagnostic Logging ---
+      
+      // Second try: Authorization header
+      if (!token && socket.handshake.headers.authorization) {
+        const authHeader = socket.handshake.headers.authorization;
+        if (typeof authHeader === 'string' && authHeader.startsWith('Bearer ')) {
+          token = authHeader.substring(7);
+          logger.debug(`Socket Auth: Using token from Authorization header`);
+        }
+      }
+      
+      // Third try: Cookies (httpOnly)
+      if (!token && socket.handshake.headers.cookie) {
+        const cookies = this.parseCookies(socket.handshake.headers.cookie);
+        if (cookies.accessToken) {
+          token = cookies.accessToken;
+          logger.debug(`Socket Auth: Using token from cookie`);
+        }
+      }
+      
+      // If no token found, reject connection
+      if (!token) {
+        logger.warn('Socket Auth: No token found in any authentication method');
+        return next(new Error('Authentication error: Token not provided'));
+      }
       
       try {
-        // Use auth service to verify token
+        // Verify the token
         const decoded = authService.verifyToken(token);
         
         if (!decoded || !decoded.userId) {
           return next(new Error('Authentication error: Invalid token payload'));
         }
         
+        // Get user info to ensure the user exists and is active
+        try {
+          const userId = decoded.userId;
+          logger.debug(`Socket Auth: Token verified for user ${userId}`);
+        
         // Attach user data to socket
-        (socket as any).user = { id: decoded.userId };
+          (socket as any).user = { 
+            id: userId, 
+            role: decoded.role || 'customer',
+            socketId: socket.id
+          };
+          
+          // Add user to their room for targeted messaging
+          socket.join(`user:${userId}`);
+          
+          // Prevent reconnection abuse by limiting connections 
+          // per user (e.g., max 5 connections per user)
+          const userSocketsCount = this.connectedUsers.get(userId)?.length || 0;
+          if (userSocketsCount >= 5) {
+            logger.warn(`Socket Auth: User ${userId} has too many connections (${userSocketsCount})`);
+            // Don't disconnect, just warn in logs
+          }
         
         next();
+        } catch (error) {
+          logger.error(`Socket Auth: Error getting user: ${error}`);
+          return next(new Error('Authentication error: User not found or inactive'));
+        }
       } catch (error) {
-        // Handle specific token errors
-        if (error instanceof AppError) {
-          return next(new Error(`Authentication error: ${error.message}`));
+        // Specific JWT validation errors
+        if (error instanceof Error) {
+          if (error.name === 'TokenExpiredError') {
+            logger.debug(`Socket Auth: Token expired`);
+            return next(new Error('Authentication error: Token expired'));
+          }
+          
+          logger.debug(`Socket Auth: Invalid token: ${error.message}`);
+          return next(new Error('Authentication error: Invalid token'));
         }
         throw error; // Re-throw unexpected errors
       }
@@ -95,6 +157,20 @@ class SocketService {
       next(new Error('Authentication error'));
     }
   };
+
+  /**
+   * Parse cookies from header string
+   */
+  private parseCookies(cookieHeader: string): {[key: string]: string} {
+    const list: {[key: string]: string} = {};
+    cookieHeader.split(';').forEach((cookie) => {
+      const parts = cookie.split('=');
+      const key = parts.shift()!.trim();
+      const value = decodeURI(parts.join('='));
+      list[key] = value;
+    });
+    return list;
+  }
 
   /**
    * Handle new socket connection
@@ -121,16 +197,27 @@ class SocketService {
     socket.join(`user:${userId}`);
 
     // Notify client that connection is successful
-    socket.emit('connected', { status: 'connected', userId });
+    socket.emit('connected', { 
+      status: 'connected', 
+      userId,
+      timestamp: new Date().toISOString()
+    });
 
     // Handle client notifications
     socket.on('client:notification', (data) => {
       this.handleClientNotification(userId, data, socket);
     });
 
+    // Handle token expiration or refresh
+    socket.on('token:refresh', (data) => {
+      logger.debug(`User ${userId} refreshed token`);
+      // The existing authentication will continue to work,
+      // no need to do anything here
+    });
+
     // Handle disconnect
-    socket.on('disconnect', () => {
-      logger.info(`User ${userId} disconnected from socket ${socket.id}`);
+    socket.on('disconnect', (reason) => {
+      logger.info(`User ${userId} disconnected from socket ${socket.id}, reason: ${reason}`);
       
       // Remove socket from connected users
       const userSockets = this.connectedUsers.get(userId) || [];

@@ -455,58 +455,28 @@ class TicketService {
           })
         ]);
         
-        // Process ticket with consistent format
+        // Use the helper method for consistent formatting
+        const ticketData = ticket.toFrontendFormat();
+        
+        // Add comments and attachments with proper formatting
         return {
-          id: ticket.id,
-          subject: ticket.subject,
-          description: ticket.description,
-          status: ticket.status,
-          priority: ticket.priority,
-          requester: ticket.requester ? {
-            id: ticket.requester.id,
-            name: `${ticket.requester.firstName} ${ticket.requester.lastName}`,
-            email: ticket.requester.email,
-            avatarUrl: ticket.requester.avatarUrl
-          } : null,
-          assignee: ticket.assignee ? {
-            id: ticket.assignee.id,
-            name: `${ticket.assignee.firstName} ${ticket.assignee.lastName}`,
-            email: ticket.assignee.email,
-            avatarUrl: ticket.assignee.avatarUrl
-          } : null,
-          department: ticket.department,
-          type: ticket.type,
-          organization: ticket.organization,
-          createdAt: ticket.createdAt,
-          updatedAt: ticket.updatedAt,
-          dueDate: ticket.dueDate,
-          resolvedAt: ticket.resolvedAt,
-          closedAt: ticket.closedAt,
-          slaStatus: ticket.slaStatus,
-          comments: comments.map(comment => ({
-            id: comment.id,
-            content: comment.content,
-            isInternal: comment.isInternal,
-            isSystem: comment.isSystem,
-            createdAt: comment.createdAt,
-            user: comment.user ? {
-              id: comment.user.id,
-              name: `${comment.user.firstName} ${comment.user.lastName}`,
-              avatarUrl: comment.user.avatarUrl,
-              role: comment.user.role
-            } : null
-          })),
+          ...ticketData,
+          comments: comments.map(comment => comment.toFrontendFormat()),
           attachments: attachments.map(attachment => ({
-            id: attachment.id,
+            id: String(attachment.id),
             fileName: attachment.fileName,
+            originalName: attachment.originalName,
             filePath: attachment.filePath,
             fileType: attachment.fileType,
             fileSize: attachment.fileSize,
             uploadedBy: attachment.uploadedBy ? {
-              id: attachment.uploadedBy.id,
-              name: `${attachment.uploadedBy.firstName} ${attachment.uploadedBy.lastName}`
+              id: String(attachment.uploadedBy.id),
+              firstName: attachment.uploadedBy.firstName || '',
+              lastName: attachment.uploadedBy.lastName || '',
+              avatar: attachment.uploadedBy.avatarUrl,
+              email: attachment.uploadedBy.email
             } : null,
-            createdAt: attachment.createdAt
+            createdAt: attachment.createdAt.toISOString()
           }))
         };
       } catch (err: unknown) {

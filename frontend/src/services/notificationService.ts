@@ -90,6 +90,8 @@ interface FetchNotificationsOptions {
   limit?: number;
   offset?: number;
   unreadOnly?: boolean;
+  forceRefresh?: boolean; // Force bypassing cache and fetching fresh from server
+  timestamp?: number; // Additional timestamp to force cache busting
 }
 
 /**
@@ -124,41 +126,44 @@ const notificationService = {
     metadata?: NotificationMetadata
   ): Promise<boolean> => {
     try {
+      // Check if this is a post-login notification
+      // @ts-ignore - Accessing custom property on window
+      const isFreshLogin = window.__freshLogin === true;
+      
+      if (isFreshLogin) {
+        console.log('[NotificationService] Detected fresh login notification, adding extra delay');
+        // Wait a bit longer for proper cookie synchronization
+        await new Promise(resolve => setTimeout(resolve, 300));
+      }
+      
       // Call the backend API to create a notification with retry capability
       const result = await withRetry(
         async () => {
-          try {
-            // Always try to fetch a fresh CSRF token first to ensure we have a valid one
-            console.log('[NotificationService] Fetching fresh CSRF token before creating notification');
-            try {
-              await apiClient.get('/auth/csrf-token');
-            } catch (tokenError) {
-              console.error('[NotificationService] Failed to fetch CSRF token:', tokenError);
-              // Continue anyway, the request might still work with existing token
-            }
+          try {            
+            // Create the notification with post-login status included in the payload
+            await apiClient.post('/notifications', {
+              title,
+              message,
+              type,
+              link,
+              metadata: {
+                ...(metadata || {}),
+                // Include post-login flag in the metadata
+                isPostLogin: isFreshLogin
+              }
+            });
             
-            // Small delay to ensure cookie is set
-            await new Promise(resolve => setTimeout(resolve, 100));
+            console.log('[NotificationService] Notification created successfully', 
+               isFreshLogin ? '(with post-login metadata)' : '');
             
-            // Then create the notification
-      await apiClient.post('/notifications', {
-        title,
-        message,
-        type,
-        link,
-        metadata
-      });
-      return true;
+            return true;
           } catch (error: any) {
             // Check for CSRF error
             if (error?.status === 403 && error?.code === 'CSRF_ERROR') {
               console.log('[NotificationService] CSRF error, will retry with new token');
-              // Clear token so it will be refreshed on retry
-              localStorage.removeItem('csrfToken');
-              localStorage.removeItem('csrfTokenExpiry');
               
-              // Wait a bit longer before retry to ensure cookies are properly set
-              await new Promise(resolve => setTimeout(resolve, 300));
+              // Wait longer before retry to ensure cookies are properly set
+              await new Promise(resolve => setTimeout(resolve, 400));
               
               throw error; // Rethrow to trigger retry
             }
@@ -203,12 +208,35 @@ const notificationService = {
       if (options.offset) queryParams.append('offset', options.offset.toString());
       if (options.unreadOnly) queryParams.append('unread', 'true');
       
+      // Always include recent flag to ensure we get the latest notifications
+      queryParams.append('recent', 'true');
+      
+      // Add cache-busting parameter if forceRefresh is true
+      if (options.forceRefresh) {
+        queryParams.append('_t', Date.now().toString());
+      }
+      
+      // Use explicit timestamp if provided
+      if (options.timestamp) {
+        queryParams.append('_ts', options.timestamp.toString());
+      }
+      
+      // Always request a reasonable limit if not specified
+      if (!options.limit) {
+        queryParams.append('limit', '50');
+      }
+      
+      console.log('[NotificationService] Fetching notifications with params:', queryParams.toString());
+      
       // Fetch notifications from backend with retry capability
       const responseData = await withRetry(
         () => apiClient.get<ApiNotificationResponse>(`/notifications?${queryParams.toString()}`),
         3, // 3 retries
         1000 // 1 second initial delay
       );
+      
+      // Log the actual response structure for debugging
+      console.log('[NotificationService] API response:', JSON.stringify(responseData));
       
       // Extract the notifications array from the response data
       let apiNotifications: ApiNotification[] | undefined;
@@ -226,10 +254,18 @@ const notificationService = {
         // API returns notifications array directly
         apiNotifications = responseData as ApiNotification[];
         debugLog('Response was direct array:', apiNotifications.length);
-      } else if (responseData?.success && responseData?.data?.notifications) {
-        // API returns {success: true, data: {notifications: []}}
-        apiNotifications = responseData.data.notifications;
-        debugLog('Extracted from success/data structure:', apiNotifications.length);
+      } else if (responseData?.success && responseData?.data) {
+        // API returns {success: true, data: []} OR {success: true, data: {notifications: []}}
+        if (Array.isArray(responseData.data)) {
+          apiNotifications = responseData.data;
+          debugLog('Extracted from success/data array structure:', apiNotifications.length);
+        } else if (responseData.data.notifications && Array.isArray(responseData.data.notifications)) {
+          apiNotifications = responseData.data.notifications;
+          debugLog('Extracted from success/data/notifications structure:', apiNotifications.length);
+        } else {
+          console.error('Data property exists but contains unexpected format:', responseData.data);
+          apiNotifications = [];
+        }
       } else {
         // No recognizable structure
         console.error('Error fetching notifications: Unrecognized response structure', responseData);
@@ -336,18 +372,18 @@ const notificationService = {
           false;
         
         return {
-        id: apiNotification.id.toString(),
-        message: apiNotification.message || '',
-        type: (apiNotification.type as any) || 'info',
-        duration: 0, // App notifications don't auto-dismiss
+          id: apiNotification.id.toString(),
+          message: apiNotification.message || '',
+          type: (apiNotification.type as any) || 'info',
+          duration: 0, // App notifications don't auto-dismiss
           timestamp: timestamp,
           isRead: isRead,
-        title: apiNotification.title || '',
-        category: 'app' // API notifications are always app notifications
+          title: apiNotification.title || '',
+          category: 'app' // API notifications are always app notifications
         };
       });
 
-      debugLog(`Transformed notifications: ${transformedNotifications.length}`);
+      console.log(`[NotificationService] Transformed ${transformedNotifications.length} notifications from API response`);
 
       // Merge with existing notifications in local storage (keeping most recent 100)
       const existingNotifications = getNotificationsFromLocalStorage();
@@ -454,6 +490,14 @@ const notificationService = {
   addNotification: async (notification: Notification): Promise<Notification> => {
     const now = Date.now();
     
+    // Ensure login notifications are properly categorized
+    if ((notification.title && notification.title.includes('Login')) ||
+        (notification.message && notification.message.includes('Welcome back'))) {
+      console.log('[NotificationService] Login notification detected, ensuring app category and unread status');
+      notification.category = 'app';
+      notification.isRead = false;
+    }
+    
     // Create a fingerprint for deduplication (ignoring category for specific messages)
     const isCommonAuthMessage = notification.message.startsWith('Welcome back') || notification.message === 'Profile updated successfully';
     const fingerprint = getNotificationFingerprint(notification, isCommonAuthMessage);
@@ -524,7 +568,7 @@ const notificationService = {
     if (!notifications.some(n => n.id === notification.id)) {
         const updatedNotifications = [...notifications, notification];
         saveNotificationsToLocalStorage(updatedNotifications);
-        // console.log('[Notification Added] Added:', notification.message); // Removed this line
+        console.log('[NotificationService] Added to local storage:', notification.id, notification.message, 'category:', notification.category, 'isRead:', notification.isRead);
     } else {
         // console.log('[Notification Skipped] Already exists by ID:', notification.message); // Removed this line
         // Optionally update the existing one if needed, but for now, just skip adding
@@ -699,7 +743,66 @@ const notificationService = {
       clearInterval(cleanupInterval);
       cleanupInterval = null;
     }
-  }
+  },
+
+  /**
+   * Sync notifications with local storage
+   * This replaces the current notifications with the provided ones
+   * @param notifications Array of notifications to sync
+   */
+  syncNotifications: (notifications: Notification[]): void => {
+    try {
+      console.log(`[NotificationService] Syncing ${notifications.length} notifications to local storage`);
+      
+      // Replace the local storage content with the provided notifications
+      saveNotificationsToLocalStorage(notifications);
+    } catch (error) {
+      console.error('Error syncing notifications to local storage:', error);
+    }
+  },
+
+  /**
+   * Clear all notifications from local storage (used on logout)
+   */
+  clearLocalStorage: (): void => {
+    try {
+      console.log('[NotificationService] Clearing all notifications from local storage');
+      localStorage.removeItem(NOTIFICATIONS_STORAGE_KEY);
+      localStorage.removeItem(FAILED_NOTIFICATIONS_KEY);
+      
+      // Reset the notification state
+      lastNotificationTimestamp = 0;
+      notificationCountMap.clear();
+      recentNotifications.clear();
+    } catch (error) {
+      console.error('Error clearing notifications from local storage:', error);
+    }
+  },
+
+  /**
+   * Get unread notification count from local storage
+   * @returns Number of unread notifications
+   */
+  getUnreadCountFromLocalStorage: (): number => {
+    const notifications = getNotificationsFromLocalStorage();
+    return notifications.filter(n => !n.isRead).length;
+  },
+
+  /**
+   * Get notifications from local storage
+   * @returns Array of notifications from local storage
+   */
+  getNotificationsFromLocalStorage: (): Notification[] => {
+    return getNotificationsFromLocalStorage();
+  },
+
+  /**
+   * Sync notifications to local storage
+   * @param notifications Notifications to sync
+   */
+  syncNotificationsToLocalStorage: (notifications: Notification[]): void => {
+    saveNotificationsToLocalStorage(notifications);
+  },
 };
 
 /**

@@ -1,12 +1,12 @@
 import apiClient from './apiClient';
 
-// Ticket type definition
+// Ticket type definition with consistent string IDs
 export interface Ticket {
   id: string;
   subject: string;
   description: string;
-  status: { id: number; name: string; color: string; isResolved?: boolean } | TicketStatus;
-  priority: TicketPriority | { id: number; name: string; color: string };
+  status: { id: string; name: string; color: string; isResolved?: boolean } | TicketStatus;
+  priority: TicketPriority | { id: string; name: string; color: string };
   requester?: { id: string; email: string; firstName: string; lastName: string };
   assignee?: { id: string; email: string; firstName: string; lastName: string };
   department?: { id: string; name: string };
@@ -20,12 +20,14 @@ export interface Ticket {
   aiSummary?: string;
   source?: string;
   isSpam?: boolean;
-  tags?: Array<{ id: number; name: string; color: string }>;
+  tags?: Array<{ id: string; name: string; color: string }>;
   commentCount?: number;
   attachments?: string[];
+  slaStatus?: string;
+  slaInfo?: any;
 }
 
-// Comment type definition
+// Comment type definition with consistent string IDs
 export interface TicketComment {
   id: string;
   ticketId: string;
@@ -34,6 +36,13 @@ export interface TicketComment {
   content: string;
   createdAt: string;
   isInternal: boolean;
+  user: {
+    id: string;
+    firstName: string;
+    lastName: string;
+    avatar?: string;
+    email: string;
+  };
 }
 
 // Ticket status enum
@@ -54,12 +63,12 @@ export enum TicketPriority {
   URGENT = 'urgent'
 }
 
-// Create ticket request
+// Create ticket request with consistent types
 export interface CreateTicketRequest {
   subject: string;
   description: string;
   requesterId: string;
-  priorityId?: number;
+  priorityId?: string;
   departmentId?: string;
   typeId?: string;
   customerEmail?: string;
@@ -102,15 +111,15 @@ class TicketService {
   public async createTicket(ticket: CreateTicketRequest): Promise<Ticket> {
     // Prepare data to send, ensuring priorityId is included if present
     const dataToSend: any = { ...ticket }; 
+    
     // Backend expects priorityId, remove the enum field if it exists
     if ('priority' in dataToSend) {
         delete dataToSend.priority;
     }
-    if (dataToSend.priorityId === undefined) {
-      // Backend requires priorityId, add a default if missing?
-      // Let's assume default medium priority ID is 1002 based on previous fixes
-      console.warn('PriorityId missing, defaulting to Medium (1002).');
-      dataToSend.priorityId = 1002; 
+    
+    // Ensure priorityId is a string if provided
+    if (dataToSend.priorityId && typeof dataToSend.priorityId === 'number') {
+      dataToSend.priorityId = String(dataToSend.priorityId);
     }
     
     // Stringify tags array if it exists for JSON field
@@ -164,7 +173,7 @@ class TicketService {
     subject: string,
     chatMessages: Array<{sender: string, text: string, timestamp: Date}>,
     requesterId: string,
-    priorityId?: number,
+    priorityId?: string,
     customerEmail?: string
   ): Promise<Ticket> {
     const description = chatMessages
@@ -175,7 +184,7 @@ class TicketService {
       subject,
       description,
       requesterId,
-      priorityId: priorityId || 1002,
+      priorityId,
       customerEmail
     };
     
@@ -186,7 +195,26 @@ class TicketService {
    * Update a ticket
    */
   public async updateTicket(id: string, ticketData: Partial<Ticket>): Promise<Ticket> {
-    return apiClient.put(`/tickets/${id}`, ticketData);
+    // Ensure all IDs are strings
+    const processedData = { ...ticketData };
+    
+    if (processedData.status && typeof processedData.status === 'object' && 'id' in processedData.status) {
+      processedData.status.id = String(processedData.status.id);
+    }
+    
+    if (processedData.priority && typeof processedData.priority === 'object' && 'id' in processedData.priority) {
+      processedData.priority.id = String(processedData.priority.id);
+    }
+    
+    if (processedData.department && typeof processedData.department === 'object' && 'id' in processedData.department) {
+      processedData.department.id = String(processedData.department.id);
+    }
+    
+    if (processedData.type && typeof processedData.type === 'object' && 'id' in processedData.type) {
+      processedData.type.id = String(processedData.type.id);
+    }
+    
+    return apiClient.put(`/tickets/${id}`, processedData);
   }
   
   /**

@@ -5,7 +5,6 @@ export interface GeneralSettings {
   companyName: string;
   supportEmail: string;
   maxFileSize: number;
-  allowGuestTickets: boolean;
   defaultTimeZone: string;
 }
 
@@ -31,7 +30,6 @@ export interface TicketSettings {
   autoCloseResolved: number;
   enableCustomerSatisfaction: boolean;
   requireCategory: boolean;
-  enableSLA: boolean;
   // SLA settings will be configured per priority and stored in the database
 }
 
@@ -74,6 +72,7 @@ export interface AdvancedSettings {
   // API settings
   apiEnabled: boolean;
   apiRateLimitPerHour: number;
+  apiRateLimitWindowMinutes: number;
   enableApiDocumentation: boolean;
   
   // Security settings

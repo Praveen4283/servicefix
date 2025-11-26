@@ -3,6 +3,7 @@ import { query } from '../config/database';
 import { AppError, asyncHandler } from '../utils/errorHandler';
 import { logger } from '../utils/logger';
 import authService from '../services/auth.service';
+import { createHash } from 'crypto';
 
 // Update the User interface to include all required properties
 export interface User {
@@ -23,6 +24,44 @@ declare global {
       user: User;
     }
   }
+}
+
+/**
+ * Generate a fingerprint for the request source
+ * @param req Request object
+ * @returns MD5 hash of IP and simplified user agent
+ */
+function generateRequestFingerprint(req: Request): string {
+  const ip = req.ip || req.socket.remoteAddress || '0.0.0.0';
+  // Extract browser and OS info without version numbers to be more resilient to updates
+  const userAgent = req.headers['user-agent'] || '';
+  
+  // Create a simplified fingerprint that's still useful for validation
+  // but resilient to minor changes in the user agent string
+  let simplifiedUserAgent = '';
+  
+  // Extract browser name
+  if (userAgent.includes('Chrome')) simplifiedUserAgent += 'Chrome_';
+  else if (userAgent.includes('Firefox')) simplifiedUserAgent += 'Firefox_';
+  else if (userAgent.includes('Safari') && !userAgent.includes('Chrome')) simplifiedUserAgent += 'Safari_';
+  else if (userAgent.includes('Edge')) simplifiedUserAgent += 'Edge_';
+  else if (userAgent.includes('Trident') || userAgent.includes('MSIE')) simplifiedUserAgent += 'IE_';
+  else simplifiedUserAgent += 'Other_';
+  
+  // Extract OS
+  if (userAgent.includes('Windows')) simplifiedUserAgent += 'Windows';
+  else if (userAgent.includes('Mac OS')) simplifiedUserAgent += 'MacOS';
+  else if (userAgent.includes('Linux')) simplifiedUserAgent += 'Linux';
+  else if (userAgent.includes('Android')) simplifiedUserAgent += 'Android';
+  else if (userAgent.includes('iOS') || userAgent.includes('iPhone') || userAgent.includes('iPad')) simplifiedUserAgent += 'iOS';
+  else simplifiedUserAgent += 'Other';
+  
+  // Create a hash of the IP and simplified user agent
+  const hash = createHash('md5')
+    .update(`${ip}|${simplifiedUserAgent}`)
+    .digest('hex');
+
+  return hash;
 }
 
 /**
@@ -61,7 +100,7 @@ export const authenticate = asyncHandler(async (
     const decoded = authService.verifyToken(token);
     logger.debug(`Authentication successful: Token verified from ${tokenSource} for user ID ${decoded.userId}`);
     
-    // Get user data
+    // Get user data with additional security information
     const userResult = await query(
       `SELECT id, email, first_name, last_name, role, 
       avatar_url, organization_id, designation

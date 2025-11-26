@@ -169,7 +169,36 @@ const TicketTimeline: React.FC<TicketTimelineProps> = ({ events }) => {
   
   // Get event title
   const getEventTitle = (event: TimelineEvent) => {
-    const userName = `${event.user.firstName} ${event.user.lastName}`;
+    // Add null check for user data
+    if (!event.user || (!event.user.firstName && !event.user.lastName)) {
+      // Fallback for missing user data
+      const userName = event.user?.id ? `User #${event.user.id}` : 'System';
+      
+      switch (event.type) {
+        case 'comment':
+          return `${userName} ${event.details.isInternal ? 'added an internal note' : 'commented'}`;
+        case 'status_change':
+          return `${userName} changed status`;
+        case 'assignment':
+          return event.details.assignee ? `${userName} assigned ticket` : `${userName} unassigned the ticket`;
+        case 'created':
+          return `${userName} created this ticket`;
+        case 'edited':
+          return `${userName} edited the ticket`;
+        case 'attachment':
+          return `${userName} added attachment`;
+        case 'due_date':
+          return event.details.newDate ? `${userName} set the due date` : `${userName} removed the due date`;
+        case 'priority_change':
+          return `${userName} changed priority`;
+        case 'category_change':
+          return `${userName} changed ${event.details.field}`;
+        default:
+          return `${userName} updated the ticket`;
+      }
+    }
+    
+    const userName = `${event.user.firstName || ''} ${event.user.lastName || ''}`.trim() || 'Unknown User';
     
     switch (event.type) {
       case 'comment':

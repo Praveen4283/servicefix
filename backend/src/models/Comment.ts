@@ -35,4 +35,28 @@ export class Comment {
 
   @UpdateDateColumn({ name: 'updated_at' })
   updatedAt!: Date;
+
+  // Helper method to convert to frontend format
+  toFrontendFormat(): any {
+    return {
+      id: String(this.id),
+      content: this.content,
+      isInternal: this.isInternal,
+      isSystem: this.isSystem,
+      createdAt: this.createdAt.toISOString(),
+      user: this.user ? {
+        id: String(this.user.id),
+        firstName: this.user.firstName || '',
+        lastName: this.user.lastName || '',
+        avatar: this.user.avatarUrl,
+        email: this.user.email
+      } : {
+        id: '0',
+        firstName: 'System',
+        lastName: '',
+        avatar: null,
+        email: 'system@example.com'
+      }
+    };
+  }
 } 

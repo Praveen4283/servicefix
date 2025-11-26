@@ -142,4 +142,64 @@ export class Ticket {
 
   @Column({ nullable: true, name: 'closed_at' })
   closedAt: Date;
+
+  // Helper method to convert to frontend format
+  toFrontendFormat(): any {
+    return {
+      id: String(this.id),
+      subject: this.subject,
+      description: this.description,
+      status: this.status ? {
+        id: String(this.status.id),
+        name: this.status.name,
+        color: this.status.color,
+        isDefault: this.status.isDefault,
+        isResolved: this.status.isResolved
+      } : null,
+      priority: this.priority ? {
+        id: String(this.priority.id),
+        name: this.priority.name,
+        color: this.priority.color,
+        slaHours: this.priority.slaHours
+      } : null,
+      department: this.department ? {
+        id: String(this.department.id),
+        name: this.department.name,
+        description: this.department.description
+      } : null,
+      type: this.type ? {
+        id: String(this.type.id),
+        name: this.type.name,
+        description: this.type.description
+      } : null,
+      requester: this.requester ? {
+        id: String(this.requester.id),
+        email: this.requester.email,
+        firstName: this.requester.firstName,
+        lastName: this.requester.lastName,
+        avatar: this.requester.avatarUrl
+      } : null,
+      assignee: this.assignee ? {
+        id: String(this.assignee.id),
+        email: this.assignee.email,
+        firstName: this.assignee.firstName,
+        lastName: this.assignee.lastName,
+        avatar: this.assignee.avatarUrl
+      } : null,
+      organization: this.organization ? {
+        id: String(this.organization.id),
+        name: this.organization.name
+      } : null,
+      createdAt: this.createdAt.toISOString(),
+      updatedAt: this.updatedAt.toISOString(),
+      dueDate: this.dueDate?.toISOString(),
+      resolvedAt: this.resolvedAt?.toISOString(),
+      closedAt: this.closedAt?.toISOString(),
+      slaStatus: this.slaStatus,
+      sentimentScore: this.sentimentScore,
+      aiSummary: this.aiSummary,
+      source: this.source,
+      isSpam: this.isSpam
+    };
+  }
 } 
