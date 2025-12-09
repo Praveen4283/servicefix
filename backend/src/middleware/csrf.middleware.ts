@@ -9,24 +9,26 @@ const CSRF_HEADER_NAME = 'x-csrf-token';
 const CSRF_TOKEN_EXPIRY = 24 * 60 * 60 * 1000; // 24 hours
 
 // Routes that should skip CSRF protection (using exact matching for security)
+// Note: These paths are relative to /api/ since that's where the CSRF middleware is mounted
 const csrfSkippedPaths: Set<string> = new Set([
-  '/api/v1/auth/login',
-  '/api/v1/auth/register',
-  '/api/v1/auth/forgot-password',
-  '/api/v1/auth/reset-password',
-  '/api/v1/auth/refresh-token',
-  // Legacy API support
-  '/api/auth/login',
-  '/api/auth/register',
-  '/api/auth/forgot-password',
-  '/api/auth/reset-password',
-  '/api/auth/refresh-token'
+  '/v1/auth/login',
+  '/v1/auth/register',
+  '/v1/auth/forgot-password',
+  '/v1/auth/reset-password',
+  '/v1/auth/refresh-token',
+  // Legacy API support (default routes without /v1)
+  '/auth/login',
+  '/auth/register',
+  '/auth/forgot-password',
+  '/auth/reset-password',
+  '/auth/refresh-token'
 ]);
 
 // Routes that should allow post-login leniency (exact paths only for security)
+// Note: These paths are relative to /api/ since that's where the CSRF middleware is mounted
 const csrfLenientPostLoginPaths: Set<string> = new Set([
-  '/api/v1/notifications',
-  '/api/notifications',
+  '/v1/notifications',
+  '/notifications',
   '/socket.io/connect'
 ]);
 
