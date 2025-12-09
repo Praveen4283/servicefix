@@ -1,12 +1,12 @@
-import React from 'react';
-import { 
-  TextField, 
-  TextFieldProps, 
-  FormControl, 
-  FormHelperText, 
-  InputLabel, 
-  Select, 
-  MenuItem, 
+
+import {
+  TextField,
+  TextFieldProps,
+  FormControl,
+  FormHelperText,
+  InputLabel,
+  Select,
+  MenuItem,
   SelectProps,
   FormControlLabel,
   Checkbox,
@@ -83,8 +83,8 @@ interface RadioFieldProps extends BaseFieldProps {
 
 // Helper function to get error message
 const getErrorMessage = (
-  name: string, 
-  touched?: FormikTouched<any>, 
+  name: string,
+  touched?: FormikTouched<any>,
   errors?: FormikErrors<any>
 ): string => {
   if (!touched || !errors || !touched[name] || !errors[name]) {
@@ -134,10 +134,10 @@ export const FormSelectField: React.FC<SelectFieldProps> = ({
   const errorMessage = getErrorMessage(name, touched, errors);
 
   return (
-    <FormControl 
-      error={hasError} 
-      fullWidth={fullWidth} 
-      variant={variant} 
+    <FormControl
+      error={hasError}
+      fullWidth={fullWidth}
+      variant={variant}
       required={required}
       margin={props.margin}
     >

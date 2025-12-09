@@ -4,7 +4,6 @@
   "description": "Frontend for ServiceFix - A comprehensive help desk & support ticket system",
   "private": true,
   "dependencies": {
-    "@ant-design/icons": "^6.0.0",
     "@emotion/react": "^11.14.0",
     "@emotion/styled": "^11.14.0",
     "@mui/icons-material": "^5.15.10",
@@ -13,7 +12,6 @@
     "@mui/x-data-grid": "^6.19.2",
     "@mui/x-date-pickers": "^6.19.2",
     "@types/uuid": "^9.0.8",
-    "antd": "^5.25.1",
     "axios": "^1.9.0",
     "date-fns": "^2.30.0",
     "date-fns-tz": "^2.0.1",

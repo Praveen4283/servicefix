@@ -11,18 +11,20 @@
 
 import axios, { AxiosError, AxiosInstance, AxiosRequestConfig, AxiosResponse } from 'axios';
 import { User } from '../context/AuthContext';
-import { 
-  UserDTO, 
-  mapUserDTOToUser, 
-  mapUserToDTO, 
+import {
+  UserDTO,
+  mapUserDTOToUser,
+  mapUserToDTO,
   // ProfileUpdateDTO, - Commented out unused import
   mapProfileUpdateToDTO,
   createDataURLFromFile
 } from '../models/UserDTO';
 import { withRetry } from '../utils/apiUtils';
 // import { createRetryableFunction } from '../utils/apiUtils'; - Commented out unused import
-// import { JsonObject, MetadataObject } from '../types/common'; - Commented out unused imports
 import { ProfileUpdateData } from '../models/UserDTO';
+import { logger } from '../utils/frontendLogger';
+import type { ApiUser, ApiResponse as CommonApiResponse, ApiSuccessResponse, ApiErrorResponse } from '../types/common';
+import { getCookie } from '../utils/cookieUtils';
 
 // Extend AxiosRequestConfig to allow custom properties
 declare module 'axios' {
@@ -37,25 +39,25 @@ declare module 'axios' {
 interface RefreshTokenResponse {
   token: string;
   refreshToken?: string;
-  user?: any;
+  user?: ApiUser;
   csrfToken?: string;
   status?: string;
-  data?: any;
+  data?: unknown;
 }
 
-// For API responses
-interface ApiResponse<T = any> {
+// For API responses (use Common types where possible)
+interface ApiResponse<T = unknown> {
   status: string;
   data?: T;
   message?: string;
   code?: string;
-  errors?: any[];
+  errors?: Array<{ field?: string; message: string; code?: string }>;
 }
 
 // For error handling
 interface ApiError {
   message: string;
-  errors?: any;
+  errors?: Array<{ field?: string; message: string; code?: string }> | Record<string, string[]>;
   status: number;
   code?: string;
 }
@@ -72,8 +74,8 @@ const createErrorResponse = (status: number, message: string): AxiosError => {
       statusText: status === 403 ? 'Forbidden' : 'Unauthorized',
       headers: {},
       config: {
-        headers: {} as any
-      } as any,
+        headers: {} as Record<string, unknown>
+      } as AxiosRequestConfig,
       data: { message, code: status === 403 ? 'CSRF_ERROR' : 'AUTH_ERROR' }
     } as AxiosResponse
   } as AxiosError;
@@ -137,16 +139,22 @@ class ApiClient {
 
   constructor() {
     // Use environment variable for the API URL to make it configurable for different environments
-    // The baseURL already includes /api in the environment variable
-    this.baseURL = process.env.REACT_APP_API_URL || 'http://localhost:5000/api';
-    
+    const envApiUrl = process.env.REACT_APP_API_URL || 'http://localhost:5000';
+
+    // Ensure baseURL ends with /api
+    // This fixes the issue where the env var is just the host (e.g. http://localhost:5000)
+    // but the API client expects the full path including /api
+    this.baseURL = envApiUrl.endsWith('/api')
+      ? envApiUrl
+      : `${envApiUrl}/api`;
+
     // Add debug for the base URL
-    console.log(`[API Client] Using base URL: ${this.baseURL}`);
-    
+    logger.debug(`Using base URL: ${this.baseURL}`);
+
     // Retrieve tokens from localStorage
     this.authToken = localStorage.getItem('authToken');
     this.refreshToken = localStorage.getItem('refreshToken');
-    
+
     // Create axios instance
     this.client = axios.create({
       baseURL: this.baseURL,
@@ -158,51 +166,61 @@ class ApiClient {
     this.client.interceptors.request.use(
       async (config) => {
         // Log the request URL for debugging
-        console.log(`[API Client] Request URL: ${config.url}`);
-        
+        logger.api.request(config.method?.toUpperCase() || 'GET', config.url || 'unknown');
+
         // Skip CSRF token for login, logout, and register
         const authEndpoints = ['/auth/login', '/auth/logout', '/auth/register', '/auth/forgot-password', '/auth/reset-password'];
         const isAuthEndpoint = authEndpoints.some(endpoint => config.url?.includes(endpoint));
-        
+
         if (isAuthEndpoint) {
-          console.log(`[API Client] Skipping CSRF token for auth endpoint: ${config.url}`);
+          logger.debug(`Skipping CSRF token for auth endpoint: ${config.url}`);
           return config;
         }
-        
+
         // Add Authorization header if we have an auth token
         if (this.authToken && config.headers) {
           config.headers['Authorization'] = `Bearer ${this.authToken}`;
         }
-        
+
         // Skip CSRF token for GET requests
         if (config.method === 'get') {
           return config;
         }
-        
+
         // Only add CSRF token for non-GET methods
         if (config.method && ['post', 'put', 'patch', 'delete'].includes(config.method)) {
           try {
-            // Check if we have a valid token already
-            const needsNewToken = !this.csrfToken || (Date.now() - this.lastCsrfFetchTime > this.csrfTokenCacheTime);
-            
-            if (needsNewToken) {
-              await this.fetchCsrfToken();
+            // First, try to get CSRF token from cookie (primary source)
+            const cookieCsrfToken = getCookie('_csrf');
+
+            if (cookieCsrfToken) {
+              // Use token from cookie
+              this.csrfToken = cookieCsrfToken;
+              logger.debug(`Using CSRF token from cookie for ${config.url}`);
             } else {
-              console.log(`[API Client] Using cached CSRF token (age: ${Math.floor((Date.now() - this.lastCsrfFetchTime)/1000)}s)`);
+              // Fall back to fetching from API if cookie doesn't exist
+              logger.debug('No CSRF token in cookie, fetching from API');
+              const needsNewToken = !this.csrfToken || (Date.now() - this.lastCsrfFetchTime > this.csrfTokenCacheTime);
+
+              if (needsNewToken) {
+                await this.fetchCsrfToken();
+              } else {
+                logger.debug(`Using cached CSRF token (age: ${Math.floor((Date.now() - this.lastCsrfFetchTime) / 1000)}s)`);
+              }
             }
 
             // Add CSRF token to header if available
             if (this.csrfToken && config.headers) {
-              console.log(`[API Client] Adding CSRF token to ${config.url}`);
+              logger.debug(`Adding CSRF token to ${config.url}`);
               config.headers['x-csrf-token'] = this.csrfToken;
             } else {
-              console.warn(`[API Client] No CSRF token available for ${config.url}`);
+              logger.warn(`No CSRF token available for ${config.url}`);
             }
           } catch (error) {
-            console.error('[API Client] Failed to fetch CSRF token:', error);
+            logger.error('Failed to get CSRF token:', error);
           }
         }
-        
+
         return config;
       },
       (error) => Promise.reject(error)
@@ -216,68 +234,68 @@ class ApiClient {
       (response) => response.data,
       async (error) => {
         const originalRequest = error.config;
-        
+
         // Handle CSRF token errors
-        if (error.response?.status === 403 && 
-            (error.response?.data?.code === 'CSRF_ERROR' || 
-             error.response?.data?.message?.includes('CSRF'))) {
-          console.log('[API Client] CSRF token error, fetching new token and retrying');
-          
+        if (error.response?.status === 403 &&
+          (error.response?.data?.code === 'CSRF_ERROR' ||
+            error.response?.data?.message?.includes('CSRF'))) {
+          logger.debug('CSRF token error, fetching new token and retrying');
+
           if (!originalRequest._csrfRetry) {
             originalRequest._csrfRetry = true;
-            
+
             // Force refresh the CSRF token
             this.csrfToken = null;
             this.lastCsrfFetchTime = 0;
             localStorage.removeItem('csrfToken');
             localStorage.removeItem('csrfTokenExpiry');
-            
+
             try {
               // Wait a bit before retrying to avoid race conditions
               await new Promise(resolve => setTimeout(resolve, 300));
               const newCsrfToken = await this.fetchCsrfToken();
-              
+
               // Apply the new CSRF token to the original request
               if (newCsrfToken && originalRequest.headers) {
                 originalRequest.headers['x-csrf-token'] = newCsrfToken;
                 return this.client(originalRequest);
               }
             } catch (csrfError) {
-              console.error('[API Client] Failed to refresh CSRF token:', csrfError);
+              logger.error('[API Client] Failed to refresh CSRF token:', csrfError);
               return Promise.reject(this.formatError(
                 createErrorResponse(403, 'CSRF token refresh failed')
               ));
             }
           }
         }
-        
+
         // Skip token refresh for public routes to prevent unnecessary auth calls
         if (this.isPublicRoute() && error.response?.status === 401) {
-          console.log('[API Client] 401 on public route, skipping token refresh');
+          logger.debug('401 on public route, skipping token refresh');
           return Promise.reject(error);
         }
 
         // Handle expired tokens with a single refresh attempt across multiple requests
         if (error.response?.status === 401 && !originalRequest._retry) {
-          console.log('[API Client] 401 Unauthorized - attempting token refresh');
+          logger.debug('401 Unauthorized - attempting token refresh');
           originalRequest._retry = true;
-          
+
           // Debounce token refresh - if a refresh is already in progress, use that promise
           // instead of starting a new refresh
           if (isRefreshingToken) {
-            console.log('[API Client] Token refresh already in progress, waiting for completion');
-            
+            logger.debug('Token refresh already in progress, waiting for completion');
+
             if (!refreshTokenPromise) {
               return Promise.reject(new Error('Token refresh inconsistent state'));
             }
-            
+
             try {
               // Wait for the existing refresh to complete
               await refreshTokenPromise;
-              
+
               // Get fresh CSRF token after successful token refresh
               await this.fetchCsrfToken();
-              
+
               // Update the headers with the new tokens
               if (this.authToken && originalRequest.headers) {
                 originalRequest.headers['Authorization'] = `Bearer ${this.authToken}`;
@@ -285,38 +303,38 @@ class ApiClient {
               if (this.csrfToken && originalRequest.headers) {
                 originalRequest.headers['x-csrf-token'] = this.csrfToken;
               }
-              
+
               // Retry the request with new tokens
               return this.client(originalRequest);
             } catch (error) {
               return Promise.reject(error);
             }
           }
-          
+
           // Set flag and create a new refresh promise
           isRefreshingToken = true;
-          
+
           // Store the promise for other requests to use
           refreshTokenPromise = (async () => {
             try {
               // Check if we have a valid refresh token
               const refreshToken = localStorage.getItem('refreshToken');
-              
+
               if (!refreshToken) {
-                console.warn('[API Client] No refresh token available');
+                logger.warn('[API Client] No refresh token available');
                 this.handleAuthError();
                 throw new Error('No refresh token available. Please log in again.');
               }
-              
-              console.log('[API Client] Attempting to refresh token');
-              
+
+              logger.debug('Attempting to refresh token');
+
               // Call token refresh endpoint with proper error handling
-              const response = await this.client.post('/auth/refresh-token', { 
-                refreshToken 
+              const response = await this.client.post('/auth/refresh-token', {
+                refreshToken
               }, {
                 _skipAuthRetry: true
               });
-              
+
               // Safely extract the token data regardless of response structure
               let responseData: RefreshTokenResponse;
 
@@ -327,38 +345,38 @@ class ApiClient {
                 } else if (response.data && typeof response.data === 'object' && 'token' in response.data) {
                   responseData = response.data as unknown as RefreshTokenResponse;
                 } else {
-                  console.error('[API Client] Unexpected response format:', response);
+                  logger.error('[API Client] Unexpected response format:', response);
                   throw new Error('Invalid response format from refresh token endpoint');
                 }
               } else {
                 throw new Error('Invalid response from refresh token endpoint');
               }
-              
+
               if (!responseData || !responseData.token) {
                 throw new Error('Invalid response from refresh token endpoint');
               }
-              
-              console.log('[API Client] Token refreshed successfully');
-              
+
+              logger.debug('Token refreshed successfully');
+
               // Update stored tokens
               this.authToken = responseData.token;
               localStorage.setItem('authToken', responseData.token);
-              
+
               // Update refresh token if provided
               if (responseData.refreshToken) {
                 this.refreshToken = responseData.refreshToken;
                 localStorage.setItem('refreshToken', responseData.refreshToken);
               }
-              
+
               // Update the authorization header
               this.client.defaults.headers.common['Authorization'] = `Bearer ${this.authToken}`;
-              
+
               // Dispatch event to notify that session was refreshed
               window.dispatchEvent(new Event('auth:session-refreshed'));
-              
+
               return responseData;
             } catch (error) {
-              console.error('[API Client] Token refresh failed:', error);
+              logger.error('[API Client] Token refresh failed:', error);
               this.handleAuthError();
               throw new Error('Session expired. Please log in again.');
             } finally {
@@ -371,14 +389,14 @@ class ApiClient {
               }, 100);
             }
           })();
-          
+
           try {
             // Wait for the refresh to complete
             await refreshTokenPromise;
-            
+
             // Get a fresh CSRF token after successful token refresh
             await this.fetchCsrfToken();
-            
+
             // Update the headers with the new tokens
             if (this.authToken && originalRequest.headers) {
               originalRequest.headers['Authorization'] = `Bearer ${this.authToken}`;
@@ -386,23 +404,23 @@ class ApiClient {
             if (this.csrfToken && originalRequest.headers) {
               originalRequest.headers['x-csrf-token'] = this.csrfToken;
             }
-            
+
             // Retry the request with new tokens
             return this.client(originalRequest);
           } catch (error) {
             return Promise.reject(error);
           }
         }
-        
+
         // For all other errors, use the formatError helper
         return Promise.reject(this.formatError(error));
       }
     );
-    
+
     // Initialize the client (fetch CSRF token)
     this.initialize();
   }
-  
+
   /**
    * Initialize the API client by prefetching the CSRF token
    * This should be called when the app starts to ensure we have a valid token
@@ -411,33 +429,33 @@ class ApiClient {
     if (this.isInitialized) {
       return;
     }
-    
+
     try {
-      console.log('[API Client] Initializing API client...');
-      
+      logger.info('Initializing API client...');
+
       // Skip initialization for public routes
       if (this.isPublicRoute()) {
-        console.log('[API Client] On public route, skipping initial CSRF token fetch');
+        logger.debug('On public route, skipping initial CSRF token fetch');
         this.isInitialized = true;
         return;
       }
-      
+
       // Fetch CSRF token
       await this.fetchCsrfToken();
-      
+
       // Try to validate the authentication session
       try {
         await this.get('/auth/validate');
-        console.log('[API Client] Authentication session validated during initialization');
+        logger.debug('Authentication session validated during initialization');
       } catch (validationError) {
-        console.log('[API Client] No active authentication session during initialization');
+        logger.debug('No active authentication session during initialization');
         // This is normal on initial load, not an error condition
       }
-      
+
       this.isInitialized = true;
-      console.log('[API Client] API client initialized successfully');
+      logger.info('API client initialized successfully');
     } catch (error) {
-      console.error('[API Client] Error initializing API client:', error);
+      logger.error('[API Client] Error initializing API client:', error);
       // We still consider the client initialized even if there was an error
       this.isInitialized = true;
     }
@@ -450,36 +468,36 @@ class ApiClient {
   async fetchCsrfToken(): Promise<string> {
     // Implement debouncing for CSRF token requests to prevent multiple simultaneous requests
     if (this.fetchingCsrfToken) {
-      console.log('[API Client] CSRF token fetch already in progress, waiting for completion');
+      logger.debug('CSRF token fetch already in progress, waiting for completion');
       try {
         return await this.fetchingCsrfToken;
       } catch (error) {
-        console.error('[API Client] Error while waiting for existing CSRF token fetch:', error);
+        logger.error('[API Client] Error while waiting for existing CSRF token fetch:', error);
         // Fall through to fresh fetch below
       }
     }
-    
+
     // Check if we have a cached token that's still valid
     const cachedToken = localStorage.getItem('csrfToken');
     const cachedTokenExpiryStr = localStorage.getItem('csrfTokenExpiry');
     const cachedTokenExpiry = cachedTokenExpiryStr ? parseInt(cachedTokenExpiryStr, 10) : 0;
-    
+
     // If token is cached and not expired (with 10% time buffer), return it
     if (cachedToken && Date.now() < cachedTokenExpiry - this.csrfTokenCacheTime * 0.1) {
-      console.log('[API Client] Using cached CSRF token');
+      logger.debug('Using cached CSRF token');
       this.csrfToken = cachedToken;
       return Promise.resolve(cachedToken);
     }
-    
+
     // If current time is too close to last fetch time, debounce
     if (Date.now() - this.lastCsrfFetchTime < 1000) {
-      console.log('[API Client] Debouncing CSRF token request');
-      
+      logger.debug('Debouncing CSRF token request');
+
       // Clear any existing timer
       if (this.csrfDebounceTimer) {
         clearTimeout(this.csrfDebounceTimer);
       }
-      
+
       // Set up a new fetch with delay
       return new Promise<string>((resolve) => {
         this.csrfDebounceTimer = setTimeout(() => {
@@ -487,10 +505,10 @@ class ApiClient {
         }, 1000);
       });
     }
-    
-    console.log('[API Client] Fetching new CSRF token');
+
+    logger.debug('Fetching new CSRF token');
     this.lastCsrfFetchTime = Date.now();
-    
+
     // Create a new fetch promise that we'll store for deduplication
     this.fetchingCsrfToken = (async (): Promise<string> => {
       try {
@@ -498,17 +516,17 @@ class ApiClient {
         const response = await this.client.get('/auth/csrf-token', {
           withCredentials: true
         });
-        
+
         // Type assertion to allow property access
         const responseObj = response as any;
-        
+
         // Enhanced response parsing with multiple fallback paths
         let csrfToken: string | null = null;
-        
+
         // Try to extract token from different possible response formats
         if (typeof responseObj.csrfToken === 'string') {
           csrfToken = responseObj.csrfToken;
-        } 
+        }
         // Try data property next
         else if (responseObj.data && typeof responseObj.data === 'object') {
           const dataObj = responseObj.data;
@@ -519,34 +537,31 @@ class ApiClient {
           }
         }
         // Try status/data pattern
-        else if (responseObj.status && responseObj.status === 'success' && responseObj.data && 
-                typeof responseObj.data === 'object' && typeof responseObj.data.csrfToken === 'string') {
+        else if (responseObj.status && responseObj.status === 'success' && responseObj.data &&
+          typeof responseObj.data === 'object' && typeof responseObj.data.csrfToken === 'string') {
           csrfToken = responseObj.data.csrfToken;
         }
-        
-        console.log(`[API Client] CSRF token extraction result: ${csrfToken ? 'found' : 'not found'}`);
-        
+
+        logger.debug(`CSRF token extraction result: ${csrfToken ? 'found' : 'not found'}`);
+
         if (!csrfToken) {
           throw new Error('No CSRF token in response');
         }
-        
-        // Ensure consistent token format and length (64 hex chars)
+
+        // Validate token format (should be 64 hex characters from 32 random bytes)
         if (!/^[a-f0-9]{64}$/i.test(csrfToken)) {
-          console.warn(`[API Client] CSRF token format invalid, regenerating`);
-          // Generate a valid token format if the server didn't provide one
-          csrfToken = Array.from(crypto.getRandomValues(new Uint8Array(32)))
-            .map(b => b.toString(16).padStart(2, '0'))
-            .join('');
+          logger.error(`[API Client] CSRF token has invalid format: ${csrfToken.substring(0, 10)}... (length: ${csrfToken.length})`);
+          throw new Error('Invalid CSRF token format received from server');
         }
-        
+
         // Update and store the token
         this.csrfToken = csrfToken;
         localStorage.setItem('csrfToken', csrfToken);
         localStorage.setItem('csrfTokenExpiry', (Date.now() + this.csrfTokenCacheTime).toString());
-        
+
         return csrfToken;
       } catch (error) {
-        console.error('[API Client] Error extracting CSRF token:', error);
+        logger.error('[API Client] Error extracting CSRF token:', error);
         throw error;
       } finally {
         // Clear the promise after completion
@@ -555,7 +570,7 @@ class ApiClient {
         }, 100);
       }
     })();
-    
+
     return this.fetchingCsrfToken;
   }
 
@@ -567,7 +582,7 @@ class ApiClient {
   // Handle error responses
   private handleError = (error: AxiosError<ApiResponse>): Promise<any> => {
     const { response, request, config } = error;
-    
+
     let apiError: ApiError = {
       message: 'An unexpected error occurred. Please try again later.',
       status: 500,
@@ -592,10 +607,10 @@ class ApiClient {
           // Attempt to refresh the token or log out
           this.handleAuthError();
         }
-      } 
+      }
       // Handle CSRF errors
       else if (response.status === 403 && response.data?.code === 'CSRF_ERROR') {
-        console.log('[API Client] CSRF token expired, fetching new token and retrying request');
+        logger.debug('CSRF token expired, fetching new token and retrying request');
         // Fetch a new CSRF token and retry the request once
         return this.fetchCsrfToken().then(() => {
           if (!config) return Promise.reject(apiError);
@@ -623,24 +638,24 @@ class ApiClient {
     try {
       // Skip auth error handling for public routes
       if (this.isPublicRoute()) {
-        console.log('[API Client] On public route, skipping auth error handling');
+        logger.debug('On public route, skipping auth error handling');
         return;
       }
-      
-      console.log('[API Client] Handling auth error');
-      
+
+      logger.debug('Handling auth error');
+
       // Call the auth/logout endpoint to handle server-side cleanup
       this.post('/auth/logout', {})
         .then(() => {
-          console.log('[API Client] Logged out successfully');
+          logger.info('Logged out successfully');
           this.logout();
         })
         .catch(error => {
-          console.error('[API Client] Error during logout:', error);
+          logger.error('[API Client] Error during logout:', error);
           this.logout();
         });
     } catch (error) {
-      console.error('[API Client] Error in handleAuthError:', error);
+      logger.error('[API Client] Error in handleAuthError:', error);
       this.logout();
     }
   }
@@ -652,11 +667,11 @@ class ApiClient {
     this.refreshToken = null;
     localStorage.removeItem('authToken');
     localStorage.removeItem('refreshToken');
-    
+
     // Dispatch a logout event that AuthContext will listen for
     const logoutEvent = new CustomEvent('auth:logout');
     window.dispatchEvent(logoutEvent);
-    
+
     // Redirect to login page
     window.location.href = '/login';
   }
@@ -666,14 +681,14 @@ class ApiClient {
     const headers: Record<string, string> = {
       'Content-Type': 'application/json'
     };
-    
+
     // No need to add Authorization header as the JWT token is now sent in HttpOnly cookies
-    
+
     // Add CSRF token if available
     if (this.csrfToken) {
       headers['x-csrf-token'] = this.csrfToken;
     }
-    
+
     return headers;
   }
 
@@ -692,11 +707,11 @@ class ApiClient {
     params?: Record<string, any>,
     config?: AxiosRequestConfig
   ): Promise<T> {
-    console.log(`[API Client] _get: Requesting ${url}`, { params, config });
+    logger.api.request('GET', url);
     return this.client
       .get<T>(url, { ...config, params }) // Axios .get will resolve with T due to interceptor
       .then((responseData) => { // responseData here IS the actual server payload of type T
-        console.log(`[API Client] _get: Received data payload for ${url}:`, responseData);
+        logger.api.response('GET', url, 200);
 
         // Now, all logic should operate on responseData directly.
         // The previous complex conditional logic was trying to re-parse what was already the direct data.
@@ -705,49 +720,49 @@ class ApiClient {
         if (url.includes('/users') && !url.includes('/stats')) {
           if (url.includes('/roles/agent')) {
             // Special case for /users/roles/agent endpoint
-            console.log(`[API Client] _get: Agent roles endpoint at ${url}. Returning data as is.`);
+            logger.debug(`Agent roles endpoint at ${url}. Returning data as is.`);
             return responseData as T;
           } else if (responseData && typeof responseData === 'object' && 'users' in responseData && Array.isArray((responseData as any).users)) {
-            console.log(`[API Client] _get: Matched /users structure for ${url}. Returning data as is.`);
+            logger.debug(`Matched /users structure for ${url}. Returning data as is.`);
           } else if (url.match(/\/users\/\d+$/) && responseData && typeof responseData === 'object') {
             // This is a single user endpoint (e.g., /users/1001), just return the data as is
-            console.log(`[API Client] _get: Single user endpoint for ${url}. Returning data as is.`);
+            logger.debug(`Single user endpoint for ${url}. Returning data as is.`);
             return responseData as T;
           } else {
-            console.warn(`[API Client] _get: /users at ${url} did NOT match expected structure. Data:`, responseData);
+            logger.warn(`[API Client] _get: /users at ${url} did NOT match expected structure. Data:`, responseData);
           }
           // Fallthrough to generic or error if structure is wrong for /users
         }
         // Specific handling for /users/stats
         else if (url.includes('/users/stats')) {
-          console.log(`[API Client] _get: Processing /users/stats for ${url}. Data:`, responseData);
+          logger.debug(`Processing /users/stats for ${url}`, responseData);
           if (responseData && typeof responseData === 'object') {
             // If stats are wrapped in a 'data' property by the backend for this specific endpoint
             if ('data' in responseData && typeof (responseData as any).data === 'object' && Object.keys((responseData as any).data).length > 0) {
-              console.log(`[API Client] _get: /users/stats has 'data' property. Returning .data`);
+              logger.debug('/users/stats has data property. Returning .data');
               return (responseData as any).data as T;
             }
             // Otherwise, assume responseData is the stats object directly
-            console.log(`[API Client] _get: /users/stats does not have 'data' property or it's empty. Returning responseData as is.`);
+            logger.debug('/users/stats does not have data property or empty. Returning responseData as is.');
             return responseData as T;
           }
         }
 
         // Generic handling for other endpoints that might have a {status: 'success', data: X} structure
         if (responseData && typeof responseData === 'object' && 'status' in responseData && (responseData as any).status === 'success' && 'data' in responseData) {
-          console.log(`[API Client] _get: Standard success/data structure for ${url}. Returning .data`);
+          logger.info(`Standard success/data structure for ${url}. Returning .data`);
           return (responseData as any).data as T;
         }
-        
+
         // If no specific handling matched and it's not the standard {status:'success', data: ...} structure,
         // assume responseData is the direct data of type T. This is the most common case due to the interceptor.
-        console.log(`[API Client] _get: No specific/standard structure matched for ${url}. Returning responseData as is.`);
+        logger.debug(`No specific/standard structure matched for ${url}. Returning responseData as is.`);
         return responseData as T;
       })
       .catch(error => {
-        console.error(`[API Client] _get: Request Failed for ${url}:`, error);
+        logger.error(`[API Client] _get: Request Failed for ${url}:`, error);
         // Ensure the promise is rejected with the error to be caught by withRetry or the caller
-        throw error; 
+        throw error;
       });
   }
 
@@ -758,48 +773,47 @@ class ApiClient {
     config?: AxiosRequestConfig
   ): Promise<T> {
     // Additional check for post-login notification requests
-    const isPostLoginNotification = url.includes('/notifications') && 
-      // @ts-ignore - Accessing custom property on window
+    const isPostLoginNotification = url.includes('/notifications') &&
       window.__freshLogin === true;
-    
+
     const postWithToken = async (): Promise<T> => {
       // For post-login notifications, always fetch a fresh token first
       if (isPostLoginNotification) {
-        console.log('[API Client] Post-login notification detected, fetching fresh token');
+        logger.debug('Post-login notification detected, fetching fresh token');
         await this.fetchCsrfToken();
         // Add a small extra delay for cookie propagation
         await new Promise(resolve => setTimeout(resolve, 100));
       }
-      
+
       return this.client
         .post<ApiResponse<T> | T>(url, data, config)
         .then((response) => {
           // Debug the response structure
-          console.log(`[API Client] POST Response for ${url}:`, response);
-          
+          logger.api.response('POST', url, 200);
+
           // For auth endpoints, just return the whole response without further processing
           if (url.includes('/auth/')) {
-            console.log(`[API Client] Returning auth response for ${url}:`, response);
+            logger.debug(`Returning auth response for ${url}`, response);
             return response as unknown as T;
           }
-          
+
           // Extract and return data
           const responseData = response?.data;
-          
+
           if (!responseData) {
             return {} as T;
           }
-          
+
           // Handle standard API response format
           if (typeof responseData === 'object' && 'data' in responseData && responseData.status === 'success') {
             return responseData.data as T;
           }
-          
+
           // If not in standard format, return as is
           return responseData as T;
         });
     };
-    
+
     return postWithToken();
   }
 
@@ -897,15 +911,15 @@ class ApiClient {
   public getUser(userId: string): Promise<User> {
     return this.get<any>(`/users/${userId}`)
       .then(response => {
-        console.log('[API Client] getUser raw response:', response);
+        logger.debug('getUser raw response:', response);
         // Use normalizeUserResponse to handle potential inconsistencies
-        const userDTO = this.normalizeUserResponse(response); 
+        const userDTO = this.normalizeUserResponse(response);
         const user = mapUserDTOToUser(userDTO);
-        console.log('[API Client] getUser transformed user:', user);
+        logger.debug('getUser transformed user:', user);
         return user;
       })
       .catch(error => {
-        console.error('[API Client] getUser error:', error);
+        logger.error('[API Client] getUser error:', error);
         throw error;
       });
   }
@@ -929,15 +943,15 @@ class ApiClient {
    * @returns Promise resolving to the updated User object
    */
   public async updateUserProfile(userId: string, profileData: ProfileUpdateData): Promise<User> {
-    console.log('[ApiClient] updateUserProfile - Received profile data:', JSON.stringify(profileData));
+    logger.debug('updateUserProfile - Received profile data:', JSON.stringify(profileData));
     const profileDTO = mapProfileUpdateToDTO(profileData); // contains { ..., avatar: File | null | undefined }
-    console.log('[ApiClient] updateUserProfile - After mapping to DTO:', JSON.stringify({...profileDTO, avatar: profileDTO.avatar ? 'File object' : profileDTO.avatar}));
+    logger.debug('updateUserProfile - After mapping to DTO:', JSON.stringify({ ...profileDTO, avatar: profileDTO.avatar ? 'File object' : profileDTO.avatar }));
 
     const avatarFile = profileDTO.avatar; // File | null | undefined
     delete profileDTO.avatar; // remove dto.avatar
 
     const currentAuthUser = JSON.parse(localStorage.getItem('user') || '{}') as User;
-    console.log('[ApiClient] updateUserProfile - Current user from localStorage:', JSON.stringify({
+    logger.debug('[ApiClient] updateUserProfile - Current user from localStorage:', JSON.stringify({
       ...currentAuthUser,
       avatarUrl: currentAuthUser.avatarUrl ? 'Avatar URL exists' : 'No avatar URL'
     }));
@@ -951,7 +965,7 @@ class ApiClient {
           quality: 0.9
         });
         const dataUrl = await createDataURLFromFile(compressedImage);
-        
+
         if (dataUrl.length > 2 * 1024 * 1024) {
           profileDTO.avatar_url = currentAuthUser.avatarUrl; // Keep existing avatar
         } else {
@@ -970,14 +984,14 @@ class ApiClient {
     }
 
     // Send the PUT request with the potentially updated profileDTO.avatar_url
-    console.log('[ApiClient] updateUserProfile - Final DTO being sent to API:', JSON.stringify(profileDTO));
+    logger.debug('updateUserProfile - Final DTO being sent to API:', JSON.stringify(profileDTO));
     return this.put<UserDTO>(`/users/${userId}`, profileDTO)
       .then(response => {
-        console.log('[ApiClient] updateUserProfile - Raw API response:', JSON.stringify(response));
+        logger.debug('updateUserProfile - Raw API response:', JSON.stringify(response));
         const normalizedResponse = this.normalizeUserResponse(response);
-        console.log('[ApiClient] updateUserProfile - Normalized response:', JSON.stringify(normalizedResponse));
+        logger.debug('updateUserProfile - Normalized response:', JSON.stringify(normalizedResponse));
         const user = mapUserDTOToUser(normalizedResponse);
-        console.log('[ApiClient] updateUserProfile - Final user object:', JSON.stringify(user));
+        logger.debug('updateUserProfile - Final user object:', JSON.stringify(user));
         return user;
       });
   }
@@ -988,10 +1002,10 @@ class ApiClient {
    * @returns A properly formatted UserDTO object
    */
   private normalizeUserResponse(response: ApiUserResponse): UserDTO {
-    console.log('[ApiClient] normalizeUserResponse - Raw input:', JSON.stringify(response));
-    
+    logger.debug('normalizeUserResponse - Raw input:', JSON.stringify(response));
+
     let organizationData: { id: string; name: string } | undefined = undefined;
-    
+
     if (response.organization) {
       // Direct organization object
       organizationData = {
@@ -1006,7 +1020,7 @@ class ApiClient {
         name: 'Loading...' // Placeholder until we can fetch the proper name
       };
     }
-    
+
     const normalized: UserDTO = {
       id: response.id || response._id || '',
       email: response.email || '',
@@ -1022,17 +1036,17 @@ class ApiClient {
       language: response.language || 'en',
       last_login_at: response.last_login_at || response.lastLogin || response.lastLoginAt,
       // Include notification settings, ensuring it's an object
-      notification_settings: typeof response.notification_settings === 'object' && response.notification_settings !== null 
-                             ? response.notification_settings 
-                             : (typeof response.notificationSettings === 'object' && response.notificationSettings !== null
-                                ? response.notificationSettings
-                                : undefined),
+      notification_settings: typeof response.notification_settings === 'object' && response.notification_settings !== null
+        ? response.notification_settings
+        : (typeof response.notificationSettings === 'object' && response.notificationSettings !== null
+          ? response.notificationSettings
+          : undefined),
       created_at: response.created_at || response.createdAt,
       updated_at: response.updated_at || response.updatedAt
     };
-    
-    console.log('[ApiClient] normalizeUserResponse - Normalized output:', JSON.stringify(normalized));
-    
+
+    logger.debug('normalizeUserResponse - Normalized output:', JSON.stringify(normalized));
+
     return normalized;
   }
 
@@ -1042,11 +1056,11 @@ class ApiClient {
    * @param file The avatar file to upload
    * @returns Promise resolving to an object with the avatar URL
    */
-  public uploadUserAvatar(userId: string, file: File): Promise<{avatar_url: string}> {
+  public uploadUserAvatar(userId: string, file: File): Promise<{ avatar_url: string }> {
     const formData = new FormData();
     formData.append('avatar', file);
-    
-    return this.post<{avatar_url: string}>(`/users/${userId}/avatar`, formData, {
+
+    return this.post<{ avatar_url: string }>(`/users/${userId}/avatar`, formData, {
       headers: {
         'Content-Type': 'multipart/form-data'
       }
@@ -1060,7 +1074,7 @@ class ApiClient {
    * @returns Promise resolving to a compressed File object
    */
   private compressImage(
-    file: File, 
+    file: File,
     options: { maxWidth: number; maxHeight: number; quality: number }
   ): Promise<File> {
     return new Promise((resolve, reject) => {
@@ -1068,36 +1082,36 @@ class ApiClient {
         // Create image element to load the file
         const img = new Image();
         img.src = URL.createObjectURL(file);
-        
+
         img.onload = () => {
           // Create canvas for resizing
           const canvas = document.createElement('canvas');
           let { width, height } = img;
-          
+
           // Calculate new dimensions while maintaining aspect ratio
           if (width > options.maxWidth) {
             height = Math.round(height * (options.maxWidth / width));
             width = options.maxWidth;
           }
-          
+
           if (height > options.maxHeight) {
             width = Math.round(width * (options.maxHeight / height));
             height = options.maxHeight;
           }
-          
+
           // Set canvas dimensions
           canvas.width = width;
           canvas.height = height;
-          
+
           // Draw resized image to canvas
           const ctx = canvas.getContext('2d');
           if (!ctx) {
             reject(new Error('Could not get canvas context'));
             return;
           }
-          
+
           ctx.drawImage(img, 0, 0, width, height);
-          
+
           // Convert canvas to blob
           canvas.toBlob(
             (blob) => {
@@ -1105,7 +1119,7 @@ class ApiClient {
                 reject(new Error('Failed to create blob from canvas'));
                 return;
               }
-              
+
               // Create new file from blob
               const compressedFile = new File(
                 [blob],
@@ -1115,14 +1129,14 @@ class ApiClient {
                   lastModified: Date.now()
                 }
               );
-              
+
               resolve(compressedFile);
             },
             'image/jpeg',
             options.quality
           );
         };
-        
+
         img.onerror = () => {
           reject(new Error('Failed to load image'));
         };
@@ -1153,13 +1167,13 @@ class ApiClient {
    */
   private isPublicRoute(): boolean {
     const publicRoutes = ['/', '/login', '/register', '/forgot-password', '/reset-password', '/cookies'];
-    
+
     // Get current path from browser
     const currentPath = window.location.pathname;
-    
+
     // Check if we're on a public route
-    return publicRoutes.some(route => 
-      currentPath === route || 
+    return publicRoutes.some(route =>
+      currentPath === route ||
       (route !== '/' && currentPath.startsWith(route))
     );
   }
@@ -1170,7 +1184,7 @@ class ApiClient {
     let message = error.message || 'An unknown error occurred';
     let errors: Record<string, string[]> | undefined = undefined;
     let code: string | undefined = undefined;
-    
+
     // Handle the response data with proper type casting
     if (error.response?.data) {
       const errorData = error.response.data as any;
@@ -1178,7 +1192,7 @@ class ApiClient {
       if (errorData.errors) errors = errorData.errors;
       if (errorData.code) code = errorData.code;
     }
-    
+
     return {
       message,
       errors,
@@ -1206,7 +1220,7 @@ api.interceptors.request.use(
     const authToken = localStorage.getItem('authToken');
     const legacyToken = localStorage.getItem('token');
     const token = authToken || legacyToken;
-    
+
     if (token) {
       config.headers.Authorization = `Bearer ${token}`;
     }
@@ -1224,12 +1238,12 @@ api.interceptors.response.use(
       localStorage.removeItem('token');
       localStorage.removeItem('refreshToken');
       localStorage.removeItem('user');
-      
+
       if (!window.location.pathname.includes('/login')) {
         window.location.href = '/login?session=expired';
       }
     }
-    
+
     return Promise.reject(error);
   }
 );

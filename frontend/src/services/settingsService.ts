@@ -1,11 +1,12 @@
 import apiClient from './apiClient';
-import { 
-  GeneralSettings, 
-  EmailSettings, 
+import {
+  GeneralSettings,
+  EmailSettings,
   TicketSettings,
   IntegrationSettings,
   AdvancedSettings
 } from '../types/settings';
+import { logger } from '../utils/frontendLogger';
 
 // Get email settings
 const getEmailSettings = async (): Promise<EmailSettings> => {
@@ -46,30 +47,30 @@ const updateTicketSettings = async (ticketSettings: TicketSettings): Promise<Tic
 const getSLASettings = async (): Promise<any> => {
   try {
     const response = await apiClient.get('/settings/sla');
-    console.log('Raw SLA settings response:', response);
-    
+    logger.debug('Raw SLA settings response:', response);
+
     // Normalize the response format for consistency
     if (response && typeof response === 'object') {
       // If the response is already in the expected format with policies array
       if (Array.isArray(response.policies)) {
         return response;
       }
-      
+
       // If policies are inside a data property
       if (response.data && Array.isArray(response.data.policies)) {
         return response.data;
       }
-      
+
       // If response is just an array of policies directly
       if (Array.isArray(response)) {
         return { policies: response, organizationId: 1001 };
       }
     }
-    
+
     // Default return with empty policies
     return { policies: [], organizationId: 1001 };
   } catch (error) {
-    console.error('Error fetching SLA settings:', error);
+    logger.error('Error fetching SLA settings:', error);
     throw error;
   }
 };
@@ -77,12 +78,12 @@ const getSLASettings = async (): Promise<any> => {
 // Update SLA settings
 const updateSLASettings = async (slaSettings: any): Promise<any> => {
   try {
-    console.log('Sending SLA settings to server:', slaSettings);
+    logger.debug('Sending SLA settings to server:', slaSettings);
     const response = await apiClient.put('/settings/sla', slaSettings);
-    console.log('SLA settings update response:', response);
+    logger.debug('SLA settings update response:', response);
     return response;
   } catch (error) {
-    console.error('Error updating SLA settings:', error);
+    logger.error('Error updating SLA settings:', error);
     throw error;
   }
 };
@@ -112,6 +113,11 @@ const updateAdvancedSettings = async (advancedSettings: AdvancedSettings): Promi
   return apiClient.put('/settings/advanced', advancedSettings);
 };
 
+// Test AI configuration
+const testAIConfiguration = async (config: { apiKey: string; modelName: string; provider: string }): Promise<any> => {
+  return apiClient.post('/settings/advanced/test-ai', config);
+};
+
 const settingsService = {
   getEmailSettings,
   updateEmailSettings,
@@ -126,7 +132,8 @@ const settingsService = {
   getAdvancedSettings,
   updateAdvancedSettings,
   getSLASettings,
-  updateSLASettings
+  updateSLASettings,
+  testAIConfiguration
 };
 
-export default settingsService; 
+export default settingsService;

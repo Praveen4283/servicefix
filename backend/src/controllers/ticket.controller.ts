@@ -45,8 +45,8 @@ export const getTickets = async (
     // Apply user role-based filters
     let requesterId = requester;
     let assigneeId = assignee;
-      
-      if (req.user.role === 'customer') {
+
+    if (req.user.role === 'customer') {
       // Customers can only see their own tickets
       requesterId = idToString(req.user.id);
     } else if (req.user.role === 'agent' && !assigneeId) {
@@ -94,28 +94,28 @@ export const getTicketById = async (
 ): Promise<void> => {
   try {
     const { id } = req.params;
-    
+
     // Use the ticket service to get ticket by ID with caching
     const ticket = await ticketService.getTicketById(id);
-    
+
     // Check if user has access to this ticket
-    const ticketOrgId = ticket.organization?.id;
+    const ticketOrgId = ticket.organization?.id ? idToNumber(ticket.organization.id) : null;
     const userOrgId = idToNumber(req.user.organizationId);
-    if (req.user.role !== 'admin' && 
-        ticketOrgId && userOrgId && 
-        ticketOrgId !== userOrgId) {
+    if (req.user.role !== 'admin' &&
+      ticketOrgId && userOrgId &&
+      ticketOrgId !== userOrgId) {
       throw new AppError('You do not have permission to access this ticket', 403);
     }
-    
+
     // Customers can only view their own tickets
-    const requesterId = ticket.requester?.id;
+    const requesterId = ticket.requester?.id ? idToNumber(ticket.requester.id) : null;
     const userId = idToNumber(req.user.id) || 0;
-    if (req.user.role === 'customer' && 
-        requesterId && userId && 
-        requesterId !== userId) {
+    if (req.user.role === 'customer' &&
+      requesterId && userId &&
+      requesterId !== userId) {
       throw new AppError('You can only view tickets you created', 403);
     }
-    
+
     // Invalidate cache and fetch fresh data if needed
     const refresh = req.query.refresh;
     const shouldRefreshData = refresh === 'true';
@@ -123,7 +123,7 @@ export const getTicketById = async (
       ticketService.invalidateTicketCache(id);
       return getTicketById(req, res, next);
     }
-    
+
     res.status(200).json({
       status: 'success',
       data: { ticket }
@@ -142,9 +142,8 @@ export const createTicket = async (
   res: Response,
   next: NextFunction
 ) => {
-  console.log('[CreateTicket] Received request. Body:', req.body); // Log body
-  console.log('[CreateTicket] Received files:', req.files); // Log files
-  
+  logger.info('[CreateTicket] Received request', { body: req.body, fileCount: req.files ? (req.files as any[]).length : 0 });
+
   try {
     const {
       subject,
@@ -158,7 +157,7 @@ export const createTicket = async (
       tags,
       source,
     } = req.body;
-    
+
     // Revert back to Express.Multer.File
     const files = req.files as Express.Multer.File[];
 
@@ -175,20 +174,20 @@ export const createTicket = async (
 
     const client = await pool.connect();
     let newTicketId: number;
-    
+
     try {
       await client.query('BEGIN');
-      
+
       // Process description with AI for sentiment analysis and summary
       let sentimentScore = null;
       let aiSummary = null;
-      
+
       if (process.env.OPENAI_API_KEY) {
         try {
           // OpenAI is no longer used
           // Just set default values for sentiment and summary
           sentimentScore = 0;
-          
+
           // Generate summary for long descriptions
           if (description.length > 100) {
             aiSummary = "AI summary not available";
@@ -198,7 +197,7 @@ export const createTicket = async (
           logger.error('Error processing ticket with AI', error);
         }
       }
-      
+
       // Create ticket
       const ticketResult = await client.query(
         `INSERT INTO tickets (
@@ -233,9 +232,9 @@ export const createTicket = async (
           source || 'web',
         ]
       );
-      
+
       newTicketId = ticketResult.rows[0].id;
-      
+
       // --- Handle Tags --- 
       const tagIds: number[] = [];
       if (tags && Array.isArray(tags) && tags.length > 0) {
@@ -286,7 +285,7 @@ export const createTicket = async (
         await client.query(ticketTagQuery, [newTicketId, ...tagIds]);
       }
       // --- End Handle Tags --- 
-      
+
       // --- Handle Attachments --- 
       if (files && files.length > 0) {
         const attachmentValues: any[] = [];
@@ -298,7 +297,7 @@ export const createTicket = async (
           try {
             // Upload to Supabase and get public URL
             const publicUrl = await uploadFile(file, 'tickets', newTicketId);
-            
+
             // Add to values for DB insert
             attachmentValues.push(
               newTicketId, // ticket_id
@@ -309,14 +308,14 @@ export const createTicket = async (
               file.size, // file_size
               actualRequesterId // uploaded_by
             );
-            
+
             // Create placeholder for this file
             const paramIndex = i * 7; // 7 params per file
             attachmentPlaceholders.push(
               `($${paramIndex + 1}, $${paramIndex + 2}, $${paramIndex + 3}, $${paramIndex + 4}, $${paramIndex + 5}, $${paramIndex + 6}, $${paramIndex + 7})`
             );
           } catch (uploadError) {
-            console.error(`[CreateTicket] Error uploading file to Supabase:`, uploadError);
+            logger.error(`[CreateTicket] Error uploading file to Supabase:`, uploadError);
             throw new AppError('File upload failed', 500);
           }
         }
@@ -327,20 +326,20 @@ export const createTicket = async (
             file_type, file_size, uploaded_by
           ) VALUES ${attachmentPlaceholders.join(',')}
         `;
-        
-        console.log(`[CreateTicket] Attempting to insert ${files.length} attachments for ticket ${newTicketId}. Query: ${attachmentQuery.substring(0, 100)}...`);
+
+        logger.info(`[CreateTicket] Attempting to insert ${files.length} attachments for ticket ${newTicketId}`);
         try {
           await client.query(attachmentQuery, attachmentValues);
-          console.log(`[CreateTicket] Successfully inserted attachments for ticket ${newTicketId}`); // Log after DB insert
+          logger.info(`[CreateTicket] Successfully inserted attachments for ticket ${newTicketId}`);
           logger.info(`Added ${files.length} attachments for ticket ${newTicketId}`);
         } catch (dbError) {
-          console.error(`[CreateTicket] Database error inserting attachments for ticket ${newTicketId}:`, dbError); // Log DB error specifically
+          logger.error(`[CreateTicket] Database error inserting attachments for ticket ${newTicketId}:`, dbError);
           // Re-throw the error to trigger the main catch block for rollback/cleanup
-          throw dbError; 
+          throw dbError;
         }
       }
       // --- End Handle Attachments ---
-      
+
       // Add system comment for ticket creation
       await client.query(
         `INSERT INTO ticket_comments (
@@ -358,7 +357,7 @@ export const createTicket = async (
           true,
         ]
       );
-      
+
       // Add ticket creation to history
       await client.query(
         `INSERT INTO ticket_history (
@@ -374,10 +373,10 @@ export const createTicket = async (
           'created',
         ]
       );
-      
+
       // Commit transaction
       await client.query('COMMIT');
-      
+
       // After transaction is committed, create SLA policy tickets record
       if (priorityId) {
         try {
@@ -386,7 +385,7 @@ export const createTicket = async (
             'SELECT id FROM sla_policy_tickets WHERE ticket_id = $1',
             [newTicketId]
           );
-          
+
           // Only proceed if no SLA policy ticket exists
           if (existingSlaTicket.rows.length === 0) {
             // Get or create SLA policy
@@ -395,20 +394,20 @@ export const createTicket = async (
                WHERE organization_id = $1 AND ticket_priority_id = $2`,
               [idToString(req.user.organizationId) || null, priorityId]
             );
-            
+
             let slaPolicyId: number | null = null;
-            
+
             if (slaPolicyResult.rows.length === 0) {
               // Create a new SLA policy
               const priorityResult = await query(
                 'SELECT name, sla_hours FROM ticket_priorities WHERE id = $1',
                 [priorityId]
               );
-              
+
               if (priorityResult.rows.length > 0) {
                 const priority = priorityResult.rows[0];
                 const slaHours = priority.sla_hours;
-                
+
                 const newPolicyResult = await query(
                   `INSERT INTO sla_policies (
                     name,
@@ -432,29 +431,29 @@ export const createTicket = async (
                     true
                   ]
                 );
-                
+
                 slaPolicyId = newPolicyResult.rows[0].id;
               }
             } else {
               slaPolicyId = slaPolicyResult.rows[0].id;
             }
-            
+
             if (slaPolicyId) {
               // Get policy details
               const policyResult = await query(
                 'SELECT * FROM sla_policies WHERE id = $1',
                 [slaPolicyId]
               );
-              
+
               if (policyResult.rows.length > 0) {
                 const policy = policyResult.rows[0];
                 const createdAt = new Date();
-                
+
                 // Calculate due dates
                 const firstResponseDue = new Date(createdAt.getTime() + policy.first_response_hours * 60 * 60 * 1000);
                 const nextResponseDue = new Date(createdAt.getTime() + policy.next_response_hours * 60 * 60 * 1000);
                 const resolutionDue = new Date(createdAt.getTime() + policy.resolution_hours * 60 * 60 * 1000);
-                
+
                 // Create metadata
                 const metadata = {
                   ticket_id: newTicketId,
@@ -476,7 +475,7 @@ export const createTicket = async (
                   pausePeriods: [],
                   totalPausedTime: 0
                 };
-                
+
                 // Create SLA policy ticket
                 await query(
                   `INSERT INTO sla_policy_tickets (
@@ -502,13 +501,13 @@ export const createTicket = async (
                     JSON.stringify(metadata)
                   ]
                 );
-                
+
                 // Update ticket with SLA status if not already set by trigger
                 const ticketResult = await query(
                   'SELECT due_date FROM tickets WHERE id = $1',
                   [newTicketId]
                 );
-                
+
                 if (!ticketResult.rows[0].due_date) {
                   await query(
                     'UPDATE tickets SET sla_status = $1, due_date = $2 WHERE id = $3',
@@ -525,7 +524,7 @@ export const createTicket = async (
           logger.error('Error creating SLA policy ticket:', slaError);
         }
       }
-      
+
       // Return created ticket ID
       res.status(201).json({
         status: 'success',
@@ -558,24 +557,24 @@ export const updateTicket = async (
   try {
     const { id } = req.params;
     const updateData = req.body;
-    
+
     // Get current ticket data before update
     const currentTicket = await ticketService.getTicketById(id);
     if (!currentTicket) {
       throw new AppError('Ticket not found', 404);
     }
-    
+
     // Check permissions
     if (req.user.role !== 'admin' && currentTicket.organization?.id !== idToString(req.user.organizationId)) {
       throw new AppError('You do not have permission to update this ticket', 403);
     }
-    
+
     // Update the ticket using the service
     const updatedTicket = await ticketService.updateTicket(Number(id), updateData);
-    
+
     // Handle SLA logic in application layer instead of database triggers
     let slaResult = null;
-    
+
     // Handle status change
     if (updateData.statusId && currentTicket.status?.id !== updateData.statusId) {
       slaResult = await slaApplicationService.handleStatusChange(
@@ -584,7 +583,7 @@ export const updateTicket = async (
         updateData.statusId
       );
     }
-    
+
     // Handle priority change
     if (updateData.priorityId && currentTicket.priority?.id !== updateData.priorityId) {
       const priorityResult = await slaApplicationService.handlePriorityChange(
@@ -592,22 +591,22 @@ export const updateTicket = async (
         Number(currentTicket.priority?.id),
         updateData.priorityId
       );
-      
+
       // If status change didn't trigger SLA action, use priority result
       if (!slaResult || slaResult.action === 'none') {
         slaResult = priorityResult;
       }
     }
-    
+
     // Invalidate cache
     ticketService.invalidateTicketCache(id);
-    
+
     // Prepare response
     const response: any = {
       status: 'success',
       data: { ticket: updatedTicket }
     };
-    
+
     // Add SLA information to response if there was an SLA action
     if (slaResult && slaResult.action !== 'none') {
       response.slaAction = {
@@ -615,7 +614,7 @@ export const updateTicket = async (
         message: slaResult.message
       };
     }
-    
+
     res.status(200).json(response);
   } catch (error) {
     logger.error('[updateTicket] Error:', error);
@@ -634,37 +633,37 @@ export const addComment = async (
   try {
     const { id } = req.params;
     const { content, isInternal = false } = req.body;
-    
+
     // Check if ticket exists and user has access
     const ticketResult = await query(
       'SELECT * FROM tickets WHERE id = $1',
       [id]
     );
-    
+
     if (ticketResult.rows.length === 0) {
       throw new AppError('Ticket not found', 404);
     }
-    
+
     const ticket = ticketResult.rows[0];
-    
+
     // Check permissions
     if (req.user.role !== 'admin' && ticket.organization_id !== idToString(req.user.organizationId)) {
       throw new AppError('You do not have permission to access this ticket', 403);
     }
-    
+
     // Customers can only add comments to their own tickets
     if (
-      req.user.role === 'customer' && 
+      req.user.role === 'customer' &&
       ticket.requester_id !== idToString(req.user.id)
     ) {
       throw new AppError('You can only add comments to tickets you created', 403);
     }
-    
+
     // Customers cannot add internal comments
     if (req.user.role === 'customer' && isInternal) {
       throw new AppError('Customers cannot add internal comments', 403);
     }
-    
+
     // Process sentiment if AI is enabled
     let sentimentScore = null;
     if (process.env.OPENAI_API_KEY) {
@@ -676,7 +675,7 @@ export const addComment = async (
         logger.error('Error analyzing sentiment for comment', error);
       }
     }
-    
+
     // Add the comment
     await query(
       `INSERT INTO ticket_comments (
@@ -695,13 +694,13 @@ export const addComment = async (
         sentimentScore,
       ]
     );
-    
+
     // Update ticket updated_at timestamp
     await query(
       'UPDATE tickets SET updated_at = NOW() WHERE id = $1',
       [id]
     );
-    
+
     res.status(201).json({
       status: 'success',
       data: {
@@ -723,30 +722,30 @@ export const deleteTicket = async (
 ) => {
   try {
     const { id } = req.params;
-    
+
     // Check if ticket exists
     const ticketResult = await query(
       'SELECT * FROM tickets WHERE id = $1',
       [id]
     );
-    
+
     if (ticketResult.rows.length === 0) {
       throw new AppError('Ticket not found', 404);
     }
-    
+
     const ticket = ticketResult.rows[0];
-    
+
     // Only admin or agent from same organization can delete tickets
     if (
-      req.user.role !== 'admin' && 
+      req.user.role !== 'admin' &&
       (ticket.organization_id !== idToString(req.user.organizationId) || req.user.role !== 'agent')
     ) {
       throw new AppError('You do not have permission to delete this ticket', 403);
     }
-    
+
     // Delete ticket (PostgreSQL cascades to comments, history, etc.)
     await query('DELETE FROM tickets WHERE id = $1', [id]);
-    
+
     res.status(200).json({
       status: 'success',
       data: null,
@@ -823,55 +822,55 @@ export const uploadTicketAttachments = async (
   try {
     const { id } = req.params;
     const files = req.files as Express.Multer.File[];
-    
+
     if (!files || files.length === 0) {
       return res.status(400).json({
         status: 'error',
         message: 'No files uploaded',
       });
     }
-    
+
     // Check if ticket exists
     const ticketResult = await query(
       'SELECT * FROM tickets WHERE id = $1',
       [id]
     );
-    
+
     if (ticketResult.rows.length === 0) {
       throw new AppError('Ticket not found', 404);
     }
-    
+
     const ticket = ticketResult.rows[0];
-    
+
     // Check if user has access to this ticket
     if (req.user.role !== 'admin' && ticket.organization_id !== idToString(req.user.organizationId)) {
       throw new AppError('You do not have permission to upload attachments to this ticket', 403);
     }
-    
+
     // Customers can only add attachments to their own tickets
     if (
-      req.user.role === 'customer' && 
+      req.user.role === 'customer' &&
       ticket.requester_id !== idToString(req.user.id)
     ) {
       throw new AppError('You can only add attachments to tickets you created', 403);
     }
-    
+
     // Start transaction
     const client = await pool.connect();
     try {
       await client.query('BEGIN');
-      
+
       const attachments = [];
-      
+
       // Process each file
       for (const file of files) {
         try {
           // Upload to Supabase Storage
           const fileName = `${id}/${uuidv4()}${path.extname(file.originalname)}`;
-          
+
           // Upload to Supabase using the helper or direct client
           let publicUrl: string;
-          
+
           if (typeof uploadFile === 'function') {
             // Use the existing helper function if available
             publicUrl = await uploadFile(file, 'tickets', parseInt(id));
@@ -881,27 +880,27 @@ export const uploadTicketAttachments = async (
               logger.error('Supabase client is not initialized');
               throw new AppError('Storage service not available', 500);
             }
-            
+
             const { data, error } = await supabase.storage
               .from(bucketName)
               .upload(fileName, file.buffer, {
                 contentType: file.mimetype,
                 cacheControl: '3600',
               });
-              
+
             if (error) {
               logger.error('Supabase upload error:', error);
               throw new AppError('Failed to upload file to storage', 500);
             }
-            
+
             // Get the public URL
             const { data: urlData } = supabase.storage
               .from(bucketName)
               .getPublicUrl(fileName);
-              
+
             publicUrl = urlData.publicUrl;
           }
-          
+
           // Save attachment record in database
           const result = await client.query(
             `INSERT INTO ticket_attachments 
@@ -909,15 +908,15 @@ export const uploadTicketAttachments = async (
              VALUES ($1, $2, $3, $4, $5, $6) 
              RETURNING id, created_at`,
             [
-              id, 
-              file.originalname, 
+              id,
+              file.originalname,
               fileName, // Store the path in Supabase
-              file.mimetype, 
-              file.size, 
+              file.mimetype,
+              file.size,
               idToString(req.user.id)
             ]
           );
-          
+
           const attachment = {
             id: result.rows[0].id,
             originalName: file.originalname,
@@ -926,9 +925,9 @@ export const uploadTicketAttachments = async (
             size: file.size,
             createdAt: result.rows[0].created_at
           };
-          
+
           attachments.push(attachment);
-          
+
           // Add to ticket history
           await client.query(
             `INSERT INTO ticket_history 
@@ -941,16 +940,16 @@ export const uploadTicketAttachments = async (
           throw fileError; // Re-throw to trigger rollback
         }
       }
-      
+
       // Update ticket's last activity timestamp
       await client.query(
         'UPDATE tickets SET updated_at = NOW() WHERE id = $1',
         [id]
       );
-      
+
       // Commit transaction
       await client.query('COMMIT');
-      
+
       res.status(201).json({
         status: 'success',
         data: {
@@ -979,7 +978,7 @@ export const downloadTicketAttachment = async (
 ) => {
   try {
     const { attachmentId } = req.params;
-    
+
     // Get attachment details
     const attachmentResult = await query(
       `SELECT ta.*, t.organization_id, t.requester_id
@@ -988,49 +987,49 @@ export const downloadTicketAttachment = async (
        WHERE ta.id = $1`,
       [attachmentId]
     );
-    
+
     if (attachmentResult.rows.length === 0) {
       throw new AppError('Attachment not found', 404);
     }
-    
+
     const attachment = attachmentResult.rows[0];
-    
+
     // Check if user has access to this attachment
     if (
-      req.user.role !== 'admin' && 
+      req.user.role !== 'admin' &&
       attachment.organization_id !== idToString(req.user.organizationId)
     ) {
       throw new AppError('You do not have permission to download this attachment', 403);
     }
-    
+
     // Customers can only download attachments from their own tickets
     if (
-      req.user.role === 'customer' && 
+      req.user.role === 'customer' &&
       attachment.requester_id !== idToString(req.user.id)
     ) {
       throw new AppError('You can only download attachments from tickets you created', 403);
     }
-    
+
     try {
       // Generate signed URL from Supabase
       if (!supabase) {
         logger.error('Supabase client is not initialized');
         throw new AppError('Storage service not available', 500);
       }
-      
+
       const { data, error } = await supabase.storage
         .from(bucketName)
         .createSignedUrl(attachment.file_path, 300); // URL valid for 5 minutes
-      
+
       if (error) {
         logger.error('Error generating signed URL:', error);
         throw new AppError('Failed to generate download URL', 500);
       }
-      
+
       if (!data || !data.signedUrl) {
         throw new AppError('Failed to generate download URL', 500);
       }
-      
+
       // Return the signed URL to the client instead of redirecting
       // This allows the frontend to handle the download
       return res.status(200).json({
@@ -1042,18 +1041,18 @@ export const downloadTicketAttachment = async (
       });
     } catch (supabaseError) {
       logger.error('Supabase error:', supabaseError);
-      
+
       // Fallback - try to get a public URL if file is public
       try {
-          if (!supabase) {
-            logger.error('Supabase client is not initialized');
-            throw new AppError('Storage service not available', 500);
-          }
-          
-          const { data } = supabase.storage
+        if (!supabase) {
+          logger.error('Supabase client is not initialized');
+          throw new AppError('Storage service not available', 500);
+        }
+
+        const { data } = supabase.storage
           .from(bucketName)
           .getPublicUrl(attachment.file_path);
-          
+
         if (data && data.publicUrl) {
           return res.status(200).json({
             status: 'success',
@@ -1085,32 +1084,32 @@ export const getTicketHistory = async (
 ) => {
   try {
     const { id } = req.params;
-    
+
     // Check if ticket exists
     const ticketResult = await query(
       'SELECT * FROM tickets WHERE id = $1',
       [id]
     );
-    
+
     if (ticketResult.rows.length === 0) {
       throw new AppError('Ticket not found', 404);
     }
-    
+
     const ticket = ticketResult.rows[0];
-    
+
     // Check if user has access to this ticket
     if (req.user.role !== 'admin' && ticket.organization_id !== idToString(req.user.organizationId)) {
       throw new AppError('You do not have permission to view this ticket history', 403);
     }
-    
+
     // Customers can only view history of their own tickets
     if (
-      req.user.role === 'customer' && 
+      req.user.role === 'customer' &&
       ticket.requester_id !== idToString(req.user.id)
     ) {
       throw new AppError('You can only view history of tickets you created', 403);
     }
-    
+
     // Get ticket history
     const historyResult = await query(
       `SELECT th.*,
@@ -1125,7 +1124,7 @@ export const getTicketHistory = async (
        ORDER BY th.created_at DESC`,
       [id]
     );
-    
+
     // Format history data
     const history = historyResult.rows.map((row: {
       id: number;
@@ -1156,7 +1155,7 @@ export const getTicketHistory = async (
         } : null
       };
     });
-    
+
     res.status(200).json({
       status: 'success',
       data: {
@@ -1179,45 +1178,45 @@ export const addTicketComment = async (
   try {
     const { id } = req.params;
     const { content, isInternal = false } = req.body;
-    
+
     // Check if ticket exists
     const ticketResult = await query(
       'SELECT * FROM tickets WHERE id = $1',
       [id]
     );
-    
+
     if (ticketResult.rows.length === 0) {
       throw new AppError('Ticket not found', 404);
     }
-    
+
     const ticket = ticketResult.rows[0];
-    
+
     // Check permissions
     if (req.user.role !== 'admin' && ticket.organization_id !== idToString(req.user.organizationId)) {
       throw new AppError('You do not have permission to access this ticket', 403);
     }
-    
+
     // Customers can only add comments to their own tickets
     if (
-      req.user.role === 'customer' && 
+      req.user.role === 'customer' &&
       ticket.requester_id !== idToString(req.user.id)
     ) {
       throw new AppError('You can only add comments to tickets you created', 403);
     }
-    
+
     // Customers cannot add internal comments
     if (req.user.role === 'customer' && isInternal) {
       throw new AppError('Customers cannot add internal comments', 403);
     }
-    
+
     // Process sentiment if AI is enabled (placeholder for future implementation)
     let sentimentScore = null;
-    
+
     // Start transaction
     const client = await pool.connect();
     try {
       await client.query('BEGIN');
-      
+
       // Add the comment
       const commentResult = await client.query(
         `INSERT INTO ticket_comments (
@@ -1236,16 +1235,16 @@ export const addTicketComment = async (
           sentimentScore,
         ]
       );
-      
+
       const commentId = commentResult.rows[0].id;
       const createdAt = commentResult.rows[0].created_at;
-      
+
       // Update ticket updated_at timestamp
       await client.query(
         'UPDATE tickets SET updated_at = NOW() WHERE id = $1',
         [id]
       );
-      
+
       // Add to ticket history
       await client.query(
         `INSERT INTO ticket_history (
@@ -1261,7 +1260,7 @@ export const addTicketComment = async (
           isInternal ? 'Internal comment' : 'Public comment',
         ]
       );
-      
+
       // Get user info
       const userResult = await client.query(
         `SELECT id, first_name, last_name, email, avatar_url
@@ -1269,23 +1268,23 @@ export const addTicketComment = async (
          WHERE id = $1`,
         [req.user.id]
       );
-      
+
       const user = userResult.rows[0];
-      
+
       // Commit transaction
       await client.query('COMMIT');
-      
+
       // If user is not a customer (agent, admin, or manager), process SLA first response
       if (req.user.role !== 'customer' && !isInternal) {
         // Process SLA first response outside the transaction to avoid blocking
         try {
           const ticketId = parseInt(id, 10);
           const userId = idToNumber(req.user.id) || 0;
-          
+
           // Only trigger first response for public (non-internal) comments
           await slaService.processFirstResponse(ticketId, userId);
           logger.info(`SLA first response processed for ticket #${id} by user ${req.user.id}`);
-          
+
           // Immediately update SLA breach status and sla_status in the tickets table
           const ticketToUpdate = await slaService.getTicketById(ticketId);
           if (ticketToUpdate) {
@@ -1297,7 +1296,7 @@ export const addTicketComment = async (
           // Don't block the comment creation if SLA processing fails
         }
       }
-      
+
       // Return the created comment with user info for frontend
       res.status(201).json({
         status: 'success',
@@ -1339,26 +1338,26 @@ export const updateTicketSLA = async (
 ) => {
   try {
     const { id } = req.params;
-    
+
     if (!id) {
       throw new AppError('Ticket ID is required', 400);
     }
-    
+
     // Get ticket
     const ticketResult = await query(
       'SELECT * FROM tickets WHERE id = $1',
       [id]
     );
-    
+
     if (ticketResult.rows.length === 0) {
       throw new AppError('Ticket not found', 404);
     }
-    
+
     const ticket = ticketResult.rows[0];
-    
+
     // Auto-assign SLA policy based on current priority
     const slaPolicyTicket = await slaService.autoAssignSLAPolicy(ticket);
-    
+
     if (!slaPolicyTicket) {
       return res.status(200).json({
         status: 'warning',
@@ -1369,19 +1368,19 @@ export const updateTicketSLA = async (
         }
       });
     }
-    
+
     // Update the due_date in tickets table based on SLA
     await query(
       'UPDATE tickets SET due_date = $1 WHERE id = $2',
       [slaPolicyTicket.resolutionDueAt, id]
     );
-    
+
     // Get updated ticket
     const updatedTicketResult = await query(
       'SELECT * FROM tickets WHERE id = $1',
       [id]
     );
-    
+
     res.status(200).json({
       status: 'success',
       data: {

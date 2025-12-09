@@ -2,6 +2,7 @@
  * Central date formatting utilities for consistent date handling across the application
  */
 import { format, formatDistanceToNow, Locale, isValid, parseISO } from 'date-fns';
+import { logger } from './frontendLogger';
 
 /**
  * Formats a date string to a standardized format
@@ -22,16 +23,16 @@ export const formatDate = (
   try {
     // Create a Date object from the string
     const date = new Date(dateString);
-    
+
     if (!isValid(date)) {
-      console.warn(`Invalid date: ${dateString}`);
+      logger.warn(`Invalid date: ${dateString}`);
       return 'Invalid date';
     }
 
     // Use date-fns to format the date
     return format(date, formatStr);
   } catch (error) {
-    console.error(`Error formatting date string "${dateString}":`, error);
+    logger.error(`Error formatting date string "${dateString}":`, error);
     return 'Error formatting date';
   }
 };
@@ -52,7 +53,7 @@ export const getRelativeTime = (
 
   try {
     const date = parseISO(dateString);
-    
+
     if (!isValid(date)) {
       return formatDate(dateString, userTimeZone);
     }
@@ -60,7 +61,7 @@ export const getRelativeTime = (
     // Use formatDistanceToNow for relative time
     return formatDistanceToNow(date, { addSuffix: true });
   } catch (error) {
-    console.error(`Error calculating relative time for "${dateString}":`, error);
+    logger.error(`Error calculating relative time for "${dateString}":`, error);
     return formatDate(dateString, userTimeZone);
   }
 };
@@ -79,7 +80,7 @@ export const formatLocaleDate = (
     const dateObj = typeof date === 'string' ? new Date(date) : date;
     return new Date(dateObj).toLocaleDateString(locale || undefined);
   } catch (error) {
-    console.error('Error formatting locale date:', error);
+    logger.error('Error formatting locale date:', error);
     return 'Invalid date';
   }
 };

@@ -1,8 +1,9 @@
+
 import React from 'react';
-import { 
-  Box, 
-  useTheme, 
-  Container, 
+import {
+  Box,
+  useTheme,
+  Container,
   Typography,
   Button,
   Avatar,
@@ -24,14 +25,14 @@ const TestimonialsSection: React.FC = () => {
     threshold: 0.2,
     triggerOnce: true
   });
-  
+
   // Match the feature card's state management exactly
   const [hoveredCard, setHoveredCard] = React.useState<number | null>(null);
   const cardRefs = React.useRef<(HTMLDivElement | null)[]>([]);
-  
+
   // New state for quote animation
   const [activeQuotes, setActiveQuotes] = React.useState<{ [key: number]: boolean }>({});
-  
+
   // Toggle quote animation for a specific card
   const toggleQuoteAnimation = (index: number) => {
     setActiveQuotes(prev => ({
@@ -87,21 +88,21 @@ const TestimonialsSection: React.FC = () => {
       icon: <StoreIcon fontSize="large" />
     }
   ];
-  
+
   return (
-    <Box 
+    <Box
       ref={testimonialsRef}
-      sx={{ 
-        py: { xs: 10, md: 16 }, 
-        background: theme.palette.mode === 'dark' 
-          ? 'linear-gradient(135deg, #171923 0%, #0a1929 100%)' 
+      sx={{
+        py: { xs: 10, md: 16 },
+        background: theme.palette.mode === 'dark'
+          ? 'linear-gradient(135deg, #171923 0%, #0a1929 100%)'
           : 'linear-gradient(135deg, #f8faff 0%, #ffffff 100%)',
         position: 'relative',
         overflow: 'hidden',
       }}
     >
       {/* Background elements */}
-      <Box 
+      <Box
         sx={{
           position: 'absolute',
           top: 0,
@@ -121,8 +122,8 @@ const TestimonialsSection: React.FC = () => {
               width: `${Math.random() * 300 + 100}px`,
               height: `${Math.random() * 300 + 100}px`,
               borderRadius: '50%',
-              background: i % 2 === 0 
-                ? theme.palette.mode === 'dark' 
+              background: i % 2 === 0
+                ? theme.palette.mode === 'dark'
                   ? 'radial-gradient(circle, rgba(63,81,181,0.06) 0%, rgba(63,81,181,0) 70%)'
                   : 'radial-gradient(circle, rgba(63,81,181,0.03) 0%, rgba(63,81,181,0) 70%)'
                 : theme.palette.mode === 'dark'
@@ -142,7 +143,7 @@ const TestimonialsSection: React.FC = () => {
             }}
           />
         ))}
-        
+
         {/* Add decorative quote marks in background */}
         <Box
           sx={{
@@ -183,13 +184,13 @@ const TestimonialsSection: React.FC = () => {
           "
         </Box>
       </Box>
-      
+
       <Container maxWidth="lg" sx={{ position: 'relative', zIndex: 1 }}>
         {/* Section header */}
         <Fade in={isTestimonialsVisible} timeout={800}>
-          <Box 
-            sx={{ 
-              textAlign: 'center', 
+          <Box
+            sx={{
+              textAlign: 'center',
               mb: { xs: 8, md: 12 },
               maxWidth: '800px',
               mx: 'auto',
@@ -198,10 +199,10 @@ const TestimonialsSection: React.FC = () => {
             }}
           >
             {/* Small decorative element above title */}
-            <Box 
-              sx={{ 
-                width: '60px', 
-                height: '4px', 
+            <Box
+              sx={{
+                width: '60px',
+                height: '4px',
                 background: 'linear-gradient(90deg, #3f51b5, #FF6B6B)',
                 mx: 'auto',
                 mb: 3,
@@ -211,20 +212,20 @@ const TestimonialsSection: React.FC = () => {
                   from: { transform: 'scaleX(0)' },
                   to: { transform: 'scaleX(1)' }
                 }
-              }} 
+              }}
             />
-        
-            <Typography 
-              variant="h6" 
-              color="primary" 
-              sx={{ 
-                mb: 2, 
+
+            <Typography
+              variant="h6"
+              color="primary"
+              sx={{
+                mb: 2,
                 fontWeight: 600,
                 textTransform: 'uppercase',
                 letterSpacing: 1,
                 display: 'inline-block',
-                background: theme.palette.mode === 'dark' 
-                  ? 'linear-gradient(90deg, #90caf9, #f48fb1)' 
+                background: theme.palette.mode === 'dark'
+                  ? 'linear-gradient(90deg, #90caf9, #f48fb1)'
                   : 'linear-gradient(90deg, #3f51b5, #f50057)',
                 backgroundClip: 'text',
                 WebkitBackgroundClip: 'text',
@@ -238,13 +239,13 @@ const TestimonialsSection: React.FC = () => {
             >
               TESTIMONIALS
             </Typography>
-            <Typography 
-              variant="h2" 
-              sx={{ 
-                mb: 3, 
+            <Typography
+              variant="h2"
+              sx={{
+                mb: 3,
                 fontWeight: 800,
-                background: theme.palette.mode === 'dark' 
-                  ? 'linear-gradient(90deg, #fff, rgba(255,255,255,0.8))' 
+                background: theme.palette.mode === 'dark'
+                  ? 'linear-gradient(90deg, #fff, rgba(255,255,255,0.8))'
                   : 'linear-gradient(90deg, #1a237e, #3949ab)',
                 backgroundClip: 'text',
                 WebkitBackgroundClip: 'text',
@@ -254,13 +255,13 @@ const TestimonialsSection: React.FC = () => {
             >
               What Our Clients Say
             </Typography>
-            <Typography 
-              variant="h6" 
-              color="textSecondary" 
-              sx={{ 
+            <Typography
+              variant="h6"
+              color="textSecondary"
+              sx={{
                 fontWeight: 400,
                 animation: isTestimonialsVisible ? 'fadeInUp 1s ease-out' : 'none',
-                maxWidth: '800px', 
+                maxWidth: '800px',
                 mx: 'auto',
                 lineHeight: 1.6,
                 mb: 4,
@@ -272,31 +273,31 @@ const TestimonialsSection: React.FC = () => {
         </Fade>
 
         {/* Testimonial cards in a staggered grid */}
-        <Grid 
-          container 
-          spacing={4} 
-          sx={{ 
+        <Grid
+          container
+          spacing={4}
+          sx={{
             mt: 4,
             transformStyle: 'preserve-3d',
             perspective: '1000px',
           }}
         >
           {testimonials.map((testimonial, index) => (
-            <Grid 
-              item 
-              xs={12} 
-              md={4} 
+            <Grid
+              item
+              xs={12}
+              md={4}
               key={index}
               sx={{
                 display: 'flex',
-                transform: isTestimonialsVisible 
-                  ? 'none' 
+                transform: isTestimonialsVisible
+                  ? 'none'
                   : `translateY(${40 + index * 20}px) rotateX(10deg)`,
                 opacity: isTestimonialsVisible ? 1 : 0,
                 transition: `all 0.8s cubic-bezier(0.175, 0.885, 0.32, 1.275) ${index * 0.2}s`,
               }}
             >
-              <Card 
+              <Card
                 elevation={0}
                 ref={(el) => cardRefs.current[index] = el}
                 onMouseEnter={() => {
@@ -309,7 +310,7 @@ const TestimonialsSection: React.FC = () => {
                   // Reset quote animation when no longer hovering
                   setTimeout(() => toggleQuoteAnimation(index), 200);
                 }}
-                sx={{ 
+                sx={{
                   width: '100%',
                   height: '100%',
                   transition: 'all 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275)',
@@ -345,23 +346,23 @@ const TestimonialsSection: React.FC = () => {
                     opacity: 1,
                   },
                   border: '1px solid',
-                  borderColor: theme.palette.mode === 'dark' 
-                    ? 'rgba(255,255,255,0.05)' 
+                  borderColor: theme.palette.mode === 'dark'
+                    ? 'rgba(255,255,255,0.05)'
                     : 'rgba(0,0,0,0.03)',
                 }}
               >
                 {/* Large decorative quote mark - visible on hover */}
-                <Box 
+                <Box
                   className="quote-mark"
-                  sx={{ 
+                  sx={{
                     position: 'absolute',
                     top: '10px',
                     right: '15px',
                     fontFamily: '"Georgia", serif',
                     fontSize: '120px',
                     lineHeight: 1,
-                    color: theme.palette.mode === 'dark' 
-                      ? 'rgba(255,255,255,0.03)' 
+                    color: theme.palette.mode === 'dark'
+                      ? 'rgba(255,255,255,0.03)'
                       : 'rgba(63,81,181,0.03)',
                     opacity: 0,
                     transition: 'opacity 0.3s ease-out',
@@ -371,11 +372,11 @@ const TestimonialsSection: React.FC = () => {
                 >
                   "
                 </Box>
-              
-                <CardContent sx={{ 
-                  p: 4, 
-                  height: '100%', 
-                  display: 'flex', 
+
+                <CardContent sx={{
+                  p: 4,
+                  height: '100%',
+                  display: 'flex',
                   flexDirection: 'column',
                   position: 'relative',
                   zIndex: 2,
@@ -385,23 +386,23 @@ const TestimonialsSection: React.FC = () => {
                     <Avatar
                       src={testimonial.avatar}
                       alt={testimonial.name}
-                      sx={{ 
-                        width: 70, 
-                        height: 70, 
+                      sx={{
+                        width: 70,
+                        height: 70,
                         mr: 2,
                         border: '2px solid',
                         borderColor: testimonial.logoColor,
                         transition: 'all 0.4s ease',
                         transform: hoveredCard === index ? 'scale(1.1)' : 'scale(1)',
-                        boxShadow: hoveredCard === index 
+                        boxShadow: hoveredCard === index
                           ? '0 10px 20px rgba(0,0,0,0.1)'
                           : 'none',
                       }}
                     />
                     <Box>
-                      <Typography 
-                        variant="h6" 
-                        sx={{ 
+                      <Typography
+                        variant="h6"
+                        sx={{
                           fontWeight: 700,
                           color: theme.palette.mode === 'dark' ? '#fff' : '#1a1a1a',
                           transition: 'all 0.3s ease',
@@ -409,8 +410,8 @@ const TestimonialsSection: React.FC = () => {
                       >
                         {testimonial.name}
                       </Typography>
-                      <Typography 
-                        variant="body2" 
+                      <Typography
+                        variant="body2"
                         color="text.secondary"
                         sx={{
                           transition: 'all 0.3s ease',
@@ -418,19 +419,19 @@ const TestimonialsSection: React.FC = () => {
                       >
                         {testimonial.position}
                       </Typography>
-                      
+
                       {/* Rating row inside name/position box for better layout */}
-                      <Box 
-                        sx={{ 
-                          display: 'flex', 
+                      <Box
+                        sx={{
+                          display: 'flex',
                           alignItems: 'center',
                           mt: 0.5,
                         }}
                       >
-                        <Rating 
-                          value={testimonial.rating} 
-                          readOnly 
-                          precision={0.5} 
+                        <Rating
+                          value={testimonial.rating}
+                          readOnly
+                          precision={0.5}
                           size="small"
                           sx={{
                             '& .MuiRating-iconFilled': {
@@ -440,10 +441,10 @@ const TestimonialsSection: React.FC = () => {
                             fontSize: '0.8rem',
                           }}
                         />
-                        <Typography 
-                          variant="caption" 
-                          sx={{ 
-                            ml: 1, 
+                        <Typography
+                          variant="caption"
+                          sx={{
+                            ml: 1,
                             fontWeight: 500,
                             transition: 'all 0.3s ease',
                           }}
@@ -453,14 +454,14 @@ const TestimonialsSection: React.FC = () => {
                       </Box>
                     </Box>
                   </Box>
-                  
+
                   {/* Testimonial text with animated quote marks */}
                   <Box sx={{ position: 'relative', mb: 3, flex: 1 }}>
                     {/* Opening quote mark */}
-                    <Box 
-                      sx={{ 
-                        position: 'absolute', 
-                        top: -10, 
+                    <Box
+                      sx={{
+                        position: 'absolute',
+                        top: -10,
                         left: -5,
                         fontFamily: '"Georgia", serif',
                         fontSize: '28px',
@@ -472,11 +473,11 @@ const TestimonialsSection: React.FC = () => {
                     >
                       "
                     </Box>
-                    
-                    <Typography 
-                      variant="body1" 
-                      color="text.secondary" 
-                      sx={{ 
+
+                    <Typography
+                      variant="body1"
+                      color="text.secondary"
+                      sx={{
                         flex: 1,
                         lineHeight: 1.6,
                         fontSize: '1rem',
@@ -489,12 +490,12 @@ const TestimonialsSection: React.FC = () => {
                     >
                       {testimonial.content}
                     </Typography>
-                    
+
                     {/* Closing quote mark */}
-                    <Box 
-                      sx={{ 
-                        position: 'absolute', 
-                        bottom: -20, 
+                    <Box
+                      sx={{
+                        position: 'absolute',
+                        bottom: -20,
                         right: -5,
                         fontFamily: '"Georgia", serif',
                         fontSize: '28px',
@@ -507,19 +508,19 @@ const TestimonialsSection: React.FC = () => {
                       "
                     </Box>
                   </Box>
-                  
+
                   {/* Company chip */}
                   <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
                     <Chip
                       label={testimonial.company}
                       size="small"
-                      icon={testimonial.icon ? 
-                        React.cloneElement(testimonial.icon as React.ReactElement, { 
+                      icon={testimonial.icon ?
+                        React.cloneElement(testimonial.icon as React.ReactElement, {
                           style: { fontSize: '1rem' },
                         }) : undefined}
                       sx={{
-                        background: theme.palette.mode === 'dark' 
-                          ? 'rgba(255,255,255,0.03)' 
+                        background: theme.palette.mode === 'dark'
+                          ? 'rgba(255,255,255,0.03)'
                           : 'rgba(0,0,0,0.04)',
                         borderRadius: '8px',
                         color: testimonial.logoColor,

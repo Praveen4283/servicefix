@@ -6,8 +6,8 @@ const API_VERSION = process.env.REACT_APP_API_VERSION || 'v1';
 const API_URL = `${API_BASE_URL}/api/${API_VERSION}`;
 
 // Use legacy unversioned URL if explicitly configured
-const LEGACY_API_URL = process.env.REACT_APP_USE_LEGACY_API === 'true' 
-  ? `${API_BASE_URL}/api` 
+const LEGACY_API_URL = process.env.REACT_APP_USE_LEGACY_API === 'true'
+  ? `${API_BASE_URL}/api`
   : API_URL;
 
 // System settings
@@ -47,7 +47,7 @@ const config = {
       csrfToken: `${API_URL}/csrf-token`,
     },
   },
-  
+
   // Feature flags
   features: {
     darkMode: true,
@@ -55,23 +55,23 @@ const config = {
     notifications: true,
     csrfProtection: process.env.REACT_APP_CSRF_PROTECTION !== 'false',
   },
-  
+
   // Limits and constraints
   limits: {
     maxFileSize: 10 * 1024 * 1024, // 10MB
     maxAttachments: 5,
     ticketsPerPage: 20,
   },
-  
+
   // Supported file types
   acceptedFileTypes: [
-  'image/jpeg',
-  'image/png',
-  'image/gif',
-  'application/pdf',
-  'application/msword',
-  'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-  'text/plain',
+    'image/jpeg',
+    'image/png',
+    'image/gif',
+    'application/pdf',
+    'application/msword',
+    'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    'text/plain',
     'application/zip',
   ],
 };

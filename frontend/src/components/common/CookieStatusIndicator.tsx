@@ -1,12 +1,13 @@
+
 import React from 'react';
-import { 
-  Button, 
-  Tooltip, 
-  IconButton, 
-  Badge, 
-  Dialog, 
-  DialogTitle, 
-  DialogContent, 
+import {
+  Button,
+  Tooltip,
+  IconButton,
+  Badge,
+  Dialog,
+  DialogTitle,
+  DialogContent,
   DialogActions,
   Typography,
   Box,
@@ -21,9 +22,9 @@ import {
   List,
   Avatar
 } from '@mui/material';
-import { 
+import {
   Cookie as CookieIcon,
-  Settings as SettingsIcon, 
+  Settings as SettingsIcon,
   CheckCircle as CheckCircleIcon,
   Cancel as CancelIcon,
   Security as SecurityIcon,
@@ -40,81 +41,81 @@ interface CookieStatusIndicatorProps {
 }
 
 // Cookie Status Indicator component
-const CookieStatusIndicator: React.FC<CookieStatusIndicatorProps> = ({ 
+const CookieStatusIndicator: React.FC<CookieStatusIndicatorProps> = ({
   variant = 'icon',
   placement = 'footer'
 }) => {
   const theme = useTheme();
   const [dialogOpen, setDialogOpen] = React.useState(false);
-  const { 
-    consentPreferences, 
-    isConsentGiven, 
+  const {
+    consentPreferences,
+    isConsentGiven,
     setShowConsentBanner
   } = useCookieConsent();
-  
+
   // Calculate number of enabled cookie categories
   const enabledCategories = Object.entries(consentPreferences)
     .filter(([key, value]) => key !== 'lastUpdated' && value === true)
     .length;
-  
+
   // Get total number of possible categories (excluding lastUpdated)
   const totalCategories = Object.keys(consentPreferences).filter(key => key !== 'lastUpdated').length;
-  
+
   // Handle opening cookie banner
   const handleManageCookies = () => {
     setShowConsentBanner(true);
     setDialogOpen(false);
   };
-  
+
   // Toggle dialog
   const handleToggleDialog = () => {
     setDialogOpen(!dialogOpen);
   };
-  
+
   // Get an appropriate color based on consent status
   const getStatusColor = () => {
     if (!isConsentGiven) return theme.palette.grey[500]; // No consent given yet
-    
+
     const ratio = enabledCategories / totalCategories;
     if (ratio === 1) return theme.palette.success.main; // All accepted
     if (ratio === 0.25) return theme.palette.error.main; // Only necessary
     return theme.palette.primary.main; // Some accepted
   };
-  
+
   // Get status text
   const getStatusText = () => {
     if (!isConsentGiven) return 'No Preference Set';
-    
+
     const ratio = enabledCategories / totalCategories;
     if (ratio === 1) return 'All Cookies Enabled';
     if (ratio === 0.25) return 'Essential Only';
     return `${enabledCategories}/${totalCategories} Categories Enabled`;
   };
-  
+
   // Render status label
   const StatusLabel = () => (
-    <Box 
-      sx={{ 
-        display: 'flex', 
+    <Box
+      sx={{
+        display: 'flex',
         alignItems: 'center',
         gap: 0.5
       }}
     >
-      <Box 
-        sx={{ 
-          width: 8, 
-          height: 8, 
-          borderRadius: '50%', 
-          bgcolor: getStatusColor(), 
+      <Box
+        sx={{
+          width: 8,
+          height: 8,
+          borderRadius: '50%',
+          bgcolor: getStatusColor(),
           boxShadow: `0 0 0 2px ${alpha(getStatusColor(), 0.2)}`
-        }} 
+        }}
       />
-      <Typography 
+      <Typography
         variant="caption"
-        sx={{ 
+        sx={{
           fontWeight: 500,
-          color: theme.palette.mode === 'dark' 
-            ? theme.palette.grey[400] 
+          color: theme.palette.mode === 'dark'
+            ? theme.palette.grey[400]
             : theme.palette.text.secondary
         }}
       >
@@ -122,19 +123,19 @@ const CookieStatusIndicator: React.FC<CookieStatusIndicatorProps> = ({
       </Typography>
     </Box>
   );
-  
+
   // Get badge content based on preferences
   const badgeContent = isConsentGiven ? enabledCategories : '!';
-  
+
   // Render different variants
   if (variant === 'icon') {
     return (
       <>
-        <Tooltip 
-          title="Cookie Settings" 
+        <Tooltip
+          title="Cookie Settings"
           arrow
         >
-          <IconButton 
+          <IconButton
             onClick={handleToggleDialog}
             size="small"
             sx={{
@@ -147,15 +148,15 @@ const CookieStatusIndicator: React.FC<CookieStatusIndicatorProps> = ({
               }
             }}
           >
-            <Badge 
-              badgeContent={badgeContent} 
+            <Badge
+              badgeContent={badgeContent}
               color={isConsentGiven ? (
                 enabledCategories === totalCategories ? "success" : "primary"
               ) : "error"}
               sx={{
                 '& .MuiBadge-badge': {
-                  fontSize: '0.65rem', 
-                  height: 16, 
+                  fontSize: '0.65rem',
+                  height: 16,
                   minWidth: 16,
                   padding: '0 4px'
                 }
@@ -165,9 +166,9 @@ const CookieStatusIndicator: React.FC<CookieStatusIndicatorProps> = ({
             </Badge>
           </IconButton>
         </Tooltip>
-        
-        <Dialog 
-          open={dialogOpen} 
+
+        <Dialog
+          open={dialogOpen}
           onClose={handleToggleDialog}
           PaperProps={{
             elevation: 24,
@@ -185,13 +186,13 @@ const CookieStatusIndicator: React.FC<CookieStatusIndicatorProps> = ({
               Cookie Status
             </Typography>
           </DialogTitle>
-          
+
           <DialogContent sx={{ px: 2, pt: 0 }}>
             <Box sx={{ mb: 2 }}>
               <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
                 Current cookie preferences for this website:
               </Typography>
-              
+
               <Paper
                 variant="outlined"
                 sx={{
@@ -203,10 +204,10 @@ const CookieStatusIndicator: React.FC<CookieStatusIndicatorProps> = ({
                 }}
               >
                 <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', p: 1 }}>
-                  <Typography 
-                    variant="h3" 
-                    sx={{ 
-                      color: getStatusColor(), 
+                  <Typography
+                    variant="h3"
+                    sx={{
+                      color: getStatusColor(),
                       fontWeight: 'bold',
                       mr: 1
                     }}
@@ -218,16 +219,16 @@ const CookieStatusIndicator: React.FC<CookieStatusIndicatorProps> = ({
                     <Typography variant="body2" sx={{ lineHeight: 1.2 }}>{totalCategories} categories</Typography>
                   </Box>
                 </Box>
-                <Typography 
-                  variant="body2" 
-                  fontWeight="500" 
+                <Typography
+                  variant="body2"
+                  fontWeight="500"
                   textAlign="center"
                   color={getStatusColor()}
                 >
                   {getStatusText()}
                 </Typography>
               </Paper>
-              
+
               <List disablePadding sx={{ mb: 1 }}>
                 <ListItem dense disableGutters>
                   <ListItemIcon sx={{ minWidth: 36 }}>
@@ -235,75 +236,75 @@ const CookieStatusIndicator: React.FC<CookieStatusIndicatorProps> = ({
                       {consentPreferences.necessary ? <CheckCircleIcon fontSize="small" /> : <SecurityIcon fontSize="small" />}
                     </Avatar>
                   </ListItemIcon>
-                  <ListItemText 
-                    primary="Necessary" 
+                  <ListItemText
+                    primary="Necessary"
                     secondary="Always active"
                     primaryTypographyProps={{ variant: 'body2', fontWeight: 500 }}
                     secondaryTypographyProps={{ variant: 'caption' }}
                   />
                 </ListItem>
-                
+
                 <ListItem dense disableGutters>
                   <ListItemIcon sx={{ minWidth: 36 }}>
-                    <Avatar sx={{ 
-                      width: 24, 
-                      height: 24, 
+                    <Avatar sx={{
+                      width: 24,
+                      height: 24,
                       bgcolor: consentPreferences.functional ? theme.palette.success.main : theme.palette.grey[300]
                     }}>
                       {consentPreferences.functional ? <CheckCircleIcon fontSize="small" /> : <FunctionalIcon fontSize="small" />}
                     </Avatar>
                   </ListItemIcon>
-                  <ListItemText 
-                    primary="Functional" 
+                  <ListItemText
+                    primary="Functional"
                     primaryTypographyProps={{ variant: 'body2', fontWeight: 500 }}
                   />
                 </ListItem>
-                
+
                 <ListItem dense disableGutters>
                   <ListItemIcon sx={{ minWidth: 36 }}>
-                    <Avatar sx={{ 
-                      width: 24, 
-                      height: 24, 
+                    <Avatar sx={{
+                      width: 24,
+                      height: 24,
                       bgcolor: consentPreferences.analytics ? theme.palette.success.main : theme.palette.grey[300]
                     }}>
                       {consentPreferences.analytics ? <CheckCircleIcon fontSize="small" /> : <AnalyticsIcon fontSize="small" />}
                     </Avatar>
                   </ListItemIcon>
-                  <ListItemText 
-                    primary="Analytics" 
+                  <ListItemText
+                    primary="Analytics"
                     primaryTypographyProps={{ variant: 'body2', fontWeight: 500 }}
                   />
                 </ListItem>
-                
+
                 <ListItem dense disableGutters>
                   <ListItemIcon sx={{ minWidth: 36 }}>
-                    <Avatar sx={{ 
-                      width: 24, 
-                      height: 24, 
+                    <Avatar sx={{
+                      width: 24,
+                      height: 24,
                       bgcolor: consentPreferences.marketing ? theme.palette.success.main : theme.palette.grey[300]
                     }}>
                       {consentPreferences.marketing ? <CheckCircleIcon fontSize="small" /> : <MarketingIcon fontSize="small" />}
                     </Avatar>
                   </ListItemIcon>
-                  <ListItemText 
-                    primary="Marketing" 
+                  <ListItemText
+                    primary="Marketing"
                     primaryTypographyProps={{ variant: 'body2', fontWeight: 500 }}
                   />
                 </ListItem>
               </List>
             </Box>
           </DialogContent>
-          
+
           <Divider />
-          
+
           <DialogActions sx={{ p: 2 }}>
-            <Button 
+            <Button
               onClick={handleManageCookies}
               startIcon={<SettingsIcon />}
               variant="contained"
               fullWidth
               color="primary"
-              sx={{ 
+              sx={{
                 borderRadius: 2,
                 textTransform: 'none',
                 fontWeight: 600,
@@ -319,7 +320,7 @@ const CookieStatusIndicator: React.FC<CookieStatusIndicatorProps> = ({
       </>
     );
   }
-  
+
   // Button variant
   return (
     <Button

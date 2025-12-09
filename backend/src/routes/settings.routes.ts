@@ -1,8 +1,8 @@
 import express from 'express';
 import { authenticate, authorize } from '../middleware/auth.middleware';
-import { 
-  getEmailSettings, 
-  updateEmailSettings, 
+import {
+  getEmailSettings,
+  updateEmailSettings,
   testEmailSettings,
   getGeneralSettings,
   updateGeneralSettings,
@@ -12,6 +12,7 @@ import {
   updateSLASettings,
   getAdvancedSettings,
   updateAdvancedSettings,
+  testAIConfiguration,
   getIntegrationSettings,
   updateIntegrationSettings,
   testIntegrationConnection
@@ -42,10 +43,11 @@ router.put('/sla', authorize(['admin']), updateSLASettings);
 // Advanced settings routes
 router.get('/advanced', authorize(['admin']), getAdvancedSettings);
 router.put('/advanced', authorize(['admin']), updateAdvancedSettings);
+router.post('/advanced/test-ai', authorize(['admin']), testAIConfiguration);
 
 // Integration settings routes
 router.get('/integration', authorize(['admin']), getIntegrationSettings);
 router.put('/integration', authorize(['admin']), updateIntegrationSettings);
 router.post('/integration/:type/test', authorize(['admin']), testIntegrationConnection);
 
-export default router; 
+export default router;

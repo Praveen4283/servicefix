@@ -1,115 +1,207 @@
-# Database Migrations
+# Database Migrations Guide
 
 ## Overview
 
-This directory is for database migrations that need to be applied to the ServiceFix database. The migrations are managed using direct SQL applied through the Supabase admin interface rather than TypeORM's migration system.
+This project uses TypeORM for database migrations to manage schema changes in a version-controlled, repeatable way.
 
-## Migration Strategy
+## Migration Workflow
 
-### How Migrations Are Applied
+### 1. Creating a New Migration
 
-1. Migrations are written as plain SQL scripts
-2. Migrations are applied directly to Supabase using the Supabase admin interface or API
-3. Each migration is tracked in the `schema_version` table
-4. Schema validation runs on application startup to ensure the database is properly configured
-
-### Creating a New Migration
-
-To create a new migration:
-
-1. Write your SQL script with the necessary changes
-2. Apply the migration using the Supabase admin interface
-3. Update the `schema_version` table with a new version record:
-
-```sql
-INSERT INTO schema_version (version, description) 
-VALUES ('YYYY_MM_DD_description', 'Description of your migration');
+**Automatic Generation** (Recommended):
+```bash
+# TypeORM will compare your entities with the database and generate a migration
+npm run migration:generate -- -n MigrationName
 ```
 
-4. If necessary, update the schema validation in `schemaValidator.ts`
-
-## Schema Version Tracking
-
-The `schema_version` table tracks all applied migrations:
-
-```
-version (VARCHAR) - Primary key, typically YYYY_MM_DD_description format
-description (TEXT) - Human readable description of the migration
-applied_at (TIMESTAMP) - When the migration was applied
-applied_by (VARCHAR) - Who applied the migration
+**Manual Creation**:
+```bash
+# Create a blank migration file
+npm run migration:create -- -n MigrationName
 ```
 
-## Validation
+### 2. Running Migrations
 
-On application startup, the `validateDatabaseSchema` function in `schemaValidator.ts` verifies that:
+```bash
+# Apply all pending migrations
+npm run migration:run
 
-1. All required tables exist
-2. Critical columns are present
-3. Required functions and triggers are defined
-4. Indexes for performance optimization are in place
+# Verify migrations were applied
+npm run migration:show
+```
 
-If any issues are detected, warnings are logged and, in some cases, automatic fixes are attempted.
+### 3. Reverting Migrations
 
-## Emergency Fixes
+```bash
+# Revert the last migration
+npm run migration:revert
+```
 
-If the schema is significantly out of sync, the full schema can be restored using the SQL script in `backend/sql/schema.sql`.
+## Migration Best Practices
 
-## Migration Files
+### DO ✅
 
-- `2023_10_12_create_schema_version_table.ts`: Creates the schema version tracking table
-- `2023_10_12_sync_entities_schema.ts`: Ensures all entity tables and columns exist in the database
+1. **Test locally first**
+   - Always test migrations on a local database copy
+   - Verify both `up` and `down` methods work
 
-## Best Practices
+2. **Make migrations reversible**
+   - Always implement the `down` method
+   - Ensure you can rollback if needed
 
-1. **Always test migrations**: Test migrations on a development database before applying to production
-2. **Include up and down methods**: Always implement both the `up` and `down` methods for reversibility
-3. **Keep migrations small**: Each migration should focus on a specific change
-4. **Use schema_version table**: Always update the schema_version table in your migrations
-5. **Avoid direct schema modification**: Don't modify the database schema directly, always use migrations
+3. **Keep migrations small**
+   - One logical change per migration
+   - Easier to debug and revert
 
-## Common Issues
+4. **Use transactions**
+   - TypeORM wraps migrations in transactions by default
+   - For complex migrations, use `queryRunner.startTransaction()`
 
-### Handling Failed Migrations
+5. **Backup before production**
+   - Always backup database before running migrations in production
+   - Have a rollback plan
 
-If a migration fails, you can:
+### DON'T ❌
 
-1. Fix the migration file
-2. Run `npm run migrations:run` again
-3. If needed, manually fix the database and mark the migration as applied in the `schema_version` table
+1. **Don't modify existing migrations**
+   - Once applied, migrations are immutable
+   - Create a new migration instead
 
-### Handling Conflicts
+2. **Don't hardcode IDs**
+   - Use queries to find records dynamically
+   - Example: `SELECT id FROM users WHERE email = 'admin@example.com'`
 
-If multiple developers create migrations simultaneously, there might be conflicts. In such cases:
+3. **Don't delete data without confirmation**
+   - Add safety checks
+   - Consider soft deletes instead
 
-1. Check which migrations have been applied using `SELECT * FROM schema_version ORDER BY applied_at`
-2. Merge the conflicting migrations if needed
-3. Ensure all changes are included in the final migration files
+4. **Don't skip testing**
+   - Untested migrations can cause production outages
 
-## Migration Structure
+## Migration Examples
 
-A typical migration file has this structure:
+### Adding a Column
+
+```typescript
+import { MigrationInterface, QueryRunner, TableColumn } from 'typeorm';
+
+export class AddEmailVerifiedColumn1234567890 implements MigrationInterface {
+  public async up(queryRunner: QueryRunner): Promise<void> {
+    await queryRunner.addColumn('users', new TableColumn({
+      name: 'email_verified',
+      type: 'boolean',
+      default: false,
+      isNullable: false
+    }));
+  }
+
+  public async down(queryRunner: QueryRunner): Promise<void> {
+    await queryRunner.dropColumn('users', 'email_verified');
+  }
+}
+```
+
+### Adding an Index
+
+```typescript
+import { MigrationInterface, QueryRunner, TableIndex } from 'typeorm';
+
+export class AddEmailIndex1234567890 implements MigrationInterface {
+  public async up(queryRunner: QueryRunner): Promise<void> {
+    await queryRunner.createIndex('users', new TableIndex({
+      name: 'idx_users_email',
+      columnNames: ['email']
+    }));
+  }
+
+  public async down(queryRunner: QueryRunner): Promise<void> {
+    await queryRunner.dropIndex('users', 'idx_users_email');
+  }
+}
+```
+
+### Data Migration
 
 ```typescript
 import { MigrationInterface, QueryRunner } from 'typeorm';
 
-export class MigrationName implements MigrationInterface {
-  name = 'MigrationName';
-
+export class MigrateUserRoles1234567890 implements MigrationInterface {
   public async up(queryRunner: QueryRunner): Promise<void> {
-    // Schema changes to apply
-    
-    // Update schema version
+    // Update existing users to have default role
     await queryRunner.query(`
-      INSERT INTO schema_version (version, description, applied_at)
-      VALUES ('${this.name}', 'Description', CURRENT_TIMESTAMP)
-      ON CONFLICT (version) DO UPDATE SET applied_at = CURRENT_TIMESTAMP;
+      UPDATE users 
+      SET role = 'customer' 
+      WHERE role IS NULL
     `);
   }
 
   public async down(queryRunner: QueryRunner): Promise<void> {
-    // Rollback logic
-    
-    // Remove from schema version
-    await queryRunner.query(`DELETE FROM schema_version WHERE version = '${this.name}';`);
+    // Revert to NULL for users that had NULL before
+    // Note: This is a simplified example
+    await queryRunner.query(`
+      UPDATE users 
+      SET role = NULL 
+      WHERE role = 'customer'
+    `);
   }
-} 
+}
+```
+
+## Production Deployment Checklist
+
+- [ ] Migration tested locally
+- [ ] Migration tested on staging database
+- [ ] Database backup created
+- [ ] Downtime window scheduled (if needed)
+- [ ] Rollback plan documented
+- [ ] Team notified of deployment
+- [ ] Migration applied
+- [ ] Application restarted
+- [ ] Verification tests run
+- [ ] Monitoring checked for errors
+
+## Troubleshooting
+
+### Migration Failed
+
+1. Check the error message in the console
+2. Verify database connection
+3. Check if migration was partially applied
+4. Revert the migration: `npm run migration:revert`
+5. Fix the issue and run again
+
+### Migration Already Applied
+
+TypeORM tracks applied migrations in the `migrations` table. To re-run:
+1. Manually delete the entry from `migrations` table
+2. Or create a new migration with a different timestamp
+
+### Can't Generate Migration
+
+1. Ensure entities are properly defined
+2. Check TypeORM configuration in `ormconfig.json` or `data-source.ts`
+3. Verify database connection
+4. Try running with `--pretty` flag for better output
+
+## Current Migration Status
+
+### Applied Migrations
+
+Run `npm run migration:show` to see which migrations have been applied.
+
+### Pending Features
+
+The following schema changes are tracked in code but may need migrations:
+- Knowledge base indexes (✅ Already applied via SQL)
+- Settings table column additions (✅ Already applied)
+
+## Resources
+
+- [TypeORM Migrations Documentation](https://typeorm.io/migrations)
+- [Migration API Reference](https://typeorm.io/migrations#migration-api)
+- Project Migration Files: `backend/src/migrations/`
+
+---
+
+**Last Updated:** 2025-11-28  
+**Maintainer:** Development Team

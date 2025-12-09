@@ -1,4 +1,4 @@
-import React from 'react';
+
 import { Box, Container, Typography, Grid, Link as MuiLink, Divider, IconButton, useTheme, Stack } from '@mui/material';
 import FacebookIcon from '@mui/icons-material/Facebook';
 import TwitterIcon from '@mui/icons-material/Twitter';
@@ -49,8 +49,8 @@ const FooterSection: React.FC = () => {
   const currentYear = new Date().getFullYear();
 
   return (
-    <Box 
-      component="footer" 
+    <Box
+      component="footer"
       sx={{
         py: { xs: 3, md: 4 },
         backgroundColor: theme.palette.mode === 'dark' ? 'rgba(0,0,0,0.8)' : '#0A1929',
@@ -121,35 +121,35 @@ const FooterSection: React.FC = () => {
                 ServiceFix
               </Typography>
             </Typography>
-            
+
             {/* Tagline */}
-            <Typography 
-              variant="body2" 
-              sx={{ 
-                mb: 2, 
-                opacity: 0.8, 
-                maxWidth: 280, 
+            <Typography
+              variant="body2"
+              sx={{
+                mb: 2,
+                opacity: 0.8,
+                maxWidth: 280,
                 fontSize: '0.8rem',
-                color: theme.palette.mode === 'dark' ? 'rgba(255,255,255,0.8)' : '#fff' 
+                color: theme.palette.mode === 'dark' ? 'rgba(255,255,255,0.8)' : '#fff'
               }}
             >
               AI-powered service automation platform for seamless customer support
             </Typography>
-            
+
             {/* Social media icons */}
             <Stack direction="row" spacing={1} sx={{ mb: 3 }}>
               {[FacebookIcon, TwitterIcon, LinkedInIcon].map((Icon, index) => (
-                <IconButton 
+                <IconButton
                   key={index}
-                  aria-label={`Social media ${index}`} 
+                  aria-label={`Social media ${index}`}
                   size="small"
-                  sx={{ 
+                  sx={{
                     color: '#fff',
                     transition: 'all 0.3s ease',
-                    '&:hover': { 
+                    '&:hover': {
                       backgroundColor: 'primary.main',
                       transform: 'translateY(-3px)',
-                      boxShadow: '0 4px 10px rgba(0,0,0,0.2)' 
+                      boxShadow: '0 4px 10px rgba(0,0,0,0.2)'
                     }
                   }}
                 >
@@ -162,10 +162,10 @@ const FooterSection: React.FC = () => {
           {/* Navigation links columns */}
           {footerNavigation.map((section, index) => (
             <Grid item xs={6} sm={2} key={section.title}>
-              <Typography 
-                variant="subtitle2" 
-                sx={{ 
-                  fontWeight: 600, 
+              <Typography
+                variant="subtitle2"
+                sx={{
+                  fontWeight: 600,
                   mb: 1.5,
                   color: theme.palette.primary.main,
                   textTransform: 'uppercase',
@@ -178,17 +178,17 @@ const FooterSection: React.FC = () => {
               <Box component="ul" sx={{ p: 0, m: 0, listStyle: 'none' }}>
                 {section.links.map((link) => (
                   <Box component="li" key={link.title} sx={{ mb: 1 }}>
-                    <MuiLink 
+                    <MuiLink
                       component={RouterLink}
                       to={link.href}
                       underline="none"
-                      sx={{ 
+                      sx={{
                         color: 'rgba(255, 255, 255, 0.7)',
                         transition: 'all 0.2s',
                         fontSize: '0.75rem',
                         display: 'inline-flex',
                         alignItems: 'center',
-                        '&:hover': { 
+                        '&:hover': {
                           color: theme.palette.primary.light,
                           transform: 'translateX(3px)'
                         }
@@ -204,12 +204,12 @@ const FooterSection: React.FC = () => {
         </Grid>
 
         <Divider sx={{ my: 2, borderColor: 'rgba(255, 255, 255, 0.1)' }} />
-        
+
         {/* Bottom section with copyright and legal links */}
-        <Box 
-          sx={{ 
-            display: 'flex', 
-            flexDirection: 'row', 
+        <Box
+          sx={{
+            display: 'flex',
+            flexDirection: 'row',
             justifyContent: 'center',
             alignItems: 'center',
             gap: 2,
@@ -217,31 +217,31 @@ const FooterSection: React.FC = () => {
           }}
         >
           {/* Copyright */}
-          <Typography 
-            variant="body2" 
-            sx={{ 
-              opacity: 0.7, 
-              fontSize: '0.7rem' 
+          <Typography
+            variant="body2"
+            sx={{
+              opacity: 0.7,
+              fontSize: '0.7rem'
             }}
           >
             © {currentYear} ServiceFix. All rights reserved.
           </Typography>
-          
+
           {/* Legal links */}
-          <Stack 
-            direction="row" 
-            spacing={2} 
-            sx={{ 
+          <Stack
+            direction="row"
+            spacing={2}
+            sx={{
               justifyContent: 'center',
               flexWrap: 'nowrap'
             }}
           >
-            <MuiLink 
+            <MuiLink
               component={RouterLink}
               to="/terms"
               variant="body2"
-              underline="hover" 
-              sx={{ 
+              underline="hover"
+              sx={{
                 color: 'rgba(255, 255, 255, 0.7)',
                 fontSize: '0.7rem',
                 '&:hover': { color: theme.palette.primary.light }
@@ -249,12 +249,12 @@ const FooterSection: React.FC = () => {
             >
               Terms
             </MuiLink>
-            <MuiLink 
+            <MuiLink
               component={RouterLink}
-              to="/privacy" 
+              to="/privacy"
               variant="body2"
-              underline="hover" 
-              sx={{ 
+              underline="hover"
+              sx={{
                 color: 'rgba(255, 255, 255, 0.7)',
                 fontSize: '0.7rem',
                 '&:hover': { color: theme.palette.primary.light }
@@ -262,12 +262,12 @@ const FooterSection: React.FC = () => {
             >
               Privacy
             </MuiLink>
-            <MuiLink 
+            <MuiLink
               component={RouterLink}
-              to="/cookies" 
+              to="/cookies"
               variant="body2"
-              underline="hover" 
-              sx={{ 
+              underline="hover"
+              sx={{
                 color: 'rgba(255, 255, 255, 0.7)',
                 fontSize: '0.7rem',
                 '&:hover': { color: theme.palette.primary.light }

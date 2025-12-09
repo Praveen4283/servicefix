@@ -10,6 +10,8 @@ import authService from '../services/auth.service';
 import { camelToSnake, snakeToCamel } from '../utils/modelConverters';
 import { v4 as uuidv4 } from 'uuid';
 import { createHash } from 'crypto';
+import { TIME } from '../constants/app.constants';
+import { getErrorMessage } from '../utils/errorUtils';
 
 // Secret key for JWT - Ensure environment variables are set
 if (!process.env.JWT_SECRET) {
@@ -73,7 +75,7 @@ interface RequestWithCsrf extends Request {
 const getCookieOptions = (isRefreshToken = false) => {
   const isProduction = process.env.NODE_ENV === 'production';
   const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
-  
+
   // Extract domain for production environment
   let cookieDomain;
   try {
@@ -86,15 +88,15 @@ const getCookieOptions = (isRefreshToken = false) => {
   } catch (error) {
     logger.warn(`Error parsing frontend URL: ${frontendUrl}`, error);
   }
-  
+
   // Define sameSite based on environment and context
   const sameSite: 'strict' | 'lax' | 'none' = isProduction ? 'strict' : 'lax';
-  
+
   // Get max age from environment variables or use defaults
-  const maxAge = isRefreshToken ? 
+  const maxAge = isRefreshToken ?
     parseDuration(process.env.JWT_REFRESH_EXPIRES_IN || '7d') :
     parseDuration(process.env.JWT_EXPIRES_IN || '1h');
-  
+
   return {
     httpOnly: true,
     secure: isProduction || frontendUrl.startsWith('https'),
@@ -171,8 +173,8 @@ const addDefaultsForOrganization = async (organizationId: string) => {
     }
 
     logger.info(`Added default statuses and priorities for organization ${organizationId}`);
-  } catch (error: any) {
-    logger.error(`Failed to add defaults for organization ${organizationId}: ${error.message}`);
+  } catch (error: unknown) {
+    logger.error(`Failed to add defaults for organization ${organizationId}: ${getErrorMessage(error)}`);
     // Don't throw - this shouldn't stop the registration process
   }
 };
@@ -187,10 +189,10 @@ export const register = asyncHandler(async (
 ) => {
   // Get the registration data from the request body
   const registrationData: UserRegistrationData = req.body;
-  
+
   // Convert camelCase input to snake_case for database
   const dbData = camelToSnake<DbUserRegistrationData>(registrationData);
-  
+
   // Validate fields
   if (!dbData.email || !dbData.password || !dbData.first_name || !dbData.last_name) {
     throw AppError.badRequest('Please provide all required fields', 'MISSING_FIELDS');
@@ -239,7 +241,7 @@ export const register = asyncHandler(async (
       organizationId
     ]
   );
-    
+
   const dbUser = userResult.rows[0];
 
   // Generate tokens
@@ -249,9 +251,13 @@ export const register = asyncHandler(async (
   // Calculate refresh token expiry date
   const refreshExpiresIn = parseDuration(process.env.JWT_REFRESH_EXPIRES_IN || '7d');
   const expiresAt = new Date(Date.now() + refreshExpiresIn);
-    
-  // Save refresh token to database
-  await authService.saveRefreshToken(dbUser.id, refreshToken, expiresAt);
+
+  // Get IP and user agent for tracking
+  const clientIp = req.ip || req.socket.remoteAddress || '0.0.0.0';
+  const userAgent = req.headers['user-agent'] || '';
+
+  // Save refresh token to database with IP tracking
+  await authService.saveRefreshToken(dbUser.id, refreshToken, expiresAt, clientIp, userAgent);
 
   // Convert snake_case database result to camelCase for the response
   const user = snakeToCamel<UserResponseData>(dbUser);
@@ -259,7 +265,7 @@ export const register = asyncHandler(async (
   // Set access token as HttpOnly cookie with proper settings
   const isProduction = process.env.NODE_ENV === 'production';
   const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
-  
+
   // Determine cookie domain based on environment
   let cookieDomain;
   if (isProduction && !frontendUrl.includes('localhost')) {
@@ -274,19 +280,19 @@ export const register = asyncHandler(async (
       logger.warn(`Error parsing frontend URL: ${frontendUrl}`, error);
     }
   }
-  
+
   // Use SameSite=None for cross-site requests in production
   const sameSite = isProduction ? 'none' : 'lax';
-  
+
   res.cookie('accessToken', token, {
     httpOnly: true,
     secure: isProduction || frontendUrl.startsWith('https'),
     sameSite: sameSite,
     path: '/',
     domain: cookieDomain,
-    maxAge: 60 * 60 * 1000 // 1 hour in milliseconds
+    maxAge: TIME.ONE_HOUR_MS
   });
-  
+
   // Set refresh token as HttpOnly cookie with the same settings
   res.cookie('refreshToken', refreshToken, {
     httpOnly: true,
@@ -294,7 +300,7 @@ export const register = asyncHandler(async (
     sameSite: sameSite,
     path: '/',
     domain: cookieDomain,
-    maxAge: 7 * 24 * 60 * 60 * 1000 // 7 days in milliseconds
+    maxAge: TIME.ONE_WEEK_MS
   });
 
   // Return user data and tokens
@@ -316,11 +322,11 @@ function generateRequestFingerprint(req: Request): string {
   const ip = req.ip || req.socket.remoteAddress || '0.0.0.0';
   // Extract browser and OS info without version numbers to be more resilient to updates
   const userAgent = req.headers['user-agent'] || '';
-  
+
   // Create a simplified fingerprint that's still useful for validation
   // but resilient to minor changes in the user agent string
   let simplifiedUserAgent = '';
-  
+
   // Extract browser name
   if (userAgent.includes('Chrome')) simplifiedUserAgent += 'Chrome_';
   else if (userAgent.includes('Firefox')) simplifiedUserAgent += 'Firefox_';
@@ -328,7 +334,7 @@ function generateRequestFingerprint(req: Request): string {
   else if (userAgent.includes('Edge')) simplifiedUserAgent += 'Edge_';
   else if (userAgent.includes('Trident') || userAgent.includes('MSIE')) simplifiedUserAgent += 'IE_';
   else simplifiedUserAgent += 'Other_';
-  
+
   // Extract OS
   if (userAgent.includes('Windows')) simplifiedUserAgent += 'Windows';
   else if (userAgent.includes('Mac OS')) simplifiedUserAgent += 'MacOS';
@@ -336,7 +342,7 @@ function generateRequestFingerprint(req: Request): string {
   else if (userAgent.includes('Android')) simplifiedUserAgent += 'Android';
   else if (userAgent.includes('iOS') || userAgent.includes('iPhone') || userAgent.includes('iPad')) simplifiedUserAgent += 'iOS';
   else simplifiedUserAgent += 'Other';
-  
+
   // Create a hash of the IP and simplified user agent
   const hash = createHash('md5')
     .update(`${ip}|${simplifiedUserAgent}`)
@@ -352,7 +358,7 @@ function generateRequestFingerprint(req: Request): string {
  */
 export const login = asyncHandler(async (req: Request, res: Response, next: NextFunction) => {
   const { email, password } = req.body;
-  
+
   if (!email || !password) {
     throw AppError.badRequest('Email and password are required');
   }
@@ -362,57 +368,58 @@ export const login = asyncHandler(async (req: Request, res: Response, next: Next
     'SELECT * FROM users WHERE email = $1',
     [email.toLowerCase()]
   );
-  
+
   if (userResult.rows.length === 0) {
     throw AppError.unauthorized('Invalid email or password');
   }
-  
+
   const user = userResult.rows[0];
-  
+
   // Check if password matches
   const isPasswordValid = await bcrypt.compare(password, user.password || user.encrypted_password || '');
   if (!isPasswordValid) {
     throw AppError.unauthorized('Invalid email or password');
   }
-  
+
   // Generate request fingerprint
   const fingerprint = generateRequestFingerprint(req);
-  
+
   // Generate token
   const token = authService.generateToken(user.id, user.role);
-  
+
   // Generate refresh token
   const refreshToken = authService.generateRefreshToken(user.id);
-  
+
   // Store user's IP address for security monitoring
   const clientIp = req.ip || req.socket.remoteAddress || '0.0.0.0';
+  const userAgent = req.headers['user-agent'] || '';
   await authService.storeUserIpAddress(user.id, clientIp);
-  
-  // Save refresh token to database
+
+  // Save refresh token to database with IP and user agent tracking
   const expiryDays = parseInt(process.env.JWT_REFRESH_EXPIRES_IN?.replace(/\D/g, '') || '7');
   const expiresAt = new Date();
   expiresAt.setDate(expiresAt.getDate() + expiryDays);
-  
-  await authService.saveRefreshToken(user.id, refreshToken, expiresAt, fingerprint);
-  
+
+  await authService.saveRefreshToken(user.id, refreshToken, expiresAt, clientIp, userAgent, fingerprint);
+
   // Set cookies with enhanced security 
   const cookieOptions = getCookieOptions();
   const refreshCookieOptions = getCookieOptions(true);
-  
+
   // Set accessToken cookie
   res.cookie('accessToken', token, cookieOptions);
-  
+
   // Set refresh token cookie
   res.cookie('refreshToken', refreshToken, refreshCookieOptions);
-  
+
   // Create a short-lived CSRF token with improved security
-  const csrfToken = crypto.randomBytes(64).toString('hex');
+  const csrfToken = crypto.randomBytes(32).toString('hex');
   res.cookie('_csrf', csrfToken, {
     ...cookieOptions,
     httpOnly: false, // CSRF token needs to be readable by JavaScript
-    maxAge: 24 * 60 * 60 * 1000 // 24 hours
+    maxAge: TIME.CSRF_TOKEN_LIFETIME_MS
   });
-  
+
   // Add token creation time for improved management
   res.cookie('_token_created', Date.now().toString(), {
     httpOnly: false,
@@ -422,10 +429,10 @@ export const login = asyncHandler(async (req: Request, res: Response, next: Next
     domain: cookieOptions.domain,
     maxAge: cookieOptions.maxAge
   });
-  
+
   // Update last login timestamp
   await query('UPDATE users SET last_login_at = CURRENT_TIMESTAMP WHERE id = $1', [user.id]);
-  
+
   // Return user data and token
   res.json({
     status: 'success',
@@ -453,36 +460,36 @@ export const login = asyncHandler(async (req: Request, res: Response, next: Next
 export const refreshToken = asyncHandler(async (req: Request, res: Response, next: NextFunction) => {
   // Try different methods to get the refresh token
   let refreshToken = req.body.refreshToken || req.cookies?.refreshToken || null;
-  
+
   if (!refreshToken) {
-      throw AppError.badRequest('Refresh token is required');
+    throw AppError.badRequest('Refresh token is required');
   }
-  
+
   // Generate request fingerprint for security validation
   const fingerprint = generateRequestFingerprint(req);
-  
+
   try {
     // Request new access token
     const result = await authService.refreshAccessToken(refreshToken, fingerprint);
-    
+
     // Set new access token in HTTP-only cookie with enhanced security
     const cookieOptions = getCookieOptions();
     res.cookie('accessToken', result.token, cookieOptions);
-    
+
     // If we got a new refresh token due to rotation, update the cookie
     if (result.refreshToken) {
       const refreshCookieOptions = getCookieOptions(true);
       res.cookie('refreshToken', result.refreshToken, refreshCookieOptions);
     }
-    
+
     // Also refresh the CSRF token with improved security
-    const newCsrfToken = crypto.randomBytes(64).toString('hex');
+    const newCsrfToken = crypto.randomBytes(32).toString('hex');
     res.cookie('_csrf', newCsrfToken, {
       ...cookieOptions,
       httpOnly: false, // CSRF token needs to be readable by JavaScript
-      maxAge: 24 * 60 * 60 * 1000 // 24 hours
+      maxAge: TIME.CSRF_TOKEN_LIFETIME_MS
     });
-    
+
     // Update token creation time
     res.cookie('_token_created', Date.now().toString(), {
       httpOnly: false,
@@ -492,7 +499,7 @@ export const refreshToken = asyncHandler(async (req: Request, res: Response, nex
       domain: cookieOptions.domain,
       maxAge: cookieOptions.maxAge
     });
-    
+
     // Return new tokens
     res.json({
       status: 'success',
@@ -521,13 +528,13 @@ export const logout = asyncHandler(async (
   try {
     // Get refresh token from cookie
     const refreshToken = req.cookies.refreshToken;
-    
+
     // If refresh token exists, revoke it
     if (refreshToken) {
       try {
         // Verify token to get userId
         const decoded = authService.verifyRefreshToken(refreshToken);
-        
+
         // Revoke token in database
         if (decoded?.userId) {
           await authService.revokeRefreshToken(decoded.userId, refreshToken);
@@ -537,17 +544,17 @@ export const logout = asyncHandler(async (
         logger.warn('Error verifying refresh token during logout:', error);
       }
     }
-    
+
     // Clear all auth-related cookies
     const baseAccessOptions = getCookieOptions();
     const baseRefreshOptions = getCookieOptions(true);
     const baseCsrfOptions = getCookieOptions();
-    
+
     // Create new option objects without the maxAge property
     const { maxAge: _1, ...accessOptions } = baseAccessOptions;
     const { maxAge: _2, ...refreshOptions } = baseRefreshOptions;
     const { maxAge: _3, ...csrfOptions } = baseCsrfOptions;
-    
+
     res.clearCookie('accessToken', accessOptions);
     res.clearCookie('refreshToken', refreshOptions);
     res.clearCookie('_csrf', csrfOptions);
@@ -569,27 +576,27 @@ export const forgotPassword = asyncHandler(async (
   res: Response,
   next: NextFunction
 ) => {
-    const { email } = req.body;
+  const { email } = req.body;
 
   if (!email) {
     throw AppError.badRequest('Email is required', 'MISSING_EMAIL');
   }
-    
-    // Check if user exists
+
+  // Check if user exists
   const result = await query('SELECT id FROM users WHERE email = $1', [email]);
-    if (result.rows.length === 0) {
-      // Don't reveal that the user doesn't exist
+  if (result.rows.length === 0) {
+    // Don't reveal that the user doesn't exist
     res.json({
       message: 'If a user with that email exists, a password reset link has been sent'
-      });
-      return;
-    }
-    
+    });
+    return;
+  }
+
   const userId = result.rows[0].id;
-    
-    // Generate reset token
+
+  // Generate reset token
   const resetToken = await authService.generatePasswordResetToken(userId);
-    
+
   // In a real application, send an email with the reset token
   // For this example, we'll just return it (in practice, never return this token directly)
   logger.info(`Reset token for user ${userId}: ${resetToken}`);
@@ -598,7 +605,7 @@ export const forgotPassword = asyncHandler(async (
     message: 'If a user with that email exists, a password reset link has been sent',
     // For development purposes only
     ...(process.env.NODE_ENV !== 'production' && { resetToken })
-    });
+  });
 });
 
 /**
@@ -609,31 +616,31 @@ export const resetPassword = asyncHandler(async (
   res: Response,
   next: NextFunction
 ) => {
-    const { token, password } = req.body;
-    
+  const { token, password } = req.body;
+
   if (!token || !password) {
     throw AppError.badRequest('Token and password are required', 'MISSING_PARAMETERS');
-    }
-    
+  }
+
   // Verify token and get user ID
   const userId = await authService.verifyPasswordResetToken(token);
-    
-    // Hash new password
-    const salt = await bcrypt.genSalt(10);
-    const hashedPassword = await bcrypt.hash(password, salt);
-    
+
+  // Hash new password
+  const salt = await bcrypt.genSalt(10);
+  const hashedPassword = await bcrypt.hash(password, salt);
+
   // Update password and clear reset token
   await query(
-      'UPDATE users SET password = $1, reset_token = NULL, reset_token_expires_at = NULL WHERE id = $2',
+    'UPDATE users SET password = $1, reset_token = NULL, reset_token_expires_at = NULL WHERE id = $2',
     [hashedPassword, userId]
-    );
-    
+  );
+
   // Revoke all refresh tokens for this user for security
   await authService.revokeAllRefreshTokens(userId);
-    
+
   res.json({
     message: 'Password reset successful'
-    });
+  });
 });
 
 /**
@@ -655,18 +662,18 @@ export const changePassword = asyncHandler(async (
   const result = await query('SELECT password FROM users WHERE id = $1', [userId]);
   if (result.rows.length === 0) {
     throw AppError.notFound('User not found', 'USER_NOT_FOUND');
-    }
+  }
 
   const hashedPassword = result.rows[0].password;
 
   // Verify current password
   const isMatch = await bcrypt.compare(currentPassword, hashedPassword);
-    if (!isMatch) {
+  if (!isMatch) {
     throw AppError.unauthorized('Current password is incorrect', 'INVALID_PASSWORD');
-    }
+  }
 
   // Hash new password
-    const salt = await bcrypt.genSalt(10);
+  const salt = await bcrypt.genSalt(10);
   const newHashedPassword = await bcrypt.hash(newPassword, salt);
 
   // Update password
@@ -708,7 +715,7 @@ export const validate = asyncHandler(async (
     WHERE u.id = $1`,
     [req.user.id]
   );
-  
+
   if (userResult.rows.length === 0) {
     throw AppError.notFound('User not found');
   }
@@ -751,16 +758,16 @@ export const getCsrfToken = asyncHandler(async (
   try {
     // Generate a new token
     const csrfToken = crypto.randomBytes(32).toString('hex');
-    
+
     // Set the token in a cookie with appropriate settings
     res.cookie('_csrf', csrfToken, {
       ...getCookieOptions(),
       httpOnly: false, // CSRF token needs to be accessible by JavaScript
-      maxAge: 24 * 60 * 60 * 1000 // 24 hours
+      maxAge: TIME.CSRF_TOKEN_LIFETIME_MS
     });
-    
+
     logger.info(`CSRF token generated for client: ${req.ip}`);
-    
+
     // Send the token to the client
     res.status(200).json({
       status: 'success',
@@ -772,16 +779,98 @@ export const getCsrfToken = asyncHandler(async (
   }
 });
 
+/**
+ * Get active sessions for the current user
+ * Returns all non-revoked, non-expired refresh tokens with IP/device info
+ */
+export const getActiveSessions = asyncHandler(async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+) => {
+  const userId = req.user?.id;
+
+  if (!userId) {
+    throw AppError.unauthorized('Not authenticated');
+  }
+
+  try {
+    // Get current refresh token to mark it in the response
+    const currentRefreshToken = req.cookies.refreshToken || '';
+
+    // Fetch all active sessions
+    const sessions = await query(
+      `SELECT 
+         id,
+         ip_address,
+         user_agent,
+         created_at,
+         last_used_at,
+         expires_at,
+         (refresh_token = $2) as is_current
+       FROM user_tokens
+       WHERE user_id = $1 
+         AND expires_at > NOW() 
+         AND is_revoked = FALSE
+       ORDER BY last_used_at DESC NULLS LAST, created_at DESC
+       LIMIT 20`,
+      [userId, currentRefreshToken]
+    );
+
+    // Parse user agent to extract device info
+    const parseUserAgent = (ua: string) => {
+      if (!ua) return 'Unknown Device';
+
+      let browser = 'Unknown';
+      let os = 'Unknown';
+
+      // Detect browser
+      if (ua.includes('Chrome') && !ua.includes('Edg')) browser = 'Chrome';
+      else if (ua.includes('Firefox')) browser = 'Firefox';
+      else if (ua.includes('Safari') && !ua.includes('Chrome')) browser = 'Safari';
+      else if (ua.includes('Edg')) browser = 'Edge';
+      else if (ua.includes('MSIE') || ua.includes('Trident')) browser = 'Internet Explorer';
+
+      // Detect OS
+      if (ua.includes('Windows')) os = 'Windows';
+      else if (ua.includes('Mac OS')) os = 'macOS';
+      else if (ua.includes('Linux')) os = 'Linux';
+      else if (ua.includes('Android')) os = 'Android';
+      else if (ua.includes('iOS') || ua.includes('iPhone') || ua.includes('iPad')) os = 'iOS';
+
+      return `${browser} on ${os}`;
+    };
+
+    res.json({
+      status: 'success',
+      count: sessions.rows.length,
+      sessions: sessions.rows.map(s => ({
+        id: s.id,
+        ipAddress: s.ip_address || 'Unknown',
+        device: parseUserAgent(s.user_agent),
+        userAgent: s.user_agent,
+        createdAt: s.created_at,
+        lastUsedAt: s.last_used_at || s.created_at,
+        expiresAt: s.expires_at,
+        isCurrent: s.is_current
+      }))
+    });
+  } catch (error) {
+    logger.error('Error fetching active sessions:', error);
+    next(error);
+  }
+});
+
 // Function to parse a duration string like '7d' and return milliseconds
 const parseDuration = (durationStr: string): number => {
   const unit = durationStr.slice(-1);
   const value = parseInt(durationStr.slice(0, -1), 10);
 
-    switch (unit) {
+  switch (unit) {
     case 's': return value * 1000; // seconds
     case 'm': return value * 60 * 1000; // minutes
     case 'h': return value * 60 * 60 * 1000; // hours
     case 'd': return value * 24 * 60 * 60 * 1000; // days
     default: return value; // assume milliseconds
-    }
+  }
 }; 

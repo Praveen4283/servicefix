@@ -1,11 +1,11 @@
-import React from 'react';
-import { 
-  Card, 
-  CardContent, 
-  Box, 
-  Typography, 
-  Chip, 
-  Avatar, 
+
+import {
+  Card,
+  CardContent,
+  Box,
+  Typography,
+  Chip,
+  Avatar,
   Grid,
   Tooltip,
   alpha
@@ -33,21 +33,21 @@ const TicketListItem: React.FC<TicketListItemProps> = ({ ticket, onClick }) => {
 
   const getTicketTitle = () => (
     <Box sx={{ display: 'flex', alignItems: 'center', mb: 0.5 }}>
-      <Typography 
-        variant="subtitle1" 
-        component="h3" 
-        sx={{ 
-          fontWeight: 600, 
+      <Typography
+        variant="subtitle1"
+        component="h3"
+        sx={{
+          fontWeight: 600,
           mr: 1,
           overflow: 'hidden',
           textOverflow: 'ellipsis',
           whiteSpace: 'nowrap'
         }}
       >
-        <Link 
-          to={`/tickets/${ticket.id}`} 
-          style={{ 
-            color: 'inherit', 
+        <Link
+          to={`/tickets/${ticket.id}`}
+          style={{
+            color: 'inherit',
             textDecoration: 'none',
             display: 'block'
           }}
@@ -55,13 +55,13 @@ const TicketListItem: React.FC<TicketListItemProps> = ({ ticket, onClick }) => {
           {ticket.subject}
         </Link>
       </Typography>
-      
+
       {ticket.id && (
         <Chip
           label={`#${ticket.id}`}
           size="small"
-          sx={{ 
-            height: 20, 
+          sx={{
+            height: 20,
             fontSize: '0.65rem',
             backgroundColor: (theme) => alpha(theme.palette.primary.main, 0.1),
             color: 'primary.main'
@@ -70,12 +70,12 @@ const TicketListItem: React.FC<TicketListItemProps> = ({ ticket, onClick }) => {
       )}
     </Box>
   );
-  
+
   const getRequesterInfo = () => {
-    const requesterName = ticket.requester 
+    const requesterName = ticket.requester
       ? `${ticket.requester.firstName} ${ticket.requester.lastName}`.trim()
       : 'Unknown User';
-    
+
     return (
       <Box sx={{ display: 'flex', alignItems: 'center', mb: 1 }}>
         <Avatar
@@ -97,11 +97,11 @@ const TicketListItem: React.FC<TicketListItemProps> = ({ ticket, onClick }) => {
       </Box>
     );
   };
-  
+
   return (
-    <Card 
-      sx={{ 
-        mb: 2, 
+    <Card
+      sx={{
+        mb: 2,
         transition: 'all 0.2s ease',
         '&:hover': {
           boxShadow: 3,
@@ -114,7 +114,7 @@ const TicketListItem: React.FC<TicketListItemProps> = ({ ticket, onClick }) => {
       <CardContent sx={{ p: 2, '&:last-child': { pb: 2 } }}>
         {getTicketTitle()}
         {getRequesterInfo()}
-        
+
         <Grid container spacing={1} alignItems="center">
           <Grid item>
             <StatusBadge status={{
@@ -133,7 +133,7 @@ const TicketListItem: React.FC<TicketListItemProps> = ({ ticket, onClick }) => {
           <Grid item>
             <SLABadge ticketId={ticket.id} />
           </Grid>
-          
+
           <Grid item sx={{ ml: 'auto' }}>
             {ticket.assignee ? (
               <Tooltip title={`Assigned to: ${ticket.assignee.firstName} ${ticket.assignee.lastName}`}>
@@ -150,7 +150,7 @@ const TicketListItem: React.FC<TicketListItemProps> = ({ ticket, onClick }) => {
                 <Chip
                   label="Unassigned"
                   size="small"
-                  sx={{ 
+                  sx={{
                     height: 24,
                     backgroundColor: (theme) => alpha(theme.palette.warning.main, 0.1),
                     color: 'warning.main'

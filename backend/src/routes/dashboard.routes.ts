@@ -3,6 +3,7 @@ import path from 'path';
 import fs from 'fs';
 import express from 'express';
 import { RouteInfo, getRouteInfo, getSystemInfo, SystemInfo } from '../utils/routeInfo';
+import { logger } from '../utils/logger';
 
 const router = Router();
 
@@ -14,20 +15,20 @@ router.get('/', async (req: Request, res: Response) => {
   try {
     // Get all route information
     const routeInfo = getRouteInfo();
-    
+
     // Get system information
     const sysInfo = getSystemInfo();
-    
+
     // Generate HTML dashboard
     const html = generateDashboardHTML(routeInfo, sysInfo);
-    
+
     // Send the HTML response
     res.setHeader('Content-Type', 'text/html');
     res.status(200).send(html);
   } catch (error) {
-    res.status(500).json({ 
-      status: 'error', 
-      message: 'Failed to generate dashboard' 
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to generate dashboard'
     });
   }
 });
@@ -45,7 +46,7 @@ function generateDashboardHTML(routeInfo: RouteInfo[], sysInfo: SystemInfo): str
   const rssMemory = sysInfo.memoryUsage.rss;
   const dbStatus = sysInfo.databaseStatus;
   const startTime = sysInfo.startTime.toLocaleString();
-  
+
   // Group routes by category
   const routesByCategory: { [key: string]: RouteInfo[] } = {};
   routeInfo.forEach(route => {
@@ -55,7 +56,7 @@ function generateDashboardHTML(routeInfo: RouteInfo[], sysInfo: SystemInfo): str
     }
     routesByCategory[category].push(route);
   });
-  
+
   return `
 <!DOCTYPE html>
 <html lang="en" data-theme="light">
@@ -623,8 +624,8 @@ function generateDashboardHTML(routeInfo: RouteInfo[], sysInfo: SystemInfo): str
                     <td>${route.path}</td>
                     <td>
                       ${route.description || '-'}
-                      ${route.params && route.params.length > 0 ? 
-                        `<div class="params-list">
+                      ${route.params && route.params.length > 0 ?
+      `<div class="params-list">
                           ${route.params.map(param => `<span class="param-tag">${param}</span>`).join('')}
                         </div>` : ''}
                     </td>
@@ -635,8 +636,8 @@ function generateDashboardHTML(routeInfo: RouteInfo[], sysInfo: SystemInfo): str
                       </div>
                       <div class="endpoint-test-panel" id="test-${route.path.replace(/\//g, '-').replace(/:/g, '-')}-${route.method}">
                         <h4>Test Endpoint</h4>
-                        ${route.params && route.params.length > 0 ? 
-                          `<div class="param-input-container">
+                        ${route.params && route.params.length > 0 ?
+      `<div class="param-input-container">
                             ${route.params.map(param => `
                               <div class="param-input-group">
                                 <label class="param-label" for="param-${param}">${param}:</label>
@@ -861,7 +862,7 @@ function generateDashboardHTML(routeInfo: RouteInfo[], sysInfo: SystemInfo): str
           });
         })
         .catch(error => {
-          console.error('Error updating health data:', error);
+          logger.error('Error updating health data:', error);
         });
     }
     
@@ -881,13 +882,13 @@ function formatUptime(uptimeInSeconds: number): string {
   const hours = Math.floor((uptimeInSeconds % (24 * 60 * 60)) / (60 * 60));
   const minutes = Math.floor((uptimeInSeconds % (60 * 60)) / 60);
   const seconds = Math.floor(uptimeInSeconds % 60);
-  
+
   const parts = [];
   if (days > 0) parts.push(`${days}d`);
   if (hours > 0) parts.push(`${hours}h`);
   if (minutes > 0) parts.push(`${minutes}m`);
   if (seconds > 0 || parts.length === 0) parts.push(`${seconds}s`);
-  
+
   return parts.join(' ');
 }
 

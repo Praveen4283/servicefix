@@ -1,9 +1,9 @@
 import express from 'express';
 import { z } from 'zod';
-import { login, register, forgotPassword, resetPassword, refreshToken, logout, changePassword, validate, getCsrfToken } from '../controllers/auth.controller';
+import { login, register, forgotPassword, resetPassword, refreshToken, logout, changePassword, validate, getCsrfToken, getActiveSessions } from '../controllers/auth.controller';
 import { validateZod } from '../middleware/zod-validate.middleware';
 import { authenticate } from '../middleware/auth.middleware';
-import ValidationPatterns, { createRequestSchema } from '../utils/validation';
+import { ValidationPatterns, createRequestSchema } from '../utils/validation';
 
 const router = express.Router();
 
@@ -91,5 +91,8 @@ router.get('/csrf-token', getCsrfToken);
 
 // Validate authentication status
 router.get('/validate', authenticate, validate);
+
+// Get active sessions (requires authentication)
+router.get('/sessions', authenticate, getActiveSessions);
 
 export default router; 

@@ -1,4 +1,5 @@
 import apiClient from './apiClient';
+import { logger } from '../utils/frontendLogger';
 
 export interface SLAPolicy {
   id: number;
@@ -56,10 +57,10 @@ const slaService = {
   async getSLAPolicies(organizationId: number): Promise<SLAPolicy[]> {
     try {
       const response = await apiClient.get(`/sla/organization/${organizationId}`);
-      
+
       // Log response for debugging
-      console.log(`SLA policies response for org ${organizationId}:`, response);
-      
+      logger.debug(`SLA policies response for org ${organizationId}:`, response);
+
       // Handle different possible response structures
       if (Array.isArray(response)) {
         // Direct array response
@@ -77,12 +78,12 @@ const slaService = {
           return possibleArrays[0] as SLAPolicy[];
         }
       }
-      
+
       // If we reached here, return empty array
-      console.warn(`No SLA policies found for organization ID: ${organizationId}`);
+      logger.warn(`No SLA policies found for organization ID: ${organizationId}`);
       return [];
     } catch (error) {
-      console.error('Error fetching SLA policies:', error);
+      logger.error('Error fetching SLA policies:', error);
       return [];
     }
   },
@@ -115,7 +116,7 @@ const slaService = {
     try {
       // Ensure we're passing a clean numeric ID to the API
       let cleanTicketId: string;
-      
+
       if (typeof ticketId === 'number') {
         cleanTicketId = String(ticketId);
       } else {
@@ -126,13 +127,13 @@ const slaService = {
         }
         cleanTicketId = matches[1];
       }
-      
+
       // Call the auto-assign endpoint
       const response = await apiClient.post(`/sla/auto-assign/${cleanTicketId}`);
-      console.log('Auto-assigned SLA policy response:', response);
+      logger.debug('Auto-assigned SLA policy response:', response);
       return response.data;
     } catch (error: any) {
-      console.error(`Failed to auto-assign SLA policy for ticket ${ticketId}:`, error);
+      logger.error(`Failed to auto-assign SLA policy for ticket ${ticketId}:`, error);
       return null;
     }
   },
@@ -141,7 +142,7 @@ const slaService = {
     try {
       // Ensure we're passing a clean numeric ID to the API
       let cleanTicketId: string;
-      
+
       if (typeof ticketId === 'number') {
         cleanTicketId = String(ticketId);
       } else {
@@ -149,21 +150,21 @@ const slaService = {
         const matches = ticketId.match(/\d+/);
         cleanTicketId = matches ? matches[0] : ticketId;
       }
-      
+
       const response = await apiClient.get(`/sla/ticket/${cleanTicketId}`);
-      console.log(`SLA status for ticket ${cleanTicketId}:`, response);
-      
+      logger.debug(`SLA status for ticket ${cleanTicketId}:`, response);
+
       // The response should now have standard format with status and data properties
-      if (response && 
-          typeof response === 'object' && 
-          response.status === 'success' && 
-          response.data) {
-        
+      if (response &&
+        typeof response === 'object' &&
+        response.status === 'success' &&
+        response.data) {
+
         return response.data;
-      } else if (response && 
-          typeof response === 'object' && 
-          'firstResponseRemainingMinutes' in response) {
-        
+      } else if (response &&
+        typeof response === 'object' &&
+        'firstResponseRemainingMinutes' in response) {
+
         // Handle old format for backward compatibility
         return {
           isFirstResponseBreached: response.isFirstResponseBreached,
@@ -177,17 +178,17 @@ const slaService = {
           isEstimated: false
         };
       }
-      
+
       throw new Error('Invalid SLA status response format');
     } catch (err) {
-      console.error(`SLA status fetch failed for ticket ${ticketId}:`, err);
+      logger.error(`SLA status fetch failed for ticket ${ticketId}:`, err);
       throw new Error('Failed to load SLA status');
     }
   },
 
   async getSLAMetrics(
-    organizationId: number, 
-    startDate: Date, 
+    organizationId: number,
+    startDate: Date,
     endDate: Date
   ): Promise<SLAMetrics> {
     const response = await apiClient.get('/sla/metrics', {
@@ -240,7 +241,7 @@ const slaService = {
     try {
       // Ensure we're passing a clean numeric ID to the API
       let cleanTicketId: string;
-      
+
       if (typeof ticketId === 'number') {
         cleanTicketId = String(ticketId);
       } else {
@@ -248,12 +249,12 @@ const slaService = {
         const matches = ticketId.match(/\d+/);
         cleanTicketId = matches ? matches[0] : ticketId;
       }
-      
+
       const response = await apiClient.post(`/sla/pause/${cleanTicketId}`);
-      console.log(`SLA paused for ticket ${cleanTicketId}:`, response);
+      logger.debug(`SLA paused for ticket ${cleanTicketId}:`, response);
       return response && response.success === true;
     } catch (err) {
-      console.error(`Failed to pause SLA for ticket ${ticketId}:`, err);
+      logger.error(`Failed to pause SLA for ticket ${ticketId}:`, err);
       return false;
     }
   },
@@ -267,7 +268,7 @@ const slaService = {
     try {
       // Ensure we're passing a clean numeric ID to the API
       let cleanTicketId: string;
-      
+
       if (typeof ticketId === 'number') {
         cleanTicketId = String(ticketId);
       } else {
@@ -275,12 +276,12 @@ const slaService = {
         const matches = ticketId.match(/\d+/);
         cleanTicketId = matches ? matches[0] : ticketId;
       }
-      
+
       const response = await apiClient.post(`/sla/resume/${cleanTicketId}`);
-      console.log(`SLA resumed for ticket ${cleanTicketId}:`, response);
+      logger.debug(`SLA resumed for ticket ${cleanTicketId}:`, response);
       return response && response.success === true;
     } catch (err) {
-      console.error(`Failed to resume SLA for ticket ${ticketId}:`, err);
+      logger.error(`Failed to resume SLA for ticket ${ticketId}:`, err);
       return false;
     }
   }

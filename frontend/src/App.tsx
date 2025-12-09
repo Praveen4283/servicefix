@@ -1,16 +1,16 @@
 import React, { Suspense, useEffect, lazy } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate, useLocation } from 'react-router-dom';
-import { 
-  CssBaseline, 
-  Box, 
-  CircularProgress, 
+import {
+  CssBaseline,
+  Box,
+  CircularProgress,
   Typography,
   Paper,
   Button,
   Grid
 } from '@mui/material';
-import { 
-  Add as AddIcon 
+import {
+  Add as AddIcon
 } from '@mui/icons-material';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { NotificationProvider, NotificationContainer } from './context/NotificationContext';
@@ -22,6 +22,7 @@ import { ErrorBoundary } from './components/ErrorBoundary';
 import { isDevelopment } from './utils/environment';
 import CookieConsentBanner from './components/common/CookieConsentBanner';
 import { initializeNotificationSystem, shutdownNotificationSystem } from './services/notificationInitializer';
+import { logger } from './utils/frontendLogger';
 
 // Layouts
 import AppLayout from './components/layout/AppLayout';
@@ -58,11 +59,11 @@ const IS_DEVELOPMENT = isDevelopment();
 
 // Loading component for Suspense fallback
 const LoadingSpinner = () => (
-  <Box 
-    display="flex" 
-    justifyContent="center" 
-    alignItems="center" 
-    flexDirection="column" 
+  <Box
+    display="flex"
+    justifyContent="center"
+    alignItems="center"
+    flexDirection="column"
     minHeight="100vh"
   >
     <CircularProgress size={50} color="primary" />
@@ -72,8 +73,8 @@ const LoadingSpinner = () => (
 
 // Error fallback component
 const ErrorFallback = ({ error, resetErrorBoundary }: { error: Error, resetErrorBoundary: () => void }) => (
-  <Paper 
-    elevation={3} 
+  <Paper
+    elevation={3}
     sx={{
       m: 2,
       p: 4,
@@ -89,9 +90,9 @@ const ErrorFallback = ({ error, resetErrorBoundary }: { error: Error, resetError
     <Typography variant="body1" paragraph>
       {error.message}
     </Typography>
-    <Button 
-      variant="contained" 
-      color="primary" 
+    <Button
+      variant="contained"
+      color="primary"
       onClick={resetErrorBoundary}
       startIcon={<AddIcon />}
     >
@@ -104,7 +105,7 @@ const ErrorFallback = ({ error, resetErrorBoundary }: { error: Error, resetError
 const AppWithRouter = () => {
   const location = useLocation();
   const { isAuthenticated, user, isLoading } = useAuth();
-  
+
   // Initialize and cleanup notification system
   useEffect(() => {
     // When auth state changes and user is authenticated
@@ -114,82 +115,85 @@ const AppWithRouter = () => {
         initializeNotificationSystem(authToken);
       }
     }
-    
-    // Cleanup function
+
+    // Cleanup function - only disconnect when user is NOT authenticated
+    // This prevents disconnections during navigation between protected routes
     return () => {
-      shutdownNotificationSystem();
+      if (!isAuthenticated) {
+        shutdownNotificationSystem();
+      }
     };
   }, [isAuthenticated, user, isLoading]);
-  
+
   // Protect routes that require authentication
   const withProtectedLayout = (Component: React.ComponentType<any>, requiredRole?: string) => {
     // Return a proper function component that can use hooks
     const WithProtectedLayoutComponent = () => {
       const { isAuthenticated, user, isLoading } = useAuth();
       const location = useLocation();
-      
+
       // If still loading auth state, show a loading spinner instead of redirecting
       if (isLoading) {
         return <LoadingSpinner />;
       }
-      
+
       if (!isAuthenticated) {
         // Only redirect to login if not authenticated AND not loading
         return <Navigate to="/login" replace state={{ from: location }} />;
       }
-      
+
       // Check role requirement if specified
       if (requiredRole && user?.role !== requiredRole) {
         // Redirect to dashboard if role doesn't match
         return <Navigate to="/dashboard" replace />;
       }
-      
+
       return (
         <AppLayout>
           <Component />
         </AppLayout>
       );
     };
-    
+
     return <WithProtectedLayoutComponent />;
   };
-  
+
   // Create a wrapper for authentication pages
   const withAuthLayout = (Component: React.ComponentType<any>) => {
     // Return a proper function component that can use hooks
     const WithAuthLayoutComponent = () => {
       const location = useLocation();
       const { isAuthenticated, isLoading } = useAuth();
-      
+
       // Also check loading state here to prevent flashing login page
       if (isLoading) {
         return <LoadingSpinner />;
       }
-      
+
       // Check localStorage for user data as a backup check for successful login
       const cachedUser = localStorage.getItem('user');
       const isLocallyAuthenticated = !!cachedUser;
-      
+
       // Prevent redirect loops by checking if we're already trying to redirect
       const isRedirecting = location.state?.isRedirecting;
-      
+
       // If we have authentication either from context or localStorage, consider the user authenticated
       if ((isAuthenticated || isLocallyAuthenticated) && !isRedirecting) {
-        console.log('[App] User is authenticated, redirecting to dashboard from auth page');
+        logger.debug('[App] User is authenticated, redirecting to dashboard from auth page');
         // Redirect to dashboard if already authenticated, with state to prevent loops
         return <Navigate to="/dashboard" replace state={{ isRedirecting: true }} />;
       }
-      
+
       return (
         <AppLayout>
           <Component />
         </AppLayout>
       );
     };
-    
+
     return <WithAuthLayoutComponent />;
   };
-  
+
   // Create a wrapper for public pages (no auth check)
   const withPublicLayout = (Component: React.ComponentType<any>) => {
     // Return a proper function component
@@ -198,7 +202,7 @@ const AppWithRouter = () => {
         <Component />
       </AppLayout>
     );
-    
+
     return <WithPublicLayoutComponent />;
   };
 
@@ -213,17 +217,17 @@ const AppWithRouter = () => {
               {/* Global components that should appear across all pages */}
               <CookieConsentBanner />
               {isAuthenticated && <ChatbotWidget />}
-              
+
               <Routes>
                 {/* Public routes */}
                 <Route path="/" element={<LandingPage />} />
-                
+
                 {/* Auth routes - these should not require authentication */}
                 <Route path="/login" element={withAuthLayout(LoginPage)} />
                 <Route path="/register" element={withAuthLayout(RegisterPage)} />
                 <Route path="/forgot-password" element={withAuthLayout(ForgotPasswordPage)} />
                 <Route path="/reset-password" element={withAuthLayout(ResetPasswordPage)} />
-                
+
                 {/* Protected routes - these require authentication */}
                 <Route path="/dashboard" element={withProtectedLayout(DashboardPage)} />
                 <Route path="/tickets">
@@ -231,27 +235,27 @@ const AppWithRouter = () => {
                   <Route path="create" element={withProtectedLayout(CreateTicketPage)} />
                   <Route path=":id" element={withProtectedLayout(TicketDetailPage)} />
                 </Route>
-                
+
                 {/* Knowledge base routes */}
                 <Route path="/knowledge">
                   <Route index element={withProtectedLayout(KnowledgeBasePage)} />
                   <Route path=":id" element={withProtectedLayout(ArticleDetailPage)} />
                 </Route>
-                
+
                 {/* Admin routes */}
                 <Route path="/analytics" element={withProtectedLayout(AnalyticsDashboardPage, 'admin')} />
                 <Route path="/automation" element={withProtectedLayout(WorkflowAutomationPage, 'admin')} />
                 <Route path="/reports" element={withProtectedLayout(ReportsPage)} />
                 <Route path="/users" element={withProtectedLayout(UsersPage, 'admin')} />
                 <Route path="/settings" element={withProtectedLayout(SettingsPage, 'admin')} />
-                
+
                 {/* User profile */}
                 <Route path="/profile" element={withProtectedLayout(ProfilePage)} />
-                
+
                 {/* Other routes */}
                 <Route path="/search" element={withProtectedLayout(SearchPage)} />
                 <Route path="/cookies" element={withPublicLayout(CookiesPage)} />
-                
+
                 {/* Catch-all 404 */}
                 <Route path="*" element={withPublicLayout(NotFoundPage)} />
               </Routes>

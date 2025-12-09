@@ -40,6 +40,22 @@ export interface TicketStats {
   highPriority: number;
 }
 
+// DTO for creating a new ticket
+export interface CreateTicketDTO {
+  subject: string;
+  description: string;
+  statusId: number;
+  priorityId?: number;
+  typeId?: number;
+  departmentId?: number;
+  assigneeId?: number;
+  requesterId: number;
+  organizationId?: number;
+  source?: string;
+  dueDate?: Date;
+  parentTicketId?: number;
+}
+
 class TicketService {
   /**
    * Get all ticket statuses for an organization
@@ -58,14 +74,14 @@ class TicketService {
            FROM ticket_statuses 
            WHERE organization_id = $1 OR organization_id IS NULL
            ORDER BY name`;
-      
+
       const result = await query(
         queryText,
         organizationId === null ? [] : [organizationId]
       );
       return result.rows;
     } catch (error) {
-      console.error('Error fetching ticket statuses:', error);
+      logger.error('Error fetching ticket statuses:', error);
       throw error;
     }
   }
@@ -87,14 +103,14 @@ class TicketService {
            FROM ticket_priorities 
            WHERE organization_id = $1 OR organization_id IS NULL
            ORDER BY sla_hours DESC`;
-      
+
       const result = await query(
         queryText,
         organizationId === null ? [] : [organizationId]
       );
       return result.rows;
     } catch (error) {
-      console.error('Error fetching ticket priorities:', error);
+      logger.error('Error fetching ticket priorities:', error);
       throw error;
     }
   }
@@ -116,14 +132,14 @@ class TicketService {
            FROM ticket_types
            WHERE organization_id = $1 OR organization_id IS NULL
            ORDER BY name`;
-      
+
       const result = await query(
         queryText,
         organizationId === null ? [] : [organizationId]
       );
       return result.rows;
     } catch (error) {
-      console.error('Error fetching ticket types:', error);
+      logger.error('Error fetching ticket types:', error);
       throw error;
     }
   }
@@ -145,14 +161,14 @@ class TicketService {
            FROM departments
            WHERE organization_id = $1 OR organization_id IS NULL
            ORDER BY name`;
-      
+
       const result = await query(
         queryText,
         organizationId === null ? [] : [organizationId]
       );
       return result.rows;
     } catch (error) {
-      console.error('Error fetching departments:', error);
+      logger.error('Error fetching departments:', error);
       throw error;
     }
   }
@@ -174,28 +190,28 @@ class TicketService {
            WHERE (organization_id = $1 OR organization_id IS NULL) 
            AND is_default = true 
            LIMIT 1`;
-      
+
       const result = await query(
         queryText,
         organizationId === null ? [] : [organizationId]
       );
-      
+
       if (result.rows.length === 0) {
         throw new Error('Default ticket status not found');
       }
-      
+
       return result.rows[0].id;
     } catch (error) {
-      console.error('Error fetching default ticket status:', error);
+      logger.error('Error fetching default ticket status:', error);
       throw error;
     }
   }
 
-  async createTicket(ticketData: any) {
+  async createTicket(ticketData: CreateTicketDTO): Promise<Ticket> {
     const ticketRepository = AppDataSource.getRepository(Ticket);
     const newTicket = ticketRepository.create(ticketData);
     const savedTicket = await ticketRepository.save(newTicket);
-    
+
     // Auto-assign SLA policy based on ticket priority if SLA is enabled
     if (savedTicket && typeof savedTicket === 'object' && 'priorityId' in savedTicket) {
       try {
@@ -207,7 +223,7 @@ class TicketService {
         // Continue with ticket creation even if SLA assignment fails
       }
     }
-    
+
     return savedTicket;
   }
 
@@ -219,33 +235,33 @@ class TicketService {
    */
   async updateTicket(ticketId: number, ticketData: Partial<Ticket>): Promise<Ticket> {
     const ticketRepository = AppDataSource.getRepository(Ticket);
-    
+
     // Get the current ticket
-    const currentTicket = await ticketRepository.findOne({ 
-      where: { id: ticketId } 
+    const currentTicket = await ticketRepository.findOne({
+      where: { id: ticketId }
     });
-    
+
     if (!currentTicket) {
       throw new Error(`Ticket with ID ${ticketId} not found`);
     }
 
     // Check if priority is changing
-    const priorityChanged = 
-      ticketData.priorityId !== undefined && 
+    const priorityChanged =
+      ticketData.priorityId !== undefined &&
       currentTicket.priorityId !== ticketData.priorityId;
 
     // Update the ticket
     await ticketRepository.update(ticketId, ticketData);
-    
+
     // Get the updated ticket
-    const updatedTicket = await ticketRepository.findOne({ 
-      where: { id: ticketId } 
+    const updatedTicket = await ticketRepository.findOne({
+      where: { id: ticketId }
     });
-    
+
     if (!updatedTicket) {
       throw new Error(`Failed to retrieve updated ticket with ID ${ticketId}`);
     }
-    
+
     // If priority changed, update SLA policy
     if (priorityChanged) {
       try {
@@ -256,7 +272,7 @@ class TicketService {
         // Continue with ticket update even if SLA update fails
       }
     }
-    
+
     return updatedTicket;
   }
 
@@ -279,9 +295,9 @@ class TicketService {
       sortBy = 'createdAt',
       sortDirection = 'DESC'
     } = options;
-    
+
     const offset = (page - 1) * limit;
-    
+
     // Create a cache key based on query parameters
     const cacheKeyParts = [
       `tickets:list:${page}:${limit}`,
@@ -296,11 +312,11 @@ class TicketService {
       dateTo && `to:${dateTo}`,
       sortBy && `sort:${sortBy}:${sortDirection}`
     ].filter(Boolean).join(':');
-    
+
     return cacheService.getOrSet(cacheKeyParts, async () => {
       try {
         const ticketRepository = getRepository(Ticket);
-        
+
         // Build query with QueryBuilder to avoid N+1 queries
         const query = ticketRepository.createQueryBuilder('ticket')
           // Join all necessary relations in a single query
@@ -313,7 +329,7 @@ class TicketService {
           .orderBy(`ticket.${sortBy}`, sortDirection)
           .skip(offset)
           .take(limit);
-          
+
         // Apply filters
         if (searchTerm) {
           query.andWhere(
@@ -321,7 +337,7 @@ class TicketService {
             { search: `%${searchTerm}%` }
           );
         }
-        
+
         if (status) {
           if (Array.isArray(status) || status.includes(',')) {
             const statusArray = Array.isArray(status) ? status : status.split(',');
@@ -330,7 +346,7 @@ class TicketService {
             query.andWhere('status.name = :status', { status });
           }
         }
-        
+
         if (priority) {
           if (Array.isArray(priority) || priority.includes(',')) {
             const priorityArray = Array.isArray(priority) ? priority : priority.split(',');
@@ -339,7 +355,7 @@ class TicketService {
             query.andWhere('priority.name = :priority', { priority });
           }
         }
-        
+
         if (assigneeId) {
           if (assigneeId === 'null' || assigneeId === 'unassigned') {
             query.andWhere('ticket.assigneeId IS NULL');
@@ -347,27 +363,27 @@ class TicketService {
             query.andWhere('ticket.assigneeId = :assigneeId', { assigneeId });
           }
         }
-        
+
         if (requesterId) {
           query.andWhere('ticket.requesterId = :requesterId', { requesterId });
         }
-        
+
         if (departmentId) {
           query.andWhere('ticket.departmentId = :departmentId', { departmentId });
         }
-        
+
         // Filter by date range
         if (dateFrom) {
           query.andWhere('ticket.createdAt >= :dateFrom', { dateFrom: new Date(dateFrom) });
         }
-        
+
         if (dateTo) {
           query.andWhere('ticket.createdAt <= :dateTo', { dateTo: new Date(dateTo) });
         }
-        
+
         // Get total count and paginated tickets
         const [tickets, totalTickets] = await query.getManyAndCount();
-        
+
         // Process tickets to ensure consistent response format
         const processedTickets = tickets.map(ticket => ({
           id: ticket.id,
@@ -394,7 +410,7 @@ class TicketService {
           closedAt: ticket.closedAt,
           slaStatus: ticket.slaStatus
         }));
-        
+
         return {
           tickets: processedTickets,
           pagination: {
@@ -411,19 +427,19 @@ class TicketService {
       }
     }, 60); // Cache for 1 minute
   }
-  
+
   /**
    * Get ticket by ID with all related data
    */
   public async getTicketById(ticketId: string) {
     const cacheKey = `tickets:${ticketId}`;
-    
+
     return cacheService.getOrSet(cacheKey, async () => {
       try {
         const ticketRepository = getRepository(Ticket);
         const commentRepository = getRepository(Comment);
         const attachmentRepository = getRepository(Attachment);
-        
+
         // Fetch ticket with related data
         const ticket = await ticketRepository.findOne({
           where: { id: ticketId } as any,
@@ -437,11 +453,11 @@ class TicketService {
             'organization'
           ]
         });
-        
+
         if (!ticket) {
           throw new AppError('Ticket not found', 404);
         }
-        
+
         // Fetch comments and attachments in parallel
         const [comments, attachments] = await Promise.all([
           commentRepository.find({
@@ -454,10 +470,10 @@ class TicketService {
             relations: ['uploadedBy']
           })
         ]);
-        
+
         // Use the helper method for consistent formatting
         const ticketData = ticket.toFrontendFormat();
-        
+
         // Add comments and attachments with proper formatting
         return {
           ...ticketData,
@@ -465,7 +481,7 @@ class TicketService {
           attachments: attachments.map(attachment => ({
             id: String(attachment.id),
             fileName: attachment.fileName,
-            originalName: attachment.originalName,
+            originalName: attachment.fileName,
             filePath: attachment.filePath,
             fileType: attachment.fileType,
             fileSize: attachment.fileSize,
@@ -481,20 +497,20 @@ class TicketService {
         };
       } catch (err: unknown) {
         if (err instanceof AppError) throw err;
-        
+
         const errorMessage = err instanceof Error ? err.message : String(err);
         logger.error(`Error fetching ticket by ID: ${errorMessage}`);
         throw new AppError('Failed to fetch ticket data', 500);
       }
     }, 60); // Cache for 1 minute
   }
-  
+
   /**
    * Get ticket statistics
    */
   public async getTicketStats() {
     const cacheKey = 'tickets:stats';
-    
+
     return cacheService.getOrSet(cacheKey, async () => {
       try {
         const ticketRepository = getRepository(Ticket);
@@ -504,15 +520,15 @@ class TicketService {
           .select('status.name', 'statusName')
           .addSelect('COUNT(ticket.id)', 'count')
           .groupBy('status.name');
-          
+
         const statusCounts = await statusQuery.getRawMany();
-        
+
         // Count unassigned tickets using QueryBuilder instead of repository count
         const unassignedCount = await ticketRepository
           .createQueryBuilder('ticket')
           .where('ticket.assigneeId IS NULL')
           .getCount();
-        
+
         // Count overdue tickets using QueryBuilder
         const overdueCount = await ticketRepository
           .createQueryBuilder('ticket')
@@ -520,25 +536,25 @@ class TicketService {
           .andWhere('ticket.resolvedAt IS NULL')
           .andWhere('ticket.closedAt IS NULL')
           .getCount();
-        
+
         // Count high priority tickets
         const highPriorityCount = await ticketRepository
           .createQueryBuilder('ticket')
           .innerJoin('ticket.priority', 'priority')
-          .where('priority.name IN (:...highPriorities)', { 
+          .where('priority.name IN (:...highPriorities)', {
             highPriorities: ['High', 'Urgent', 'Critical']
           })
           .getCount();
-        
+
         // Calculate total tickets
         const totalCount = await ticketRepository.count();
-        
+
         // Convert status counts to a record for easier access
         const statusCountMap: Record<string, number> = {};
         statusCounts.forEach(item => {
           statusCountMap[item.statusName.toLowerCase()] = parseInt(item.count);
         });
-        
+
         return {
           total: totalCount,
           open: statusCountMap.open || 0,
@@ -556,7 +572,7 @@ class TicketService {
       }
     }, 300); // Cache for 5 minutes
   }
-  
+
   /**
    * Invalidate ticket-related caches when data changes
    */
@@ -565,7 +581,7 @@ class TicketService {
       // Invalidate specific ticket cache
       cacheService.delete(`tickets:${ticketId}`);
     }
-    
+
     // Invalidate list and stats caches
     cacheService.deleteByPattern('tickets:list:*');
     cacheService.delete('tickets:stats');
@@ -582,7 +598,7 @@ class TicketService {
       const status = await statusRepository.findOne({
         where: { id: Number(statusId) } as any
       });
-      
+
       return status;
     } catch (err: unknown) {
       const errorMessage = err instanceof Error ? err.message : String(err);

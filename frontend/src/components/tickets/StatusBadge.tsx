@@ -1,4 +1,4 @@
-import React from 'react';
+
 import { Chip, Typography, Box } from '@mui/material';
 import { CheckCircle, Pending, Schedule, ErrorOutline, Block } from '@mui/icons-material';
 import { useTickets } from '../../context/TicketContext'; // Import useTickets
@@ -49,27 +49,27 @@ const StatusBadge: React.FC<StatusBadgeProps> = ({
       return <Schedule fontSize="small" />; // Default/fallback icon
     }
     const statusName = status.name.toLowerCase();
-    
+
     if (statusName.includes('resolved') || statusName.includes('complete') || statusName.includes('done')) {
       return <CheckCircle fontSize="small" />;
     }
-    
+
     if (statusName.includes('pending') || statusName.includes('waiting')) {
       return <Pending fontSize="small" />;
     }
-    
+
     if (statusName.includes('progress') || statusName.includes('working')) {
       return <Schedule fontSize="small" />;
     }
-    
+
     if (statusName.includes('urgent') || statusName.includes('critical')) {
       return <ErrorOutline fontSize="small" />;
     }
-    
+
     if (statusName.includes('closed') || statusName.includes('cancelled')) {
       return <Block fontSize="small" />;
     }
-    
+
     // Default icon based on status ID
     switch (status.id) {
       case '1':
@@ -92,7 +92,7 @@ const StatusBadge: React.FC<StatusBadgeProps> = ({
         return <Schedule fontSize="small" />;
     }
   };
-  
+
   if (!status) {
     // Render a placeholder or default badge if status is undefined or not found
     return (
@@ -101,7 +101,7 @@ const StatusBadge: React.FC<StatusBadgeProps> = ({
         size={size}
         variant={variant === 'filled' ? 'filled' : 'outlined'}
         icon={showIcon ? <Schedule fontSize="small" /> : undefined}
-        sx={{ 
+        sx={{
           bgcolor: variant === 'filled' ? 'grey.300' : undefined,
           color: variant === 'filled' ? 'grey.800' : 'text.secondary',
           fontWeight: 500,
@@ -109,7 +109,7 @@ const StatusBadge: React.FC<StatusBadgeProps> = ({
       />
     );
   }
-  
+
   // For outlined variant
   if (variant === 'outlined') {
     return (
@@ -130,7 +130,7 @@ const StatusBadge: React.FC<StatusBadgeProps> = ({
         <Typography
           variant={size === 'small' ? 'caption' : 'body2'}
           component="span"
-          sx={{ 
+          sx={{
             color: status.color,
             fontWeight: 'medium',
           }}
@@ -140,7 +140,7 @@ const StatusBadge: React.FC<StatusBadgeProps> = ({
       </Box>
     );
   }
-  
+
   // For filled variant (default)
   return (
     <Chip

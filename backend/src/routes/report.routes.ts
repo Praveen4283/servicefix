@@ -1,6 +1,7 @@
 import express from 'express';
 import { authenticate, authorize } from '../middleware/auth.middleware';
 import { UserRole } from '../models/User';
+import { logger } from '../utils/logger';
 
 const router = express.Router();
 
@@ -12,7 +13,7 @@ const router = express.Router();
 router.get('/tickets/summary', authenticate, authorize([UserRole.ADMIN, UserRole.AGENT]), async (req, res) => {
   try {
     const { startDate, endDate } = req.query;
-    
+
     // This would use a reporting service to fetch actual analytics
     // For now, returning mock data
     const summary = {
@@ -46,10 +47,10 @@ router.get('/tickets/summary', authenticate, authorize([UserRole.ADMIN, UserRole
         }
       }
     };
-    
+
     return res.json(summary);
   } catch (error) {
-    console.error('Error fetching ticket summary:', error);
+    logger.error('Error fetching ticket summary:', error);
     return res.status(500).json({ message: 'Server error' });
   }
 });
@@ -62,14 +63,14 @@ router.get('/tickets/summary', authenticate, authorize([UserRole.ADMIN, UserRole
 router.get('/tickets/trend', authenticate, authorize([UserRole.ADMIN, UserRole.AGENT]), async (req, res) => {
   try {
     const { interval = 'day', startDate, endDate } = req.query;
-    
+
     // This would use a reporting service to fetch actual analytics
     // For now, generating mock data for the past 30 days
     const now = new Date();
     const data = Array(30).fill(0).map((_, i) => {
       const date = new Date(now);
       date.setDate(date.getDate() - (29 - i));
-      
+
       return {
         date: date.toISOString().split('T')[0],
         totalTickets: Math.floor(Math.random() * 50) + 20,
@@ -77,10 +78,10 @@ router.get('/tickets/trend', authenticate, authorize([UserRole.ADMIN, UserRole.A
         newTickets: Math.floor(Math.random() * 30) + 15
       };
     });
-    
+
     return res.json(data);
   } catch (error) {
-    console.error('Error fetching ticket trends:', error);
+    logger.error('Error fetching ticket trends:', error);
     return res.status(500).json({ message: 'Server error' });
   }
 });
@@ -93,7 +94,7 @@ router.get('/tickets/trend', authenticate, authorize([UserRole.ADMIN, UserRole.A
 router.get('/agents/performance', authenticate, authorize([UserRole.ADMIN]), async (req, res) => {
   try {
     const { startDate, endDate } = req.query;
-    
+
     // This would use a reporting service to fetch actual analytics
     // For now, returning mock data
     const agentPerformance = [
@@ -128,10 +129,10 @@ router.get('/agents/performance', authenticate, authorize([UserRole.ADMIN]), asy
         responseAccuracy: '98%'
       }
     ];
-    
+
     return res.json(agentPerformance);
   } catch (error) {
-    console.error('Error fetching agent performance:', error);
+    logger.error('Error fetching agent performance:', error);
     return res.status(500).json({ message: 'Server error' });
   }
 });
@@ -144,7 +145,7 @@ router.get('/agents/performance', authenticate, authorize([UserRole.ADMIN]), asy
 router.get('/knowledge-base/usage', authenticate, authorize([UserRole.ADMIN, UserRole.AGENT]), async (req, res) => {
   try {
     const { startDate, endDate } = req.query;
-    
+
     // This would use a reporting service to fetch actual analytics
     // For now, returning mock data
     const kbUsage = {
@@ -168,10 +169,10 @@ router.get('/knowledge-base/usage', authenticate, authorize([UserRole.ADMIN, Use
         { term: 'error message', count: 87 }
       ]
     };
-    
+
     return res.json(kbUsage);
   } catch (error) {
-    console.error('Error fetching knowledge base usage:', error);
+    logger.error('Error fetching knowledge base usage:', error);
     return res.status(500).json({ message: 'Server error' });
   }
 });
@@ -184,7 +185,7 @@ router.get('/knowledge-base/usage', authenticate, authorize([UserRole.ADMIN, Use
 router.get('/customer-satisfaction', authenticate, authorize([UserRole.ADMIN, UserRole.AGENT]), async (req, res) => {
   try {
     const { startDate, endDate } = req.query;
-    
+
     // This would use a reporting service to fetch actual analytics
     // For now, returning mock data
     const satisfactionData = {
@@ -200,7 +201,7 @@ router.get('/customer-satisfaction', authenticate, authorize([UserRole.ADMIN, Us
       trendData: Array(12).fill(0).map((_, i) => {
         const date = new Date();
         date.setMonth(date.getMonth() - (11 - i));
-        
+
         return {
           month: date.toISOString().split('T')[0].substring(0, 7),
           satisfaction: (4 + (Math.random() * 0.8 - 0.4)).toFixed(1)
@@ -214,10 +215,10 @@ router.get('/customer-satisfaction', authenticate, authorize([UserRole.ADMIN, Us
         { theme: 'Technical knowledge', count: 54, sentiment: 'mixed' }
       ]
     };
-    
+
     return res.json(satisfactionData);
   } catch (error) {
-    console.error('Error fetching customer satisfaction data:', error);
+    logger.error('Error fetching customer satisfaction data:', error);
     return res.status(500).json({ message: 'Server error' });
   }
 });

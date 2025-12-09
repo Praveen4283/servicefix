@@ -1,4 +1,5 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
+import { logger } from '../../utils/frontendLogger';
 import {
   Box,
   Container,
@@ -60,7 +61,7 @@ import {
   Close as CloseIcon,
   PersonOff as PersonOffIcon,
 } from '@mui/icons-material';
-import { 
+import {
   pageContainer,
   pageHeaderSection,
   tableContainerStyle,
@@ -78,7 +79,7 @@ import { useNotification } from '../../context/NotificationContext';
 // Import existing styles and create enhanced components similar to TicketListPage
 const EnhancedCard = (props: any) => {
   return (
-    <Zoom in={true} style={{ transitionDelay: props.index ? `${props.index * 100}ms` : '0ms' }}>
+    <Zoom in={true} style={{ transitionDelay: props.index ? `${props.index * 100} ms` : '0ms' }}>
       <Card {...props} />
     </Zoom>
   );
@@ -120,8 +121,8 @@ const gradientAccent = (theme: any) => ({
     right: 0,
     height: '4px',
     background: theme.palette.mode === 'dark'
-      ? `linear-gradient(90deg, ${theme.palette.primary.main}, ${theme.palette.secondary.main}, ${theme.palette.primary.main})`
-      : `linear-gradient(90deg, ${theme.palette.primary.main}, ${theme.palette.secondary.main})`,
+      ? `linear - gradient(90deg, ${theme.palette.primary.main}, ${theme.palette.secondary.main}, ${theme.palette.primary.main})`
+      : `linear - gradient(90deg, ${theme.palette.primary.main}, ${theme.palette.secondary.main})`,
     zIndex: 1
   }
 });
@@ -180,7 +181,7 @@ const UsersPage = () => {
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down('md'));
   const isTablet = useMediaQuery(theme.breakpoints.between('sm', 'md'));
-  
+
   const [users, setUsers] = useState<User[]>([]);
   const [filteredUsers, setFilteredUsers] = useState<User[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
@@ -191,7 +192,7 @@ const UsersPage = () => {
   const [openDialog, setOpenDialog] = useState(false);
   const [deleteUserId, setDeleteUserId] = useState<string | null>(null);
   const { addNotification } = useNotification();
-  
+
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [totalUsers, setTotalUsers] = useState(0);
   const [userStats, setUserStats] = useState<UserStats>({
@@ -224,7 +225,7 @@ const UsersPage = () => {
       setIsLoading(false);
       return;
     }
-    
+
     setIsLoading(true);
     try {
       // Make API request with pagination parameters AND cache buster
@@ -235,12 +236,12 @@ const UsersPage = () => {
         role: roleFilter !== 'all' ? roleFilter : undefined,
         _cb: Date.now() // Cache-busting parameter
       };
-      
+
       console.log("[fetchUsers] Sending request with params:", params);
-      
+
       const response = await apiClient.get<UsersResponse>('/users', params);
       console.log("[fetchUsers] Received users raw response:", response);
-      
+
       // Check if response is proper - with more lenient checking
       if (response) {
         // With modified API client, response now has the users array directly
@@ -248,13 +249,13 @@ const UsersPage = () => {
           console.log("[fetchUsers] Received users array:", response.users);
           setUsers(response.users);
           setFilteredUsers(response.users);
-          
+
           // Update pagination from the response
           if (response.pagination) {
             console.log("[fetchUsers] Pagination data:", response.pagination);
             setTotalUsers(response.pagination.total);
           }
-          
+
           // Fetch user stats
           await fetchUserStats();
         } else {
@@ -271,11 +272,11 @@ const UsersPage = () => {
       }
     } catch (error: any) {
       console.error('[fetchUsers] Error fetching users:', error);
-      
+
       // Display a user-friendly error message
       const errorMessage = error.message || 'Failed to load users data';
       addNotification(errorMessage, 'error');
-      
+
       // Set empty users list
       setUsers([]);
       setFilteredUsers([]);
@@ -336,7 +337,7 @@ const UsersPage = () => {
   const handleChangePage = (event: unknown, newPage: number) => {
     setPage(newPage);
   };
-  
+
   // Update the rows per page change handler
   const handleChangeRowsPerPage = (event: React.ChangeEvent<HTMLInputElement>) => {
     setRowsPerPage(parseInt(event.target.value, 10));
@@ -357,10 +358,10 @@ const UsersPage = () => {
     if (deleteUserId) {
       setIsLoading(true);
       try {
-        await apiClient.delete(`/users/${deleteUserId}`);
+        await apiClient.delete(`/ users / ${deleteUserId} `);
         // Fetch updated users after deletion
         await fetchUsers();
-        
+
         addNotification('User deleted successfully', 'success');
       } catch (error: any) {
         console.error('Error deleting user:', error);
@@ -369,20 +370,20 @@ const UsersPage = () => {
         setIsLoading(false);
       }
     }
-    
+
     handleCloseDialog();
   };
 
   const handleResetPassword = async (userId: string) => {
     try {
-      await apiClient.post(`/users/${userId}/reset-password`);
+      await apiClient.post(`/ users / ${userId}/reset-password`);
       addNotification('Password reset email sent', 'success');
     } catch (error: any) {
       console.error('Error resetting password:', error);
       addNotification(error.message || 'Failed to send password reset email', 'error');
     }
   };
-  
+
   const handleRefreshData = async () => {
     await fetchUsers();
   };
@@ -399,7 +400,7 @@ const UsersPage = () => {
         return 'default';
     }
   };
-  
+
   const getRoleIcon = (role: string) => {
     switch (role) {
       case 'admin':
@@ -412,7 +413,7 @@ const UsersPage = () => {
         return <PersonIcon />;
     }
   };
-  
+
   // Get user stats for dashboard metrics
   const getUserStats = () => {
     const total = userStats.total || 1; // Avoid division by zero
@@ -493,7 +494,7 @@ const UsersPage = () => {
         first_name: '',
         last_name: '',
         email: '',
-        role: 'customer', 
+        role: 'customer',
         password: '',
         departmentId: '',
         designation: '',
@@ -533,12 +534,12 @@ const UsersPage = () => {
   const handleFormSubmit = async (event: React.FormEvent) => {
     event.preventDefault();
     if (!currentUser) return;
-    
+
     setIsSubmitting(true);
     const { departmentId, ...restOfUserData } = currentUser;
     const userData = {
       ...restOfUserData,
-      department_id: departmentId || null, 
+      department_id: departmentId || null,
     };
 
     try {
@@ -599,9 +600,9 @@ const UsersPage = () => {
   // --- End Avatar Deletion Handlers ---
 
   return (
-    <Container 
+    <Container
       maxWidth={false}
-      sx={{ 
+      sx={{
         py: { xs: 2, md: 3 },
         position: 'relative',
         width: '100%',
@@ -613,7 +614,7 @@ const UsersPage = () => {
           right: 0,
           width: { xs: '100%', lg: '25%' },
           height: { xs: '40%', lg: '100%' },
-          background: theme.palette.mode === 'dark' 
+          background: theme.palette.mode === 'dark'
             ? `radial-gradient(circle at 100% 0%, ${alpha(theme.palette.primary.dark, 0.15)} 0%, transparent 70%)`
             : `radial-gradient(circle at 100% 0%, ${alpha(theme.palette.primary.light, 0.15)} 0%, transparent 70%)`,
           zIndex: -1,
@@ -627,7 +628,7 @@ const UsersPage = () => {
           left: 0,
           width: { xs: '100%', lg: '25%' },
           height: { xs: '30%', lg: '60%' },
-          background: theme.palette.mode === 'dark' 
+          background: theme.palette.mode === 'dark'
             ? `radial-gradient(circle at 0% 100%, ${alpha(theme.palette.secondary.dark, 0.15)} 0%, transparent 70%)`
             : `radial-gradient(circle at 0% 100%, ${alpha(theme.palette.secondary.light, 0.15)} 0%, transparent 70%)`,
           zIndex: -1,
@@ -636,7 +637,7 @@ const UsersPage = () => {
         }
       }}
     >
-      <Box sx={{ 
+      <Box sx={{
         animation: 'fadeIn 1s ease forwards',
         opacity: 0,
         '@keyframes fadeIn': {
@@ -647,10 +648,10 @@ const UsersPage = () => {
         <Grid container spacing={1}>
           {/* Header styled like TicketListPage */}
           <Grid item xs={12}>
-            <Card 
+            <Card
               elevation={0}
-              sx={{ 
-                p: 0, 
+              sx={{
+                p: 0,
                 overflow: 'hidden',
                 border: '1px solid',
                 borderColor: alpha(theme.palette.primary.main, 0.2),
@@ -738,7 +739,7 @@ const UsersPage = () => {
                     fullWidth
                     startIcon={<AddIcon />}
                     onClick={() => handleOpenModal('add')}
-                    sx={{ 
+                    sx={{
                       height: '100%',
                       borderRadius: 2
                     }}
@@ -747,14 +748,14 @@ const UsersPage = () => {
                   </Button>
                 </Grid>
                 <Grid item xs={12} sm={6} md={2} sx={{ display: 'flex', justifyContent: 'flex-end' }}>
-                  <Button 
-                    variant="outlined" 
+                  <Button
+                    variant="outlined"
                     startIcon={<FilterListIcon />}
                     onClick={() => {
                       setRoleFilter('all');
                       setSearchQuery('');
                     }}
-                    sx={{ 
+                    sx={{
                       height: '100%',
                       borderRadius: 2,
                       width: '100%'
@@ -792,53 +793,53 @@ const UsersPage = () => {
                     <Table>
                       <TableHead>
                         <TableRow>
-                          <TableCell sx={{ 
-                            fontWeight: 'bold', 
-                            backgroundColor: theme.palette.mode === 'dark' 
-                              ? alpha(theme.palette.primary.dark, 0.1) 
+                          <TableCell sx={{
+                            fontWeight: 'bold',
+                            backgroundColor: theme.palette.mode === 'dark'
+                              ? alpha(theme.palette.primary.dark, 0.1)
                               : alpha(theme.palette.primary.light, 0.1)
                           }}>User</TableCell>
-                          <TableCell sx={{ 
-                            fontWeight: 'bold', 
-                            backgroundColor: theme.palette.mode === 'dark' 
-                              ? alpha(theme.palette.primary.dark, 0.1) 
+                          <TableCell sx={{
+                            fontWeight: 'bold',
+                            backgroundColor: theme.palette.mode === 'dark'
+                              ? alpha(theme.palette.primary.dark, 0.1)
                               : alpha(theme.palette.primary.light, 0.1)
                           }}>Email</TableCell>
-                          <TableCell sx={{ 
-                            fontWeight: 'bold', 
-                            backgroundColor: theme.palette.mode === 'dark' 
-                              ? alpha(theme.palette.primary.dark, 0.1) 
+                          <TableCell sx={{
+                            fontWeight: 'bold',
+                            backgroundColor: theme.palette.mode === 'dark'
+                              ? alpha(theme.palette.primary.dark, 0.1)
                               : alpha(theme.palette.primary.light, 0.1)
                           }}>Role</TableCell>
-                          <TableCell sx={{ 
-                            fontWeight: 'bold', 
-                            backgroundColor: theme.palette.mode === 'dark' 
-                              ? alpha(theme.palette.primary.dark, 0.1) 
+                          <TableCell sx={{
+                            fontWeight: 'bold',
+                            backgroundColor: theme.palette.mode === 'dark'
+                              ? alpha(theme.palette.primary.dark, 0.1)
                               : alpha(theme.palette.primary.light, 0.1)
                           }}>Department</TableCell>
-                          <TableCell sx={{ 
-                            fontWeight: 'bold', 
-                            backgroundColor: theme.palette.mode === 'dark' 
-                              ? alpha(theme.palette.primary.dark, 0.1) 
+                          <TableCell sx={{
+                            fontWeight: 'bold',
+                            backgroundColor: theme.palette.mode === 'dark'
+                              ? alpha(theme.palette.primary.dark, 0.1)
                               : alpha(theme.palette.primary.light, 0.1)
                           }}>Status</TableCell>
-                          <TableCell sx={{ 
-                            fontWeight: 'bold', 
-                            backgroundColor: theme.palette.mode === 'dark' 
-                              ? alpha(theme.palette.primary.dark, 0.1) 
+                          <TableCell sx={{
+                            fontWeight: 'bold',
+                            backgroundColor: theme.palette.mode === 'dark'
+                              ? alpha(theme.palette.primary.dark, 0.1)
                               : alpha(theme.palette.primary.light, 0.1)
                           }}>Last Login</TableCell>
-                          <TableCell align="right" sx={{ 
-                            fontWeight: 'bold', 
-                            backgroundColor: theme.palette.mode === 'dark' 
-                              ? alpha(theme.palette.primary.dark, 0.1) 
+                          <TableCell align="right" sx={{
+                            fontWeight: 'bold',
+                            backgroundColor: theme.palette.mode === 'dark'
+                              ? alpha(theme.palette.primary.dark, 0.1)
                               : alpha(theme.palette.primary.light, 0.1)
                           }}>Actions</TableCell>
                         </TableRow>
                       </TableHead>
                       <TableBody>
                         {filteredUsers.map((user) => (
-                          <TableRow 
+                          <TableRow
                             key={user.id}
                             sx={{
                               cursor: 'pointer',
@@ -888,10 +889,10 @@ const UsersPage = () => {
                             </TableCell>
                             <TableCell align="right">
                               <Tooltip title="Edit User">
-                                <IconButton 
-                                  size="small" 
+                                <IconButton
+                                  size="small"
                                   onClick={() => handleOpenModal('edit', user)}
-                                  sx={{ 
+                                  sx={{
                                     color: theme.palette.primary.main,
                                     '&:hover': { backgroundColor: alpha(theme.palette.primary.main, 0.1) }
                                   }}
@@ -903,7 +904,7 @@ const UsersPage = () => {
                                 <IconButton
                                   size="small"
                                   onClick={() => handleResetPassword(user.id)}
-                                  sx={{ 
+                                  sx={{
                                     color: theme.palette.info.main,
                                     '&:hover': { backgroundColor: alpha(theme.palette.info.main, 0.1) }
                                   }}
@@ -917,9 +918,9 @@ const UsersPage = () => {
                                     size="small"
                                     onClick={() => handleDeleteClick(user.id)}
                                     disabled={user.role === 'admin'}
-                                    sx={{ 
+                                    sx={{
                                       color: user.role === 'admin' ? theme.palette.action.disabled : theme.palette.error.main,
-                                      '&:hover': { 
+                                      '&:hover': {
                                         backgroundColor: user.role === 'admin' ? 'transparent' : alpha(theme.palette.error.main, 0.1)
                                       }
                                     }}
@@ -934,9 +935,9 @@ const UsersPage = () => {
                         {filteredUsers.length === 0 && (
                           <TableRow>
                             <TableCell colSpan={7} align="center" sx={{ py: 4 }}>
-                              <Box 
-                                sx={{ 
-                                  display: 'flex', 
+                              <Box
+                                sx={{
+                                  display: 'flex',
                                   flexDirection: 'column',
                                   alignItems: 'center',
                                   justifyContent: 'center'
@@ -975,7 +976,7 @@ const UsersPage = () => {
         </Grid>
       </Box>
 
-      {/* --- Add/Edit User Modal --- */} 
+      {/* --- Add/Edit User Modal --- */}
       <Dialog open={isModalOpen} onClose={handleCloseModal} maxWidth="sm" fullWidth>
         <DialogTitle sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           {modalMode === 'add' ? 'Add New User' : 'Edit User'}
@@ -987,8 +988,8 @@ const UsersPage = () => {
           <DialogContent dividers>
             <Grid container spacing={3}>
               {/* Organization field moved to be next to Designation */}
-              
-              {/* Existing Fields */} 
+
+              {/* Existing Fields */}
               <Grid item xs={12} sm={6}>
                 <TextField
                   required
@@ -1104,46 +1105,46 @@ const UsersPage = () => {
                 </Grid>
               )}
               {modalMode === 'edit' && (
-                 <Grid item xs={12} container spacing={2} alignItems="center">
-                   <Grid item xs={currentUser?.avatar_url ? 6 : 12}>
-                     <FormControlLabel
-                       control={
-                         <Switch
-                           checked={currentUser?.is_active ?? true}
-                           onChange={handleFormChange}
-                           name="is_active"
-                           disabled={isSubmitting || (modalMode === 'edit' && String(currentUser?.id) === String(loggedInUser?.id) && currentUser?.role === 'admin')}
-                         />
-                       }
-                       label="User is Active"
-                     />
-                   </Grid>
-                   {/* Add Delete Avatar Button if avatar exists */}
-                   {(() => {
-                     return currentUser?.avatar_url && (
-                       <Grid item xs={6} sx={{ textAlign: 'right' }}>
-                         <Button
-                           variant="outlined"
-                           color="error"
-                           size="small"
-                           startIcon={<DeleteIcon />}
-                           onClick={() => currentUser && openAvatarDeleteConfirm(currentUser)}
-                           disabled={isSubmitting}
-                         >
-                           Delete Avatar
-                         </Button>
-                       </Grid>
-                     );
-                   })()}
-                 </Grid>
-               )}
+                <Grid item xs={12} container spacing={2} alignItems="center">
+                  <Grid item xs={currentUser?.avatar_url ? 6 : 12}>
+                    <FormControlLabel
+                      control={
+                        <Switch
+                          checked={currentUser?.is_active ?? true}
+                          onChange={handleFormChange}
+                          name="is_active"
+                          disabled={isSubmitting || (modalMode === 'edit' && String(currentUser?.id) === String(loggedInUser?.id) && currentUser?.role === 'admin')}
+                        />
+                      }
+                      label="User is Active"
+                    />
+                  </Grid>
+                  {/* Add Delete Avatar Button if avatar exists */}
+                  {(() => {
+                    return currentUser?.avatar_url && (
+                      <Grid item xs={6} sx={{ textAlign: 'right' }}>
+                        <Button
+                          variant="outlined"
+                          color="error"
+                          size="small"
+                          startIcon={<DeleteIcon />}
+                          onClick={() => currentUser && openAvatarDeleteConfirm(currentUser)}
+                          disabled={isSubmitting}
+                        >
+                          Delete Avatar
+                        </Button>
+                      </Grid>
+                    );
+                  })()}
+                </Grid>
+              )}
             </Grid>
           </DialogContent>
           <DialogActions sx={{ p: 2 }}>
             <Button onClick={handleCloseModal} disabled={isSubmitting}>Cancel</Button>
-            <Button 
-              type="submit" 
-              variant="contained" 
+            <Button
+              type="submit"
+              variant="contained"
               disabled={isSubmitting}
               startIcon={isSubmitting ? <CircularProgress size={20} color="inherit" /> : null}
             >
@@ -1152,7 +1153,7 @@ const UsersPage = () => {
           </DialogActions>
         </Box>
       </Dialog>
-      {/* --- End Add/Edit User Modal --- */} 
+      {/* --- End Add/Edit User Modal --- */}
 
       {/* --- Avatar Delete Confirmation Dialog --- */}
       <Dialog open={isAvatarDeleteDialogOpen} onClose={closeAvatarDeleteConfirm}>
@@ -1182,14 +1183,14 @@ const UsersPage = () => {
           </DialogContentText>
         </DialogContent>
         <DialogActions sx={{ p: 2 }}>
-          <Button 
-            onClick={handleCloseDialog} 
+          <Button
+            onClick={handleCloseDialog}
             variant="outlined"
           >
             Cancel
           </Button>
-          <Button 
-            onClick={handleConfirmDelete} 
+          <Button
+            onClick={handleConfirmDelete}
             variant="contained"
             sx={{
               color: theme.palette.primary.contrastText,
@@ -1197,8 +1198,8 @@ const UsersPage = () => {
               '&:hover': {
                 background: `linear-gradient(45deg, ${theme.palette.primary.dark}, ${theme.palette.secondary.dark})`,
                 transform: 'translateY(-3px)',
-                boxShadow: theme.palette.mode === 'dark' 
-                  ? '0 12px 20px rgba(0,0,0,0.4)' 
+                boxShadow: theme.palette.mode === 'dark'
+                  ? '0 12px 20px rgba(0,0,0,0.4)'
                   : '0 12px 20px rgba(0,0,0,0.15)',
               }
             }}

@@ -9,6 +9,7 @@ import {
 } from 'typeorm';
 import { ChatbotConversation } from './ChatbotConversation';
 import { User } from './User';
+import type { ChatMetadata } from '../types/common';
 
 export type SenderType = 'user' | 'bot' | 'agent';
 
@@ -46,7 +47,7 @@ export class ChatMessage {
   content: string;
 
   @Column({ type: 'jsonb', nullable: true })
-  metadata?: any;
+  metadata?: ChatMetadata;
 
   @CreateDateColumn({ name: 'created_at', type: 'timestamp with time zone' })
   createdAt: Date;

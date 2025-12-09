@@ -1,12 +1,12 @@
 import React, { useState, ReactNode, useEffect } from 'react';
 import '../../../src/styles/logo-animation.css';
-import { 
-  Box, 
-  AppBar, 
-  Toolbar, 
-  Typography, 
-  Divider, 
-  IconButton, 
+import {
+  Box,
+  AppBar,
+  Toolbar,
+  Typography,
+  Divider,
+  IconButton,
   useMediaQuery,
   useTheme,
   Avatar,
@@ -47,6 +47,7 @@ import { NotificationContainer, useNotification, NotificationMenu } from '../../
 import { useTheme as useThemeContext } from '../../context/ThemeContext';
 import CookieStatusIndicator from '../common/CookieStatusIndicator';
 import AccessAlarmIcon from '@mui/icons-material/AccessAlarm';
+import { logger } from '../../utils/frontendLogger';
 
 // Layout props
 interface AppLayoutProps {
@@ -63,32 +64,32 @@ const AppLayout: React.FC<AppLayoutProps> = ({ children }) => {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
-  
+
   const isAuthenticated = !!user;
-  const isAuthPage = location.pathname === '/login' || 
-                    location.pathname === '/register' || 
-                    location.pathname === '/forgot-password' || 
-                    location.pathname.includes('/reset-password');
-  
+  const isAuthPage = location.pathname === '/login' ||
+    location.pathname === '/register' ||
+    location.pathname === '/forgot-password' ||
+    location.pathname.includes('/reset-password');
+
   // Add event listener for closing profile menu from other components
   useEffect(() => {
     const handleCloseProfileMenu = () => {
-      console.log('[AppLayout] Closing profile menu from event');
+      logger.debug('[AppLayout] Closing profile menu from event');
       setAnchorEl(null);
     };
 
     // Listen for custom event from ProfilePage
     window.addEventListener('closeProfileMenu', handleCloseProfileMenu);
-    
+
     // Clean up event listener on unmount
     return () => {
       window.removeEventListener('closeProfileMenu', handleCloseProfileMenu);
     };
   }, []);
-  
+
   // Also close menu when location changes (URL navigation)
   useEffect(() => {
-    console.log('[AppLayout] Location changed, closing menus');
+    logger.debug('[AppLayout] Location changed, closing menus');
     setAnchorEl(null);
     setMobileMenuOpen(false);
   }, [location.pathname]);
@@ -123,7 +124,7 @@ const AppLayout: React.FC<AppLayoutProps> = ({ children }) => {
   // Menu items based on user role
   const getMenuItems = () => {
     if (!isAuthenticated) return [];
-    
+
     const menuItems = [
       // Common items for all users
       {
@@ -159,7 +160,7 @@ const AppLayout: React.FC<AppLayoutProps> = ({ children }) => {
           }
         );
       }
-      
+
       // Admin-only items
       if (user?.role === 'admin') {
         menuItems.push(
@@ -264,11 +265,11 @@ const AppLayout: React.FC<AppLayoutProps> = ({ children }) => {
               borderRadius: 1,
               mb: 0.5,
               py: 1.5,
-              bgcolor: location.pathname === item.path || 
+              bgcolor: location.pathname === item.path ||
                 (location.pathname.startsWith(item.path) && item.path !== '/')
                 ? alpha(theme.palette.primary.main, 0.1)
                 : 'transparent',
-              color: location.pathname === item.path || 
+              color: location.pathname === item.path ||
                 (location.pathname.startsWith(item.path) && item.path !== '/')
                 ? theme.palette.primary.main
                 : theme.palette.text.primary,
@@ -277,7 +278,7 @@ const AppLayout: React.FC<AppLayoutProps> = ({ children }) => {
             <ListItemIcon
               sx={{
                 minWidth: 40,
-                color: (location.pathname === item.path || 
+                color: (location.pathname === item.path ||
                   (location.pathname.startsWith(item.path) && item.path !== '/'))
                   ? theme.palette.primary.main
                   : theme.palette.text.primary
@@ -295,7 +296,7 @@ const AppLayout: React.FC<AppLayoutProps> = ({ children }) => {
           </ListItem>
         ))}
         <Divider sx={{ my: 1 }} />
-        <ListItem 
+        <ListItem
           button
           onClick={() => { navigate('/profile'); setMobileMenuOpen(false); }}
         >
@@ -304,7 +305,7 @@ const AppLayout: React.FC<AppLayoutProps> = ({ children }) => {
           </ListItemIcon>
           <ListItemText primary="Profile" />
         </ListItem>
-        <ListItem 
+        <ListItem
           button
           onClick={toggleTheme}
         >
@@ -313,7 +314,7 @@ const AppLayout: React.FC<AppLayoutProps> = ({ children }) => {
           </ListItemIcon>
           <ListItemText primary={isDarkMode ? "Light Mode" : "Dark Mode"} />
         </ListItem>
-        <ListItem 
+        <ListItem
           button
           onClick={() => { logout(); setMobileMenuOpen(false); }}
         >
@@ -329,7 +330,7 @@ const AppLayout: React.FC<AppLayoutProps> = ({ children }) => {
   // Desktop navigation links
   const renderDesktopNavLinks = () => {
     const menuItems = getMenuItems();
-    
+
     return (
       <>
         {menuItems.map((item) => (
@@ -343,8 +344,8 @@ const AppLayout: React.FC<AppLayoutProps> = ({ children }) => {
               py: 1,
               borderRadius: 2,
               color: theme.palette.text.primary,
-              fontWeight: (location.pathname === item.path || 
-                (location.pathname.startsWith(item.path) && item.path !== '/')) 
+              fontWeight: (location.pathname === item.path ||
+                (location.pathname.startsWith(item.path) && item.path !== '/'))
                 ? 600 : 400,
               '&:hover': {
                 bgcolor: alpha(theme.palette.primary.main, 0.08),
@@ -361,11 +362,11 @@ const AppLayout: React.FC<AppLayoutProps> = ({ children }) => {
   // Render authentication buttons (for unauthenticated users)
   const renderAuthButtons = () => (
     <Box>
-      <Button 
-        component={Link} 
-        to="/login" 
+      <Button
+        component={Link}
+        to="/login"
         variant="outlined"
-        sx={{ 
+        sx={{
           mr: 2,
           color: theme.palette.mode === 'dark' ? 'inherit' : 'text.primary',
           '&:hover': {
@@ -376,12 +377,12 @@ const AppLayout: React.FC<AppLayoutProps> = ({ children }) => {
       >
         Log In
       </Button>
-      <Button 
-        component={Link} 
-        to="/register" 
+      <Button
+        component={Link}
+        to="/register"
         variant="contained"
         color="primary"
-        sx={{ 
+        sx={{
           borderRadius: '28px',
           px: 3,
           '&:hover': {
@@ -396,13 +397,13 @@ const AppLayout: React.FC<AppLayoutProps> = ({ children }) => {
   );
 
   return (
-    <Box sx={{ 
-      display: 'flex', 
-      flexDirection: 'column', 
-      minHeight: '100vh', 
+    <Box sx={{
+      display: 'flex',
+      flexDirection: 'column',
+      minHeight: '100vh',
       overflow: 'hidden',
-      background: theme.palette.mode === 'dark' 
-        ? 'linear-gradient(135deg, #0a1929 0%, #171923 100%)' 
+      background: theme.palette.mode === 'dark'
+        ? 'linear-gradient(135deg, #0a1929 0%, #171923 100%)'
         : 'linear-gradient(135deg, #f8faff 0%, #f0f4fa 100%)',
     }}>
       {/* Background gradient elements */}
@@ -438,7 +439,7 @@ const AppLayout: React.FC<AppLayoutProps> = ({ children }) => {
           }} />
         </Box>
       )}
-      
+
       {/* App Bar */}
       <AppBar
         position="fixed"
@@ -447,14 +448,14 @@ const AppLayout: React.FC<AppLayoutProps> = ({ children }) => {
           width: '100%',
           zIndex: theme.zIndex.drawer + 2,
           backdropFilter: 'blur(8px)',
-          backgroundColor: theme.palette.mode === 'dark' 
+          backgroundColor: theme.palette.mode === 'dark'
             ? alpha(theme.palette.background.paper, 0.8)
             : alpha(theme.palette.background.paper, 0.95),
           boxShadow: theme.palette.mode === 'dark'
             ? '0 4px 20px rgba(0,0,0,0.2)'
             : '0 4px 20px rgba(0,0,0,0.05)',
-          borderBottom: `1px solid ${theme.palette.mode === 'dark' 
-            ? alpha(theme.palette.divider, 0.1) 
+          borderBottom: `1px solid ${theme.palette.mode === 'dark'
+            ? alpha(theme.palette.divider, 0.1)
             : alpha(theme.palette.divider, 0.5)}`,
         }}
       >
@@ -476,12 +477,12 @@ const AppLayout: React.FC<AppLayoutProps> = ({ children }) => {
               )}
 
               {/* Logo */}
-              <Box 
-                component={Link} 
-                to={isAuthenticated ? "/dashboard" : "/"} 
-                sx={{ 
-                  display: 'flex', 
-                  alignItems: 'center', 
+              <Box
+                component={Link}
+                to={isAuthenticated ? "/dashboard" : "/"}
+                sx={{
+                  display: 'flex',
+                  alignItems: 'center',
                   textDecoration: 'none',
                   mr: isAuthenticated ? 3 : 2 // Increase right margin when authenticated
                 }}
@@ -491,16 +492,16 @@ const AppLayout: React.FC<AppLayoutProps> = ({ children }) => {
                   src="/android-chrome-192x192.png"
                   alt="ServiceFix"
                   className="logo-animation"
-                  sx={{ 
+                  sx={{
                     height: { xs: 40, sm: 45 },
                     width: 'auto',
                     mr: 1,
                     display: 'block'
                   }}
                 />
-                <Typography 
-                  variant="h6" 
-                  sx={{ 
+                <Typography
+                  variant="h6"
+                  sx={{
                     fontWeight: 800,
                     background: 'linear-gradient(45deg, #3f51b5, #FF6B6B)',
                     backgroundClip: 'text',
@@ -525,8 +526,8 @@ const AppLayout: React.FC<AppLayoutProps> = ({ children }) => {
 
               {/* Desktop navigation (authenticated only) - Moved inside left section */}
               {isAuthenticated && !isMobile && (
-                <Box sx={{ 
-                  display: 'flex', 
+                <Box sx={{
+                  display: 'flex',
                   alignItems: 'center',
                   flexWrap: 'wrap'
                 }}>
@@ -534,14 +535,14 @@ const AppLayout: React.FC<AppLayoutProps> = ({ children }) => {
                 </Box>
               )}
             </Box>
-            
+
             {/* Right section: Different based on auth state */}
             {isAuthenticated ? (
               <Box sx={{ display: 'flex', alignItems: 'center', ml: 'auto' }}>
                 {/* Search Icon */}
-                <IconButton 
-                  color="inherit" 
-                  onClick={() => navigate('/search')} 
+                <IconButton
+                  color="inherit"
+                  onClick={() => navigate('/search')}
                   size="large"
                   sx={{ color: theme.palette.text.primary, mx: { xs: 0.5, sm: 1 } }}
                 >
@@ -554,7 +555,7 @@ const AppLayout: React.FC<AppLayoutProps> = ({ children }) => {
                     color="inherit"
                     onClick={toggleTheme}
                     size="small"
-                    sx={{ 
+                    sx={{
                       mr: 2,
                       color: theme.palette.text.primary,
                       transition: 'transform 0.3s, background 0.2s',
@@ -568,7 +569,7 @@ const AppLayout: React.FC<AppLayoutProps> = ({ children }) => {
                     {isDarkMode ? <LightModeIcon /> : <DarkModeIcon />}
                   </IconButton>
                 </Tooltip>
-                
+
                 {/* Notifications - replaced with NotificationMenu component */}
                 <NotificationMenu />
 
@@ -578,7 +579,7 @@ const AppLayout: React.FC<AppLayoutProps> = ({ children }) => {
                     edge="end"
                     onClick={handleProfileMenuOpen}
                     color="inherit"
-                    sx={{ 
+                    sx={{
                       color: theme.palette.text.primary,
                       ml: { xs: 0.5, sm: 1 },
                       '&:hover': {
@@ -587,20 +588,20 @@ const AppLayout: React.FC<AppLayoutProps> = ({ children }) => {
                     }}
                   >
                     {user?.avatarUrl ? (
-                      <Avatar 
-                        src={user.avatarUrl} 
+                      <Avatar
+                        src={user.avatarUrl}
                         alt={`${user.firstName} ${user.lastName}`}
-                        sx={{ 
-                          width: 34, 
+                        sx={{
+                          width: 34,
                           height: 34,
                           border: '2px solid',
                           borderColor: theme.palette.primary.main
                         }}
                       />
                     ) : (
-                      <Avatar sx={{ 
-                        width: 34, 
-                        height: 34, 
+                      <Avatar sx={{
+                        width: 34,
+                        height: 34,
                         bgcolor: theme.palette.primary.main,
                         border: '2px solid',
                         borderColor: theme.palette.primary.main
@@ -621,7 +622,7 @@ const AppLayout: React.FC<AppLayoutProps> = ({ children }) => {
                     color="inherit"
                     onClick={toggleTheme}
                     size="small"
-                    sx={{ 
+                    sx={{
                       mr: 2,
                       color: theme.palette.text.primary,
                       transition: 'transform 0.3s, background 0.2s',
@@ -635,7 +636,7 @@ const AppLayout: React.FC<AppLayoutProps> = ({ children }) => {
                     {isDarkMode ? <LightModeIcon /> : <DarkModeIcon />}
                   </IconButton>
                 </Tooltip>
-                
+
                 {renderAuthButtons()}
               </Box>
             )}
@@ -646,12 +647,12 @@ const AppLayout: React.FC<AppLayoutProps> = ({ children }) => {
       {/* Main content */}
       {isAuthPage ? (
         // Auth pages layout (centered paper)
-        <Container 
-          maxWidth="sm" 
-          sx={{ 
-            flex: 1, 
-            display: 'flex', 
-            alignItems: 'center', 
+        <Container
+          maxWidth="sm"
+          sx={{
+            flex: 1,
+            display: 'flex',
+            alignItems: 'center',
             justifyContent: 'center',
             py: 4,
             mt: '64px',
@@ -687,7 +688,7 @@ const AppLayout: React.FC<AppLayoutProps> = ({ children }) => {
             px: 2, // Add light padding for authenticated users
             overflowX: 'hidden',
             background: isAuthenticated ? (
-              theme.palette.mode === 'dark' 
+              theme.palette.mode === 'dark'
                 ? alpha(theme.palette.background.default, 0.9)
                 : alpha(theme.palette.background.default, 0.6)
             ) : 'transparent',
@@ -701,7 +702,7 @@ const AppLayout: React.FC<AppLayoutProps> = ({ children }) => {
                 right: 0,
                 width: { xs: '100%', lg: '35%' },
                 height: { xs: '40%', lg: '100%' },
-                background: theme.palette.mode === 'dark' 
+                background: theme.palette.mode === 'dark'
                   ? `radial-gradient(circle at 100% 0%, ${alpha(theme.palette.primary.dark, 0.2)} 0%, transparent 60%)`
                   : `radial-gradient(circle at 100% 0%, ${alpha(theme.palette.primary.light, 0.2)} 0%, transparent 60%)`,
                 zIndex: -1,
@@ -714,7 +715,7 @@ const AppLayout: React.FC<AppLayoutProps> = ({ children }) => {
                 left: 0,
                 width: { xs: '100%', lg: '30%' },
                 height: { xs: '30%', lg: '60%' },
-                background: theme.palette.mode === 'dark' 
+                background: theme.palette.mode === 'dark'
                   ? `radial-gradient(circle at 0% 100%, ${alpha(theme.palette.secondary.dark, 0.2)} 0%, transparent 60%)`
                   : `radial-gradient(circle at 0% 100%, ${alpha(theme.palette.secondary.light, 0.2)} 0%, transparent 60%)`,
                 zIndex: -1,
@@ -726,7 +727,7 @@ const AppLayout: React.FC<AppLayoutProps> = ({ children }) => {
           {children}
         </Box>
       )}
-      
+
       {/* Footer */}
       <Box
         component="footer"
@@ -738,15 +739,15 @@ const AppLayout: React.FC<AppLayoutProps> = ({ children }) => {
           position: 'relative',
           zIndex: 1,
           backdropFilter: 'blur(8px)',
-          backgroundColor: theme.palette.mode === 'dark' 
+          backgroundColor: theme.palette.mode === 'dark'
             ? alpha(theme.palette.background.paper, 0.7)
             : alpha(theme.palette.background.paper, 0.7),
         }}
       >
         <Container maxWidth={isAuthenticated ? false : "lg"} disableGutters={false}>
-          <Box 
-            sx={{ 
-              display: 'flex', 
+          <Box
+            sx={{
+              display: 'flex',
               flexDirection: 'row',
               justifyContent: 'center',
               alignItems: 'center',
@@ -755,34 +756,34 @@ const AppLayout: React.FC<AppLayoutProps> = ({ children }) => {
             }}
           >
             {/* Copyright */}
-            <Typography 
-              variant="body2" 
-              sx={{ 
-                opacity: 0.7, 
+            <Typography
+              variant="body2"
+              sx={{
+                opacity: 0.7,
                 fontSize: '0.7rem',
                 color: theme.palette.text.secondary
               }}
             >
               © {new Date().getFullYear()} ServiceFix. All rights reserved.
             </Typography>
-            
+
             {/* Legal links */}
-            <Stack 
-              direction="row" 
-              spacing={2} 
-              sx={{ 
+            <Stack
+              direction="row"
+              spacing={2}
+              sx={{
                 justifyContent: 'center',
                 flexWrap: 'nowrap'
               }}
             >
-              <MuiLink 
+              <MuiLink
                 component={Link}
                 to="/terms"
                 variant="body2"
-                underline="hover" 
-                sx={{ 
-                  color: theme.palette.mode === 'dark' 
-                    ? alpha(theme.palette.primary.main, 0.8) 
+                underline="hover"
+                sx={{
+                  color: theme.palette.mode === 'dark'
+                    ? alpha(theme.palette.primary.main, 0.8)
                     : theme.palette.primary.main,
                   fontSize: '0.7rem',
                   '&:hover': { color: theme.palette.primary.light }
@@ -790,14 +791,14 @@ const AppLayout: React.FC<AppLayoutProps> = ({ children }) => {
               >
                 Terms
               </MuiLink>
-              <MuiLink 
+              <MuiLink
                 component={Link}
-                to="/privacy" 
+                to="/privacy"
                 variant="body2"
-                underline="hover" 
-                sx={{ 
-                  color: theme.palette.mode === 'dark' 
-                    ? alpha(theme.palette.primary.main, 0.8) 
+                underline="hover"
+                sx={{
+                  color: theme.palette.mode === 'dark'
+                    ? alpha(theme.palette.primary.main, 0.8)
                     : theme.palette.primary.main,
                   fontSize: '0.7rem',
                   '&:hover': { color: theme.palette.primary.light }
@@ -805,14 +806,14 @@ const AppLayout: React.FC<AppLayoutProps> = ({ children }) => {
               >
                 Privacy
               </MuiLink>
-              <MuiLink 
+              <MuiLink
                 component={Link}
-                to="/cookies" 
+                to="/cookies"
                 variant="body2"
-                underline="hover" 
-                sx={{ 
-                  color: theme.palette.mode === 'dark' 
-                    ? alpha(theme.palette.primary.main, 0.8) 
+                underline="hover"
+                sx={{
+                  color: theme.palette.mode === 'dark'
+                    ? alpha(theme.palette.primary.main, 0.8)
                     : theme.palette.primary.main,
                   fontSize: '0.7rem',
                   '&:hover': { color: theme.palette.primary.light }
@@ -827,7 +828,7 @@ const AppLayout: React.FC<AppLayoutProps> = ({ children }) => {
 
       {/* Popups and Menus */}
       {isAuthenticated && renderProfileMenu}
-      {isAuthenticated && renderMobileMenu}      
+      {isAuthenticated && renderMobileMenu}
     </Box>
   );
 };

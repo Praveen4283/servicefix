@@ -2,6 +2,8 @@ import { v4 as uuidv4 } from 'uuid';
 import socketService from './socketService';
 import notificationService from './notificationService';
 import { Notification, NotificationType } from '../context/NotificationContext';
+import { logger } from '../utils/frontendLogger';
+import { TIME } from '../constants/app.constants';
 
 // Type for notification context interface the manager will use
 interface NotificationContextInterface {
@@ -82,12 +84,12 @@ class NotificationManager {
       this.isSocketConnected = true;
       this.syncPendingNotifications();
     });
-    
+
     socketService.onDisconnect(() => {
       this.log('[NotificationManager] Socket disconnected');
       this.isSocketConnected = false;
     });
-    
+
     socketService.subscribeToNotifications((notification: any) => {
       this.log('[NotificationManager] Socket notification received:', notification);
       this.processSocketNotification(notification);
@@ -98,13 +100,13 @@ class NotificationManager {
   setContext(context: NotificationContext) {
     this.log('[NotificationManager] Context set');
     this._context = context;
-    
+
     // Process any queued messages
     if (this._queue.length > 0) {
       this.log(`[NotificationManager] Processing ${this._queue.length} queued notifications`);
       const queueCopy = [...this._queue];
       this._queue = [];
-      
+
       queueCopy.forEach(item => {
         if (item.type === 'direct') {
           this.showDirectNotification(item.payload);
@@ -133,29 +135,29 @@ class NotificationManager {
     // Create a fingerprint for the notification
     const fingerprint = `${notification.type}:${notification.title}:${notification.message}`;
     const currentTime = Date.now();
-    
+
     // Check against active notifications within the last 5 seconds
     for (const [existingFingerprint, timestamp] of this.recentNotifications.entries()) {
       // If similar notification was shown in last 5 seconds, consider it a duplicate
-      if (existingFingerprint === fingerprint && (currentTime - timestamp) < 5000) {
+      if (existingFingerprint === fingerprint && (currentTime - timestamp) < TIME.TOAST_DUPLICATE_WINDOW_MS) {
         this.log(`[NotificationManager] Blocked duplicate notification: ${fingerprint}`);
         return true;
       }
     }
-    
+
     // Add this notification to prevent immediate duplicates
     this.recentNotifications.set(fingerprint, currentTime);
-    
+
     // Remove old notifications from tracking (older than 10 seconds)
     const keysToRemove: string[] = [];
     this.recentNotifications.forEach((timestamp, key) => {
-      if (currentTime - timestamp > 10000) { // 10 seconds
+      if (currentTime - timestamp > TIME.TOAST_CLEANUP_OLD_MS) {
         keysToRemove.push(key);
       }
     });
-    
+
     keysToRemove.forEach(key => this.recentNotifications.delete(key));
-    
+
     return false;
   }
 
@@ -171,7 +173,7 @@ class NotificationManager {
   // Show notification directly in UI
   showDirectNotification(options: ShowDirectOptions) {
     this.log('[NotificationManager] Showing notification:', options);
-    
+
     if (!this._context) {
       console.warn('[NotificationManager] Context not set, queueing notification');
       this._queue.push({ type: 'direct', payload: options });
@@ -181,8 +183,8 @@ class NotificationManager {
     // Ensure login notifications are always app category
     let effectiveCategory = options.category || 'system';
     if ((options.type === 'success' && options.message.includes('Welcome back')) ||
-        (options.title && options.title === 'Login Successful')) {
-      console.log('[NotificationManager] Detected login notification, forcing app category');
+      (options.title && options.title === 'Login Successful')) {
+      logger.debug('Detected login notification, forcing app category');
       effectiveCategory = 'app';
     }
 
@@ -192,13 +194,13 @@ class NotificationManager {
       message: options.message,
       type: options.type,
       title: options.title,
-      duration: options.duration || 5000,
+      duration: options.duration || TIME.TOAST_DURATION_MS,
       timestamp: Date.now(),
       isRead: options.isRead || false,
       category: effectiveCategory
     };
-    
-    console.log('[NotificationManager] Notification object created:', notification);
+
+    logger.debug('Notification object created:', notification);
 
     try {
       // Different handling based on persistence
@@ -213,7 +215,7 @@ class NotificationManager {
                 options.type,
                 {
                   title: options.title,
-                  duration: options.duration || 5000,
+                  duration: options.duration || TIME.TOAST_DURATION_MS,
                   id: notification.id
                 }
               );
@@ -230,7 +232,7 @@ class NotificationManager {
           options.type,
           {
             title: options.title,
-            duration: options.duration || 5000,
+            duration: options.duration || TIME.TOAST_DURATION_MS,
             id: notification.id
           }
         );
@@ -238,8 +240,8 @@ class NotificationManager {
 
       // For login notifications, also add directly to local storage as a backup
       if ((options.type === 'success' && options.message.includes('Welcome back')) ||
-          (options.title && options.title === 'Login Successful')) {
-        console.log('[NotificationManager] Adding login notification directly to local storage as backup');
+        (options.title && options.title === 'Login Successful')) {
+        logger.debug('Adding login notification directly to local storage as backup');
         import('../services/notificationService').then(({ default: notificationService }) => {
           notificationService.addNotification({
             ...notification,
@@ -255,8 +257,8 @@ class NotificationManager {
 
   // Process incoming socket notification
   private processSocketNotification(notification: any) {
-    console.log('[NotificationManager] Processing socket notification:', notification);
-    
+    logger.socket.event('notification', notification);
+
     // Add required fields if missing
     const processedNotification: ManagedNotification = {
       id: notification.id || uuidv4(),
@@ -269,20 +271,20 @@ class NotificationManager {
       category: notification.category || 'app',
       source: 'socket'
     };
-    
+
     // Add to UI and store
     this.addToUI(processedNotification);
   }
 
   // Add a notification to the UI via the context
   private addToUI(notification: ManagedNotification) {
-    console.log('[NotificationManager] Adding notification to UI:', notification);
-    
+    logger.debug('Adding notification to UI:', notification);
+
     if (!this._context) {
       console.warn('[NotificationManager] Context not set, queueing notification:', notification);
-      this._queue.push({ 
-        type: 'direct', 
-        payload: { 
+      this._queue.push({
+        type: 'direct',
+        payload: {
           message: notification.message,
           type: notification.type,
           title: notification.title,
@@ -290,11 +292,11 @@ class NotificationManager {
           isPersistent: notification.category === 'app',
           category: notification.category,
           isRead: notification.isRead
-        } 
+        }
       });
       return;
     }
-    
+
     // Always add persistent notifications to the backend/panel
     if (notification.category === 'app') {
       this._context._addPersistentNotification(notification)
@@ -335,9 +337,9 @@ class NotificationManager {
   // Sync pending notifications to server when connected
   private syncPendingNotifications() {
     if (!this.isSocketConnected || this.pendingSyncNotifications.size === 0) return;
-    
+
     this.log(`[NotificationManager] Syncing ${this.pendingSyncNotifications.size} pending notifications`);
-    
+
     this.pendingSyncNotifications.forEach((notification, id) => {
       socketService.emit('client:notification', {
         ...notification,

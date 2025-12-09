@@ -9,6 +9,30 @@ import { Department } from './Department';
 import { Organization } from './Organization';
 import { SLAPolicyTicket } from './SLAPolicyTicket';
 
+// Frontend format type for API responses
+export interface TicketFrontendFormat {
+  id: string;
+  subject: string;
+  description: string;
+  status: { id: string; name: string; color: string; isDefault: boolean; isResolved: boolean } | null;
+  priority: { id: string; name: string; color: string; slaHours: number } | null;
+  department: { id: string; name: string; description: string } | null;
+  type: { id: string; name: string; description: string } | null;
+  requester: { id: string; email: string; firstName: string; lastName: string; avatar: string | null } | null;
+  assignee: { id: string; email: string; firstName: string; lastName: string; avatar: string | null } | null;
+  organization: { id: string; name: string } | null;
+  createdAt: string;
+  updatedAt: string;
+  dueDate?: string;
+  resolvedAt?: string;
+  closedAt?: string;
+  slaStatus: string | null;
+  sentimentScore: number | null;
+  aiSummary: string | null;
+  source: string;
+  isSpam: boolean;
+}
+
 export enum TicketSource {
   EMAIL = 'email',
   PORTAL = 'portal',
@@ -144,7 +168,7 @@ export class Ticket {
   closedAt: Date;
 
   // Helper method to convert to frontend format
-  toFrontendFormat(): any {
+  toFrontendFormat(): TicketFrontendFormat {
     return {
       id: String(this.id),
       subject: this.subject,

@@ -1,4 +1,4 @@
-import React from 'react';
+
 import {
   Box,
   Typography,
@@ -34,34 +34,34 @@ export interface TimelineEvent {
     // For comments
     content?: string;
     isInternal?: boolean;
-    
+
     // For status changes
     from?: string | { name: string };
     to?: string | { name: string };
     fromColor?: string;
     toColor?: string;
-    
+
     // For assignments
     assignee?: {
       id: string;
       firstName: string;
       lastName: string;
     };
-    
+
     // For attachments
     fileName?: string;
     fileSize?: number;
-    
+
     // For due date changes
     oldDate?: string;
     newDate?: string;
-    
+
     // For priority changes
     oldPriority?: string | { name: string };
     newPriority?: string | { name: string };
     oldColor?: string;
     newColor?: string;
-    
+
     // For category changes
     field?: string;
     oldValue?: string;
@@ -75,7 +75,7 @@ interface TicketTimelineProps {
 
 const TicketTimeline: React.FC<TicketTimelineProps> = ({ events }) => {
   const theme = useTheme();
-  
+
   // Format date
   const formatDate = (dateString: string) => {
     const options: Intl.DateTimeFormatOptions = {
@@ -87,7 +87,7 @@ const TicketTimeline: React.FC<TicketTimelineProps> = ({ events }) => {
     };
     return new Date(dateString).toLocaleString(undefined, options);
   };
-  
+
   // Get relative time
   const getRelativeTime = (dateString: string) => {
     const date = new Date(dateString);
@@ -97,16 +97,16 @@ const TicketTimeline: React.FC<TicketTimelineProps> = ({ events }) => {
     const diffMin = Math.round(diffSec / 60);
     const diffHour = Math.round(diffMin / 60);
     const diffDay = Math.round(diffHour / 24);
-    
+
     if (diffSec < 60) return `${diffSec} sec ago`;
     if (diffMin < 60) return `${diffMin} min ago`;
     if (diffHour < 24) return `${diffHour} hour${diffHour > 1 ? 's' : ''} ago`;
     if (diffDay === 1) return 'Yesterday';
     if (diffDay < 7) return `${diffDay} day${diffDay > 1 ? 's' : ''} ago`;
-    
+
     return formatDate(dateString);
   };
-  
+
   // Format file size
   const formatFileSize = (bytes?: number) => {
     if (!bytes) return '';
@@ -114,7 +114,7 @@ const TicketTimeline: React.FC<TicketTimelineProps> = ({ events }) => {
     if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
     return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
   };
-  
+
   // Get icon for event type
   const getEventIcon = (event: TimelineEvent) => {
     switch (event.type) {
@@ -140,7 +140,7 @@ const TicketTimeline: React.FC<TicketTimelineProps> = ({ events }) => {
         return <EditIcon />;
     }
   };
-  
+
   // Get color for event type
   const getEventColor = (event: TimelineEvent) => {
     switch (event.type) {
@@ -166,14 +166,14 @@ const TicketTimeline: React.FC<TicketTimelineProps> = ({ events }) => {
         return theme.palette.grey[500];
     }
   };
-  
+
   // Get event title
   const getEventTitle = (event: TimelineEvent) => {
     // Add null check for user data
     if (!event.user || (!event.user.firstName && !event.user.lastName)) {
       // Fallback for missing user data
       const userName = event.user?.id ? `User #${event.user.id}` : 'System';
-      
+
       switch (event.type) {
         case 'comment':
           return `${userName} ${event.details.isInternal ? 'added an internal note' : 'commented'}`;
@@ -197,19 +197,19 @@ const TicketTimeline: React.FC<TicketTimelineProps> = ({ events }) => {
           return `${userName} updated the ticket`;
       }
     }
-    
+
     const userName = `${event.user.firstName || ''} ${event.user.lastName || ''}`.trim() || 'Unknown User';
-    
+
     switch (event.type) {
       case 'comment':
         return `${userName} ${event.details.isInternal ? 'added an internal note' : 'commented'}`;
       case 'status_change':
         // Explicit type guards for status changes
-        const fromStatus = 
-          event.details.from && typeof event.details.from === 'object' && 'name' in event.details.from 
-            ? event.details.from.name 
+        const fromStatus =
+          event.details.from && typeof event.details.from === 'object' && 'name' in event.details.from
+            ? event.details.from.name
             : event.details.from;
-        const toStatus = 
+        const toStatus =
           event.details.to && typeof event.details.to === 'object' && 'name' in event.details.to
             ? event.details.to.name
             : event.details.to;
@@ -233,13 +233,13 @@ const TicketTimeline: React.FC<TicketTimelineProps> = ({ events }) => {
         return `${userName} removed the due date`;
       case 'priority_change':
         // Explicit type guards for priority changes
-        const oldPriorityName = 
+        const oldPriorityName =
           event.details.oldPriority && typeof event.details.oldPriority === 'object' && 'name' in event.details.oldPriority
-            ? event.details.oldPriority.name 
+            ? event.details.oldPriority.name
             : event.details.oldPriority;
-        const newPriorityName = 
+        const newPriorityName =
           event.details.newPriority && typeof event.details.newPriority === 'object' && 'name' in event.details.newPriority
-            ? event.details.newPriority.name 
+            ? event.details.newPriority.name
             : event.details.newPriority;
         return `${userName} changed priority from "${oldPriorityName || 'N/A'}" to "${newPriorityName || 'N/A'}"`;
       case 'category_change':
@@ -248,7 +248,7 @@ const TicketTimeline: React.FC<TicketTimelineProps> = ({ events }) => {
         return `${userName} updated the ticket`;
     }
   };
-  
+
   if (!events || events.length === 0) {
     return (
       <Box textAlign="center" py={4}>
@@ -258,7 +258,7 @@ const TicketTimeline: React.FC<TicketTimelineProps> = ({ events }) => {
       </Box>
     );
   }
-  
+
   return (
     <Box>
       {events.map((event, index) => (
@@ -277,7 +277,7 @@ const TicketTimeline: React.FC<TicketTimelineProps> = ({ events }) => {
               }}
             />
           )}
-          
+
           <Box display="flex" mb={3} sx={{ position: 'relative', zIndex: 1 }}>
             {/* Event Icon */}
             <Avatar
@@ -290,7 +290,7 @@ const TicketTimeline: React.FC<TicketTimelineProps> = ({ events }) => {
             >
               {getEventIcon(event)}
             </Avatar>
-            
+
             {/* Event Content */}
             <Box flexGrow={1}>
               <Box
@@ -314,7 +314,7 @@ const TicketTimeline: React.FC<TicketTimelineProps> = ({ events }) => {
                   {getRelativeTime(event.timestamp)}
                 </Typography>
               </Box>
-              
+
               {/* Comment content */}
               {event.type === 'comment' && event.details.content && (
                 <Paper
@@ -336,7 +336,7 @@ const TicketTimeline: React.FC<TicketTimelineProps> = ({ events }) => {
                   </Typography>
                 </Paper>
               )}
-              
+
               {/* Attachment details */}
               {event.type === 'attachment' && event.details.fileName && (
                 <Box

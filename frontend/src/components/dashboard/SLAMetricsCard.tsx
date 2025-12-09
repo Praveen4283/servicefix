@@ -1,28 +1,29 @@
 import React, { useState, useEffect } from 'react';
-import { 
-  Card, 
-  CardHeader, 
-  CardContent, 
-  Grid, 
-  Typography, 
-  CircularProgress, 
+import {
+  Card,
+  CardHeader,
+  CardContent,
+  Grid,
+  Typography,
+  CircularProgress,
   Box,
   Paper,
   Stack
 } from '@mui/material';
-import { 
+import {
   DatePicker
 } from '@mui/x-date-pickers';
 import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
 import { LocalizationProvider } from '@mui/x-date-pickers/LocalizationProvider';
-import { 
-  CheckCircle as CheckCircleIcon, 
-  Warning as WarningIcon, 
-  AccessTime as ClockIcon 
+import {
+  CheckCircle as CheckCircleIcon,
+  Warning as WarningIcon,
+  AccessTime as ClockIcon
 } from '@mui/icons-material';
 import axios from 'axios';
 import config from '../../config';
 import { useAuth } from '../../context/AuthContext';
+import { logger } from '../../utils/frontendLogger';
 
 interface SLAMetrics {
   totalTickets: number;
@@ -52,12 +53,12 @@ const SLAMetricsCard: React.FC<SLAMetricsCardProps> = ({ organizationId }) => {
 
   const fetchMetrics = async () => {
     if (!organizationId) return;
-    
+
     setLoading(true);
     try {
       // Get token from localStorage
       const token = localStorage.getItem('authToken');
-      
+
       const response = await axios.get(`${config.api.baseUrl}/api/sla/metrics`, {
         params: {
           startDate: startDate.toISOString(),
@@ -67,10 +68,10 @@ const SLAMetricsCard: React.FC<SLAMetricsCardProps> = ({ organizationId }) => {
           Authorization: token ? `Bearer ${token}` : ''
         }
       });
-      
+
       setMetrics(response.data.data);
     } catch (error) {
-      console.error('Error fetching SLA metrics:', error);
+      logger.error('Error fetching SLA metrics:', error);
       setError('Failed to load SLA metrics');
     } finally {
       setLoading(false);
@@ -96,8 +97,8 @@ const SLAMetricsCard: React.FC<SLAMetricsCardProps> = ({ organizationId }) => {
 
   return (
     <Card elevation={3}>
-      <CardHeader 
-      title="SLA Compliance" 
+      <CardHeader
+        title="SLA Compliance"
         action={
           <LocalizationProvider dateAdapter={AdapterDateFns}>
             <Stack direction="row" spacing={2}>
@@ -110,10 +111,10 @@ const SLAMetricsCard: React.FC<SLAMetricsCardProps> = ({ organizationId }) => {
                 label="End Date"
                 value={endDate}
                 onChange={(newValue) => newValue && setEndDate(newValue)}
-          />
+              />
             </Stack>
           </LocalizationProvider>
-      }
+        }
       />
       <CardContent>
         <Grid container spacing={2}>
@@ -140,7 +141,7 @@ const SLAMetricsCard: React.FC<SLAMetricsCardProps> = ({ organizationId }) => {
                       value={Math.round(metrics?.responseCompliancePercentage || 0)}
                       color={(metrics?.responseCompliancePercentage || 0) < 80 ? 'error' : 'success'}
                       size={80}
-                />
+                    />
                     <Box
                       sx={{
                         top: 0,
@@ -189,7 +190,7 @@ const SLAMetricsCard: React.FC<SLAMetricsCardProps> = ({ organizationId }) => {
                       value={Math.round(metrics?.resolutionCompliancePercentage || 0)}
                       color={(metrics?.resolutionCompliancePercentage || 0) < 80 ? 'error' : 'success'}
                       size={80}
-                />
+                    />
                     <Box
                       sx={{
                         top: 0,

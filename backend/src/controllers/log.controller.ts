@@ -12,20 +12,20 @@ export const logController = {
     try {
       // Check if it's a batch of logs or a single log
       const logs = Array.isArray(req.body) ? req.body : [req.body];
-      
+
       if (logs.length === 0) {
-        return res.status(400).json({ 
-          status: 'error', 
-          message: 'No logs provided' 
+        return res.status(400).json({
+          status: 'error',
+          message: 'No logs provided'
         });
       }
-      
+
       // Process each log in the batch
       let processedCount = 0;
-      
+
       for (const logData of logs) {
         const { level, message, timestamp, appName, meta, userAgent, url, sessionId, userId } = logData;
-        
+
         // Only accept valid log levels
         const validLevels = ['error', 'warn', 'info', 'debug', 'http'];
         if (!validLevels.includes(level)) {
@@ -47,7 +47,7 @@ URL: ${url || 'not provided'}
 Session: ${sessionId || 'not provided'}
 User: ${userId || 'anonymous'}
 IP: ${req.ip}`;
-        
+
         // First, log using the backend logger
         logWithMetadata(level, `[FRONTEND-${appName || 'app'}] ${message}`, {
           timestamp,
@@ -65,22 +65,23 @@ IP: ${req.ip}`;
         const useSupabaseStorage = process.env.USE_SUPABASE_LOGS === 'true';
         if (useSupabaseStorage) {
           uploadLogToStorage(logMessage, logType, 'frontend')
-            .catch(error => console.error('Error uploading frontend log to Supabase:', error));
+            .catch(error => logger.error('Error uploading frontend log to Supabase:', error));
         }
-        
+
         processedCount++;
       }
 
       // Return success
-      return res.status(200).json({ 
+      return res.status(200).json({
         status: 'success',
         message: `${processedCount} log(s) saved successfully`
       });
-    } catch (error: any) {
-      logger.error(`Error saving frontend log: ${error.message}`);
-      return res.status(500).json({ 
-        status: 'error', 
-        message: 'Failed to save log' 
+    } catch (error: unknown) {
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      logger.error(`Error saving frontend log: ${errorMessage}`);
+      return res.status(500).json({
+        status: 'error',
+        message: 'Failed to save log'
       });
     }
   }

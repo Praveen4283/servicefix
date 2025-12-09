@@ -48,8 +48,8 @@ import {
   FormHelperText,
   SelectChangeEvent,
 } from '@mui/material';
-import { 
-  Save as SaveIcon, 
+import {
+  Save as SaveIcon,
   Warning as WarningIcon,
   Refresh as RefreshIcon,
   Settings as SettingsIcon,
@@ -75,10 +75,10 @@ import {
   AccessTime as ClockIcon,
   Business as BusinessIcon
 } from '@mui/icons-material';
-import { 
+import {
   pageContainer,
-  pageHeaderSection, 
-  cardStyleSx, 
+  pageHeaderSection,
+  cardStyleSx,
   sectionCardStyleSx,
   buttonAnimation,
 } from '../../styles/commonStyles';
@@ -86,9 +86,10 @@ import settingsService from '../../services/settingsService';
 import slaService, { SLAPolicy } from '../../services/slaService';
 import ticketPriorityService from '../../services/ticketPriorityService';
 import { useAuth } from '../../context/AuthContext';
-import { 
-  GeneralSettings, 
-  EmailSettings, 
+import { logger } from '../../utils/frontendLogger';
+import {
+  GeneralSettings,
+  EmailSettings,
   TicketSettings,
   IntegrationSettings,
   AdvancedSettings,
@@ -117,6 +118,7 @@ interface FormFieldProps {
   error?: boolean;
   helperText?: string;
   disabled?: boolean;
+  placeholder?: string;
 }
 
 const FormField: React.FC<FormFieldProps> = ({
@@ -131,6 +133,7 @@ const FormField: React.FC<FormFieldProps> = ({
   error = false,
   helperText,
   disabled = false,
+  placeholder,
 }) => (
   <TextField
     fullWidth={fullWidth}
@@ -144,6 +147,7 @@ const FormField: React.FC<FormFieldProps> = ({
     error={error}
     helperText={helperText}
     disabled={disabled}
+    placeholder={placeholder}
     inputProps={{
       'aria-label': label,
     }}
@@ -186,7 +190,7 @@ const EnhancedCard = (props: any) => {
   const { disableHoverEffect, ...rest } = props;
   return (
     <Zoom in={true} style={{ transitionDelay: props.index ? `${props.index * 100}ms` : '0ms' }}>
-      <Card 
+      <Card
         {...rest}
         sx={{
           ...(props.sx || {}),
@@ -318,10 +322,10 @@ const FormSelect: React.FC<FormSelectProps> = ({
   helperText,
   disabled = false,
 }) => (
-  <FormControl 
-    fullWidth={fullWidth} 
-    margin={margin} 
-    required={required} 
+  <FormControl
+    fullWidth={fullWidth}
+    margin={margin}
+    required={required}
     error={error}
     disabled={disabled}
   >
@@ -358,18 +362,18 @@ const SettingsPage: React.FC = () => {
   const theme = useTheme();
   const { user } = useAuth();
   const location = useLocation();
-  
+
   // Get organization ID from authenticated user instead of hardcoding it
   // Convert to number to ensure compatibility with APIs expecting numeric IDs
   const organizationId = user?.organizationId ? Number(user.organizationId) : undefined;
-  
+
   // Tab state
   const [value, setValue] = useState<number>(0);
   const [pendingTabValue, setPendingTabValue] = useState<number | null>(null);
-  
+
   // Add TabsRef to handle MUI Tabs error
   const tabsRef = useRef<HTMLDivElement>(null);
-  
+
   const [loading, setLoading] = useState(false);
   const [loadingSettings, setLoadingSettings] = useState({
     general: false,
@@ -438,7 +442,7 @@ const SettingsPage: React.FC = () => {
   const [originalTicketSettings, setOriginalTicketSettings] = useState<TicketSettings>({
     ...ticketSettings
   });
-  
+
   // Integration settings
   const [integrationSettings, setIntegrationSettings] = useState<IntegrationSettings>({
     // Slack Integration
@@ -447,7 +451,7 @@ const SettingsPage: React.FC = () => {
     slackChannel: '',
     slackNotifyOnNewTicket: true,
     slackNotifyOnTicketUpdates: false,
-    
+
     // Microsoft Teams Integration
     teamsEnabled: false,
     teamsWebhookUrl: '',
@@ -461,7 +465,7 @@ const SettingsPage: React.FC = () => {
     jiraApiToken: '',
     jiraProject: '',
     jiraCreateIssuesForTickets: true,
-    
+
     // GitHub Integration
     githubEnabled: false,
     githubAccessToken: '',
@@ -480,21 +484,21 @@ const SettingsPage: React.FC = () => {
     apiRateLimitPerHour: 1000,
     apiRateLimitWindowMinutes: 15,
     enableApiDocumentation: true,
-    
+
     // Security settings
     maxLoginAttempts: 5,
     passwordExpiryDays: 90,
     sessionTimeoutMinutes: 60,
     enforceMfa: false,
-    
+
     // Performance settings
     cacheDurationMinutes: 15,
     maxConcurrentFileUploads: 5,
-    
+
     // Custom fields
     enableCustomFields: true,
     maxCustomFieldsPerTicket: 10,
-    
+
     // AI features
     enableAiSuggestions: true,
     enableAutoTagging: true,
@@ -526,20 +530,20 @@ const SettingsPage: React.FC = () => {
   // Load all settings on initial render
   useEffect(() => {
     if (organizationId) {
-    fetchAllSettings();
-    fetchTicketPriorities();
-    fetchSLAPolicies();
+      fetchAllSettings();
+      fetchTicketPriorities();
+      fetchSLAPolicies();
     } else {
       notificationManager.showError('Organization ID not found. Please contact support.');
     }
-    
+
     // Check if we have an initialTab passed from navigation state
     const state = location.state as { initialTab?: number } | null;
     if (state && typeof state.initialTab === 'number') {
       setValue(state.initialTab);
     }
   }, [location, organizationId]);
-  
+
   // Fetch all settings from the API
   const fetchAllSettings = async () => {
     setApiError(null);
@@ -551,15 +555,15 @@ const SettingsPage: React.FC = () => {
       fetchAdvancedSettings()
     ]);
   };
-  
+
   // Fetch general settings
   const fetchGeneralSettings = async () => {
     try {
       setLoadingSettings(prev => ({ ...prev, general: true }));
-      
+
       // Use the actual API call
       const data = await settingsService.getGeneralSettings();
-      
+
       if (data && typeof data === 'object') {
         setGeneralSettings(data);
         setOriginalGeneralSettings(data);
@@ -572,7 +576,7 @@ const SettingsPage: React.FC = () => {
           maxFileSize: 5,
           defaultTimeZone: 'UTC',
         };
-        
+
         setGeneralSettings(defaultData);
         setOriginalGeneralSettings(defaultData);
       }
@@ -581,7 +585,7 @@ const SettingsPage: React.FC = () => {
       setApiError('Failed to load general settings. Please try again.');
       // Use notificationManager instead of setNotification
       notificationManager.showError('Failed to load general settings');
-      
+
       // Set defaults on error
       const defaultData: GeneralSettings = {
         companyName: 'ServiceFix',
@@ -589,20 +593,20 @@ const SettingsPage: React.FC = () => {
         maxFileSize: 5,
         defaultTimeZone: 'UTC',
       };
-      
+
       setGeneralSettings(defaultData);
       setOriginalGeneralSettings(defaultData);
     } finally {
       setLoadingSettings(prev => ({ ...prev, general: false }));
     }
   };
-  
+
   // Fetch email settings
   const fetchEmailSettings = async () => {
     try {
       setLoadingSettings(prev => ({ ...prev, email: true }));
       const data = await settingsService.getEmailSettings();
-      
+
       if (data && typeof data === 'object') {
         setEmailSettings(data);
         setOriginalEmailSettings(data);
@@ -622,15 +626,15 @@ const SettingsPage: React.FC = () => {
       setLoadingSettings(prev => ({ ...prev, email: false }));
     }
   };
-  
+
   // Fetch ticket settings
   const fetchTicketSettings = async () => {
     try {
       setLoadingSettings(prev => ({ ...prev, ticket: true }));
-      
+
       // Use the actual API call
       const data = await settingsService.getTicketSettings();
-      
+
       if (data && typeof data === 'object') {
         setTicketSettings(data);
         setOriginalTicketSettings(data);
@@ -650,15 +654,15 @@ const SettingsPage: React.FC = () => {
       setLoadingSettings(prev => ({ ...prev, ticket: false }));
     }
   };
-  
+
   // Fetch integration settings
   const fetchIntegrationSettings = async () => {
     try {
       setLoadingSettings(prev => ({ ...prev, integration: true }));
-      
+
       // Use the actual API call
       const data = await settingsService.getIntegrationSettings();
-      
+
       if (data && typeof data === 'object') {
         setIntegrationSettings(data);
         setOriginalIntegrationSettings(data);
@@ -672,7 +676,7 @@ const SettingsPage: React.FC = () => {
           slackChannel: '',
           slackNotifyOnNewTicket: true,
           slackNotifyOnTicketUpdates: false,
-          
+
           // Microsoft Teams Integration
           teamsEnabled: false,
           teamsWebhookUrl: '',
@@ -686,14 +690,14 @@ const SettingsPage: React.FC = () => {
           jiraApiToken: '',
           jiraProject: '',
           jiraCreateIssuesForTickets: true,
-          
+
           // GitHub Integration
           githubEnabled: false,
           githubAccessToken: '',
           githubRepository: '',
           githubCreateIssuesForTickets: true
         };
-        
+
         setIntegrationSettings(defaultData);
         setOriginalIntegrationSettings(defaultData);
       }
@@ -702,7 +706,7 @@ const SettingsPage: React.FC = () => {
       setApiError('Failed to load integration settings. Please try again.');
       // Use notificationManager instead of setNotification
       notificationManager.showError('Failed to load integration settings');
-      
+
       // Set defaults on error
       const defaultData: IntegrationSettings = {
         // Slack Integration
@@ -711,7 +715,7 @@ const SettingsPage: React.FC = () => {
         slackChannel: '',
         slackNotifyOnNewTicket: true,
         slackNotifyOnTicketUpdates: false,
-        
+
         // Microsoft Teams Integration
         teamsEnabled: false,
         teamsWebhookUrl: '',
@@ -725,29 +729,29 @@ const SettingsPage: React.FC = () => {
         jiraApiToken: '',
         jiraProject: '',
         jiraCreateIssuesForTickets: true,
-        
+
         // GitHub Integration
         githubEnabled: false,
         githubAccessToken: '',
         githubRepository: '',
         githubCreateIssuesForTickets: true
       };
-      
+
       setIntegrationSettings(defaultData);
       setOriginalIntegrationSettings(defaultData);
     } finally {
       setLoadingSettings(prev => ({ ...prev, integration: false }));
     }
   };
-  
+
   // Fetch advanced settings
   const fetchAdvancedSettings = async () => {
     try {
       setLoadingSettings(prev => ({ ...prev, advanced: true }));
-      
+
       // Use the actual API call
       const data = await settingsService.getAdvancedSettings();
-      
+
       if (data && typeof data === 'object') {
         setAdvancedSettings(data);
         setOriginalAdvancedSettings(data);
@@ -760,28 +764,28 @@ const SettingsPage: React.FC = () => {
           apiRateLimitPerHour: 1000,
           apiRateLimitWindowMinutes: 15,
           enableApiDocumentation: true,
-          
+
           // Security settings
           maxLoginAttempts: 5,
           passwordExpiryDays: 90,
           sessionTimeoutMinutes: 60,
           enforceMfa: false,
-          
+
           // Performance settings
           cacheDurationMinutes: 15,
           maxConcurrentFileUploads: 5,
-          
+
           // Custom fields
           enableCustomFields: true,
           maxCustomFieldsPerTicket: 10,
-          
+
           // AI features
           enableAiSuggestions: true,
           enableAutoTagging: true,
           enableSentimentAnalysis: true,
           aiModelName: 'gpt-3.5-turbo'
         };
-        
+
         setAdvancedSettings(defaultData);
         setOriginalAdvancedSettings(defaultData);
       }
@@ -790,7 +794,7 @@ const SettingsPage: React.FC = () => {
       setApiError('Failed to load advanced settings. Please try again.');
       // Use notificationManager instead of setNotification
       notificationManager.showError('Failed to load advanced settings');
-      
+
       // Set defaults on error
       const defaultData: AdvancedSettings = {
         // API settings
@@ -798,28 +802,28 @@ const SettingsPage: React.FC = () => {
         apiRateLimitPerHour: 1000,
         apiRateLimitWindowMinutes: 15,
         enableApiDocumentation: true,
-        
+
         // Security settings
         maxLoginAttempts: 5,
         passwordExpiryDays: 90,
         sessionTimeoutMinutes: 60,
         enforceMfa: false,
-        
+
         // Performance settings
         cacheDurationMinutes: 15,
         maxConcurrentFileUploads: 5,
-        
+
         // Custom fields
         enableCustomFields: true,
         maxCustomFieldsPerTicket: 10,
-        
+
         // AI features
         enableAiSuggestions: true,
         enableAutoTagging: true,
         enableSentimentAnalysis: true,
         aiModelName: 'gpt-3.5-turbo'
       };
-      
+
       setAdvancedSettings(defaultData);
       setOriginalAdvancedSettings(defaultData);
     } finally {
@@ -834,9 +838,9 @@ const SettingsPage: React.FC = () => {
     const isTicketDirty = JSON.stringify(ticketSettings) !== JSON.stringify(originalTicketSettings);
     const isIntegrationDirty = JSON.stringify(integrationSettings) !== JSON.stringify(originalIntegrationSettings);
     const isAdvancedDirty = JSON.stringify(advancedSettings) !== JSON.stringify(originalAdvancedSettings);
-    
+
     setUnsavedChanges(isGeneralDirty || isEmailDirty || isTicketDirty || isIntegrationDirty || isAdvancedDirty);
-    
+
     // Always refresh SLA policies on any ticket settings change
     if (isTicketDirty) {
       fetchSLAPolicies();
@@ -864,38 +868,38 @@ const SettingsPage: React.FC = () => {
 
   const validateForm = (settingsType: string): boolean => {
     const newErrors: ValidationErrors = { ...validationErrors };
-    
+
     if (settingsType === 'general') {
       newErrors.generalSettings = {};
-      
+
       if (!generalSettings.companyName.trim()) {
         newErrors.generalSettings.companyName = 'Company name is required';
       }
-      
+
       if (!generalSettings.supportEmail.trim()) {
         newErrors.generalSettings.supportEmail = 'Support email is required';
       } else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(generalSettings.supportEmail)) {
         newErrors.generalSettings.supportEmail = 'Invalid email format';
       }
-      
+
       if (generalSettings.maxFileSize <= 0) {
         newErrors.generalSettings.maxFileSize = 'Max file size must be greater than 0';
       }
     } else if (settingsType === 'email') {
       newErrors.emailSettings = {};
-      
+
       if (!emailSettings.smtpServer.trim()) {
         newErrors.emailSettings.smtpServer = 'SMTP server is required';
       }
-      
+
       if (emailSettings.smtpPort <= 0 || emailSettings.smtpPort > 65535) {
         newErrors.emailSettings.smtpPort = 'Port must be between 1 and 65535';
       }
-      
+
       if (!emailSettings.smtpUsername.trim()) {
         newErrors.emailSettings.smtpUsername = 'SMTP username is required';
       }
-      
+
       if (!emailSettings.emailReplyTo.trim()) {
         newErrors.emailSettings.emailReplyTo = 'Reply-to email is required';
       } else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(emailSettings.emailReplyTo)) {
@@ -903,17 +907,17 @@ const SettingsPage: React.FC = () => {
       }
     } else if (settingsType === 'ticket') {
       newErrors.ticketSettings = {};
-      
+
       if (ticketSettings.closedTicketReopen < 0) {
         newErrors.ticketSettings.closedTicketReopen = 'Must be 0 or greater';
       }
-      
+
       if (ticketSettings.autoCloseResolved < 0) {
         newErrors.ticketSettings.autoCloseResolved = 'Must be 0 or greater';
       }
     } else if (settingsType === 'integration') {
       newErrors.integrationSettings = {};
-      
+
       // Validate Slack settings if enabled
       if (integrationSettings.slackEnabled) {
         if (!integrationSettings.slackWebhookUrl.trim()) {
@@ -921,12 +925,12 @@ const SettingsPage: React.FC = () => {
         } else if (!integrationSettings.slackWebhookUrl.startsWith('https://hooks.slack.com/')) {
           newErrors.integrationSettings.slackWebhookUrl = 'Invalid Slack webhook URL format';
         }
-        
+
         if (!integrationSettings.slackChannel.trim()) {
           newErrors.integrationSettings.slackChannel = 'Channel is required when Slack is enabled';
         }
       }
-      
+
       // Validate Teams settings if enabled
       if (integrationSettings.teamsEnabled) {
         if (!integrationSettings.teamsWebhookUrl.trim()) {
@@ -935,7 +939,7 @@ const SettingsPage: React.FC = () => {
           newErrors.integrationSettings.teamsWebhookUrl = 'Invalid Teams webhook URL format';
         }
       }
-      
+
       // Validate Jira settings if enabled
       if (integrationSettings.jiraEnabled) {
         if (!integrationSettings.jiraUrl.trim()) {
@@ -943,81 +947,81 @@ const SettingsPage: React.FC = () => {
         } else if (!integrationSettings.jiraUrl.startsWith('https://')) {
           newErrors.integrationSettings.jiraUrl = 'Jira URL must use HTTPS';
         }
-        
+
         if (!integrationSettings.jiraUsername.trim()) {
           newErrors.integrationSettings.jiraUsername = 'Username is required when Jira is enabled';
         }
-        
+
         if (!integrationSettings.jiraApiToken.trim()) {
           newErrors.integrationSettings.jiraApiToken = 'API token is required when Jira is enabled';
         }
-        
+
         if (!integrationSettings.jiraProject.trim()) {
           newErrors.integrationSettings.jiraProject = 'Project key is required when Jira is enabled';
         }
       }
-      
+
       // Validate GitHub settings if enabled
       if (integrationSettings.githubEnabled) {
         if (!integrationSettings.githubAccessToken.trim()) {
           newErrors.integrationSettings.githubAccessToken = 'Access token is required when GitHub is enabled';
         }
-        
+
         if (!integrationSettings.githubRepository.trim()) {
           newErrors.integrationSettings.githubRepository = 'Repository is required when GitHub is enabled';
         }
       }
     } else if (settingsType === 'advanced') {
       newErrors.advancedSettings = {};
-      
+
       // Validate API settings
       if (advancedSettings.apiRateLimitPerHour <= 0) {
         newErrors.advancedSettings.apiRateLimitPerHour = 'API rate limit must be greater than 0';
       }
-      
+
       if (advancedSettings.apiRateLimitWindowMinutes <= 0) {
         newErrors.advancedSettings.apiRateLimitWindowMinutes = 'Rate limit window must be greater than 0';
       }
-      
+
       // Validate security settings
       if (advancedSettings.maxLoginAttempts <= 0) {
         newErrors.advancedSettings.maxLoginAttempts = 'Max login attempts must be greater than 0';
       }
-      
+
       if (advancedSettings.passwordExpiryDays < 0) {
         newErrors.advancedSettings.passwordExpiryDays = 'Password expiry days must be 0 or greater';
       }
-      
+
       if (advancedSettings.sessionTimeoutMinutes <= 0) {
         newErrors.advancedSettings.sessionTimeoutMinutes = 'Session timeout must be greater than 0';
       }
-      
+
       // Validate performance settings
       if (advancedSettings.cacheDurationMinutes < 0) {
         newErrors.advancedSettings.cacheDurationMinutes = 'Cache duration must be 0 or greater';
       }
-      
+
       if (advancedSettings.maxConcurrentFileUploads <= 0) {
         newErrors.advancedSettings.maxConcurrentFileUploads = 'Max concurrent uploads must be greater than 0';
       }
-      
+
       // Validate custom fields settings
       if (advancedSettings.enableCustomFields && advancedSettings.maxCustomFieldsPerTicket <= 0) {
         newErrors.advancedSettings.maxCustomFieldsPerTicket = 'Max custom fields must be greater than 0';
       }
     }
-    
+
     setValidationErrors(newErrors);
-    
+
     // Check if there are any errors for the current settings type
-    const currentErrors = 
+    const currentErrors =
       settingsType === 'general' ? newErrors.generalSettings :
-      settingsType === 'email' ? newErrors.emailSettings :
-      settingsType === 'ticket' ? newErrors.ticketSettings : 
-      settingsType === 'integration' ? newErrors.integrationSettings :
-      settingsType === 'advanced' ? newErrors.advancedSettings :
-      undefined;
-    
+        settingsType === 'email' ? newErrors.emailSettings :
+          settingsType === 'ticket' ? newErrors.ticketSettings :
+            settingsType === 'integration' ? newErrors.integrationSettings :
+              settingsType === 'advanced' ? newErrors.advancedSettings :
+                undefined;
+
     return !currentErrors || Object.keys(currentErrors).length === 0;
   };
 
@@ -1026,7 +1030,7 @@ const SettingsPage: React.FC = () => {
       setNextTabIndex(newValue);
       setShowLeaveDialog(true);
     } else {
-    setValue(newValue);
+      setValue(newValue);
     }
   };
 
@@ -1049,7 +1053,7 @@ const SettingsPage: React.FC = () => {
       ...prev,
       [name]: type === 'checkbox' ? checked : type === 'number' ? Number(value) : value,
     }));
-    
+
     // Clear validation error for this field if it exists
     if (validationErrors.generalSettings && validationErrors.generalSettings[name as keyof GeneralSettings]) {
       setValidationErrors((prev) => ({
@@ -1068,7 +1072,7 @@ const SettingsPage: React.FC = () => {
       ...prev,
       [name]: type === 'checkbox' ? checked : type === 'number' ? Number(value) : value,
     }));
-    
+
     // Clear validation error for this field if it exists
     if (validationErrors.emailSettings && validationErrors.emailSettings[name as keyof EmailSettings]) {
       setValidationErrors((prev) => ({
@@ -1088,7 +1092,7 @@ const SettingsPage: React.FC = () => {
       ...prev,
       [name]: type === 'checkbox' ? checked : type === 'number' ? Number(value) : value,
     }));
-    
+
     // Clear validation error for this field if it exists
     if (validationErrors.ticketSettings && validationErrors.ticketSettings[name as keyof TicketSettings]) {
       setValidationErrors((prev) => ({
@@ -1107,7 +1111,7 @@ const SettingsPage: React.FC = () => {
       ...prev,
       [name]: type === 'checkbox' ? checked : value,
     }));
-    
+
     // Clear validation error for this field if it exists
     if (validationErrors.integrationSettings && validationErrors.integrationSettings[name as keyof IntegrationSettings]) {
       setValidationErrors((prev) => ({
@@ -1122,7 +1126,7 @@ const SettingsPage: React.FC = () => {
 
   const handleAdvancedSettingsChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const { name, value, checked, type } = e.target;
-    
+
     // For number inputs, convert to number and validate
     if (type === 'number') {
       const numValue = Number(value);
@@ -1138,12 +1142,12 @@ const SettingsPage: React.FC = () => {
         return;
       }
     }
-    
+
     setAdvancedSettings((prev) => ({
       ...prev,
       [name]: type === 'checkbox' ? checked : type === 'number' ? Number(value) : value,
     }));
-    
+
     // Clear validation error for this field if it exists
     if (validationErrors.advancedSettings && name in validationErrors.advancedSettings) {
       setValidationErrors((prev: ValidationErrors) => ({
@@ -1182,13 +1186,13 @@ const SettingsPage: React.FC = () => {
       notificationManager.showError('Please correct the errors before saving');
       return;
     }
-    
+
     setLoading(true);
-    
+
     try {
       // Call the actual settings service
       const result = await settingsService.updateGeneralSettings(generalSettings);
-      
+
       setOriginalGeneralSettings(result);
       // Use notificationManager instead of setNotification
       notificationManager.showSuccess('General settings saved successfully');
@@ -1207,13 +1211,13 @@ const SettingsPage: React.FC = () => {
       notificationManager.showError('Please correct the errors before saving');
       return;
     }
-    
+
     setLoading(true);
-    
+
     try {
       // Call the actual settings service
       const result = await settingsService.updateEmailSettings(emailSettings);
-      
+
       setOriginalEmailSettings(result);
       // Use notificationManager instead of setNotification
       notificationManager.showSuccess('Email settings saved successfully');
@@ -1232,13 +1236,13 @@ const SettingsPage: React.FC = () => {
       notificationManager.showError('Please correct the errors before saving');
       return;
     }
-    
+
     setLoading(true);
-    
+
     try {
       // Call the actual settings service
       const result = await settingsService.updateIntegrationSettings(integrationSettings);
-      
+
       setOriginalIntegrationSettings(result);
       // Use notificationManager instead of setNotification
       notificationManager.showSuccess('Integration settings saved successfully');
@@ -1256,12 +1260,12 @@ const SettingsPage: React.FC = () => {
       notificationManager.showError('Please correct the errors before saving');
       return;
     }
-    
+
     setLoading(true);
-    
+
     try {
       const result = await settingsService.updateAdvancedSettings(advancedSettings);
-      
+
       setOriginalAdvancedSettings(result);
       notificationManager.showSuccess('Advanced settings saved successfully');
     } catch (error) {
@@ -1278,18 +1282,18 @@ const SettingsPage: React.FC = () => {
       notificationManager.showError('Please correct the errors before saving');
       return;
     }
-    
+
     setLoading(true);
-    
+
     try {
       // Call the real service to save ticket settings
       const result = await settingsService.updateTicketSettings(ticketSettings);
-      
+
       setOriginalTicketSettings(result);
-      
+
       // Always sync SLA policies after saving ticket settings
       await syncSLAPoliciesToSettings();
-      
+
       notificationManager.showSuccess('Ticket settings saved successfully');
     } catch (error) {
       console.error('Error saving ticket settings:', error);
@@ -1305,20 +1309,20 @@ const SettingsPage: React.FC = () => {
       if (!organizationId) {
         throw new Error('Organization ID not available');
       }
-      
+
       console.log('Syncing SLA policies to settings table...');
       // Get the latest policies from the SLA service
       const latestPolicies = await slaService.getSLAPolicies(organizationId);
-      
+
       if (latestPolicies && latestPolicies.length > 0) {
         console.log(`Syncing ${latestPolicies.length} SLA policies to settings table`);
-        
+
         // Save to settings table
         const response = await settingsService.updateSLASettings({
           organizationId,
           policies: latestPolicies
         });
-        
+
         console.log('SLA policies successfully synced to settings table', response);
       } else {
         console.warn('No SLA policies to sync to settings table');
@@ -1336,13 +1340,13 @@ const SettingsPage: React.FC = () => {
       notificationManager.showError('Please correct the errors before testing');
       return;
     }
-    
+
     setLoading(true);
-    
+
     try {
       // Use the real API to test email settings
       const result = await settingsService.testEmailSettings(emailSettings);
-      
+
       // Use notificationManager instead of setNotification
       if (result.success) {
         notificationManager.showSuccess(result.message || 'Test email sent successfully. Please check your inbox.');
@@ -1358,40 +1362,80 @@ const SettingsPage: React.FC = () => {
     }
   };
 
+  // Handle testing AI configuration
+  const handleTestAIConfig = async () => {
+    if (!advancedSettings.aiApiKey) {
+      notificationManager.showError('Please enter an API key to test');
+      return;
+    }
+
+    setLoading(true);
+    try {
+      // We need to call the API directly since we haven't added this method to settingsService yet
+      // Or we can add it to settingsService first. Let's use apiClient directly for now or add to service.
+      // Since I can't easily edit settingsService and SettingsPage at the same time, I'll use apiClient here if available
+      // But apiClient is not imported. I should use settingsService and add the method there.
+      // Wait, I should add the method to settingsService first to be clean.
+
+      // Let's assume I'll add it to settingsService next.
+      // Actually, I should add it to settingsService NOW before this file.
+      // But I'm already in this file. I'll use a direct fetch or axios if available, or just assume I'll fix service.
+      // apiClient is likely used in settingsService.
+
+      // Let's check imports. I don't see apiClient imported.
+      // I'll use fetch for now or better, I'll pause this edit and update settingsService first.
+      // No, I can't pause easily. I'll write the code assuming settingsService.testAIConfiguration exists
+      // and then I'll go update settingsService.
+
+      const response = await settingsService.testAIConfiguration({
+        apiKey: advancedSettings.aiApiKey,
+        modelName: advancedSettings.aiModelName,
+        provider: advancedSettings.aiProvider || 'gemini'
+      });
+
+      notificationManager.showSuccess('AI configuration test successful!');
+    } catch (error: any) {
+      console.error('Error testing AI config:', error);
+      notificationManager.showError(`AI test failed: ${error.message || 'Unknown error'}`);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   // Memoized error getter functions for improved performance
   const getGeneralError = useCallback(
-    (fieldName: keyof GeneralSettings) => 
+    (fieldName: keyof GeneralSettings) =>
       validationErrors.generalSettings && validationErrors.generalSettings[fieldName],
     [validationErrors.generalSettings]
   );
-  
+
   const getEmailError = useCallback(
-    (fieldName: keyof EmailSettings) => 
+    (fieldName: keyof EmailSettings) =>
       validationErrors.emailSettings && validationErrors.emailSettings[fieldName],
     [validationErrors.emailSettings]
   );
-  
+
   const getTicketError = useCallback(
-    (fieldName: keyof TicketSettings) => 
+    (fieldName: keyof TicketSettings) =>
       validationErrors.ticketSettings && validationErrors.ticketSettings[fieldName],
     [validationErrors.ticketSettings]
   );
-  
+
   const getIntegrationError = useCallback(
-    (fieldName: keyof IntegrationSettings) => 
+    (fieldName: keyof IntegrationSettings) =>
       validationErrors.integrationSettings && validationErrors.integrationSettings[fieldName],
     [validationErrors.integrationSettings]
   );
-  
+
   const getAdvancedError = useCallback(
-    (fieldName: keyof AdvancedSettings) => 
+    (fieldName: keyof AdvancedSettings) =>
       validationErrors.advancedSettings && validationErrors.advancedSettings[fieldName],
     [validationErrors.advancedSettings]
   );
 
   const handleRefreshData = useCallback((event: React.MouseEvent<HTMLButtonElement>) => {
     setLoading(true);
-    
+
     // Fetch all settings
     fetchAllSettings()
       .then(() => {
@@ -1414,14 +1458,14 @@ const SettingsPage: React.FC = () => {
       notificationManager.showError('Please correct the errors before testing');
       return;
     }
-    
+
     setLoading(true);
-    
+
     try {
       // Determine which settings to send based on the integration type
       let testSettings;
       let testName;
-      
+
       switch (type) {
         case 'slack':
           if (!integrationSettings.slackEnabled) {
@@ -1467,11 +1511,11 @@ const SettingsPage: React.FC = () => {
         default:
           throw new Error('Unknown integration type');
       }
-      
+
       // Use the actual API call instead of mock data
       try {
         const result = await settingsService.testIntegrationConnection(type, testSettings);
-        
+
         // Use notificationManager instead of setNotification
         if (result.success) {
           notificationManager.showSuccess(result.message || `Connection to ${testName} tested successfully`);
@@ -1501,9 +1545,9 @@ const SettingsPage: React.FC = () => {
       if (!organizationId) {
         throw new Error('Organization ID not available');
       }
-      
+
       const priorities = await ticketPriorityService.getPriorities();
-      
+
       // We should have an array of priorities at this point thanks to the fixed service
       if (Array.isArray(priorities)) {
         setPriorities(priorities);
@@ -1520,25 +1564,25 @@ const SettingsPage: React.FC = () => {
       setLoadingPriorities(false);
     }
   };
-  
+
   // New function to fetch SLA policies
   const fetchSLAPolicies = async () => {
     try {
       setLoadingSlaPolicies(true);
       setSlaError(null);
-      
+
       if (!organizationId) {
         throw new Error('Organization ID not available');
       }
-      
+
       console.log('Using organization ID for SLA policies:', organizationId);
-      
+
       // First try to get policies from the settings table
       let policies: SLAPolicy[] = [];
       try {
         const slaSettings = await settingsService.getSLASettings();
         console.log('SLA settings from database:', slaSettings);
-        
+
         // Check different possible response formats
         if (slaSettings) {
           if (slaSettings.policies && Array.isArray(slaSettings.policies) && slaSettings.policies.length > 0) {
@@ -1555,17 +1599,17 @@ const SettingsPage: React.FC = () => {
       } catch (error) {
         console.error('Error getting policies from settings table:', error);
       }
-      
+
       // If we found policies in the settings table, use those
       if (policies.length > 0) {
         console.log('Using policies from settings table:', policies);
-      setSlaPolicies(policies);
+        setSlaPolicies(policies);
       } else {
         // Fallback to the SLA service if needed
         console.log('No policies found in settings table, fetching from SLA service');
         try {
           const fetchedPolicies = await slaService.getSLAPolicies(organizationId);
-          
+
           if (fetchedPolicies && Array.isArray(fetchedPolicies) && fetchedPolicies.length > 0) {
             console.log(`Got ${fetchedPolicies.length} policies from SLA service`, fetchedPolicies);
             setSlaPolicies(fetchedPolicies);
@@ -1587,29 +1631,29 @@ const SettingsPage: React.FC = () => {
       setLoadingSlaPolicies(false);
     }
   };
-  
+
   // New function to handle SLA form changes
   const handleSLAFormChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const { name, value, type, checked } = e.target;
-    
+
     setSlaForm((prev) => ({
       ...prev,
       [name]: type === 'checkbox' ? checked : type === 'number' ? parseInt(value) : value,
     }));
   };
-  
+
   // Function to handle SLA priority selection
   const handleSLAPriorityChange = (e: React.ChangeEvent<{ name?: string; value: unknown }>) => {
     const priorityId = Number(e.target.value);
-    
+
     if (isNaN(priorityId) || priorityId <= 0) {
       console.warn('Invalid priority ID selected:', e.target.value);
       return;
     }
-    
+
     // Find existing SLA policy for this priority
     const existingPolicy = slaPolicies.find(policy => policy.ticketPriorityId === priorityId);
-    
+
     if (existingPolicy) {
       console.log('Found existing SLA policy for priority:', existingPolicy);
       setSlaForm({
@@ -1624,7 +1668,7 @@ const SettingsPage: React.FC = () => {
       // Find priority to get default values based on priority's SLA hours
       const priority = priorities.find(p => p.id === priorityId);
       const defaultSlaHours = priority?.slaHours || 24;
-      
+
       // Set reasonable defaults based on priority SLA hours
       setSlaForm({
         priorityId,
@@ -1636,7 +1680,7 @@ const SettingsPage: React.FC = () => {
       });
     }
   };
-  
+
   // Function to save SLA policy
   const handleSaveSLAPolicy = async () => {
     // Validate form
@@ -1644,34 +1688,34 @@ const SettingsPage: React.FC = () => {
       notificationManager.showError('Please select a priority');
       return;
     }
-    
+
     if (!slaForm.firstResponseHours || !slaForm.nextResponseHours || !slaForm.resolutionHours) {
       notificationManager.showError('Please enter all SLA time values');
       return;
     }
-    
+
     if (!organizationId) {
       notificationManager.showError('Organization ID not available');
       return;
     }
-    
+
     setSavingSlaPolicies(true);
-    
+
     try {
       // Get the priority details
       const priority = priorities.find(p => p.id === slaForm.priorityId);
-      
+
       if (!priority) {
         throw new Error('Selected priority not found');
       }
-      
+
       console.log(`Creating/updating SLA policy for priority: ${priority.name} (ID: ${priority.id})`);
-      
+
       // Find existing policy for this priority
-      const existingPolicy = slaPolicies.find(policy => 
+      const existingPolicy = slaPolicies.find(policy =>
         policy.ticketPriorityId === slaForm.priorityId
       );
-      
+
       const policyData = {
         name: `${priority.name} Priority SLA`,
         description: `SLA policy for ${priority.name} priority tickets`,
@@ -1682,23 +1726,23 @@ const SettingsPage: React.FC = () => {
         resolutionHours: slaForm.resolutionHours,
         businessHoursOnly: slaForm.businessHoursOnly
       };
-      
+
       console.log('SLA policy data to be saved:', policyData);
-      
+
       // Use the imported SLAPolicy type from slaService
       let savedPolicy: import('../../services/slaService').SLAPolicy | null = null;
-      
+
       if (existingPolicy) {
         // Update existing policy
         console.log(`Updating existing SLA policy with ID: ${existingPolicy.id}`);
         savedPolicy = await slaService.updateSLAPolicy(existingPolicy.id, policyData);
-        
+
         // Log what we got back
         console.log('SLA policy saved successfully:', savedPolicy ? savedPolicy : 'No response data returned');
-        
+
         // Update the policies list
         if (savedPolicy) {
-          setSlaPolicies(prevPolicies => 
+          setSlaPolicies(prevPolicies =>
             prevPolicies.map(p => p.id === savedPolicy!.id ? savedPolicy! : p)
           );
         }
@@ -1706,16 +1750,16 @@ const SettingsPage: React.FC = () => {
         // Create new policy
         console.log('Creating new SLA policy');
         savedPolicy = await slaService.createSLAPolicy(policyData);
-        
+
         // Log what we got back
         console.log('SLA policy saved successfully:', savedPolicy ? savedPolicy : 'No response data returned');
-        
+
         // Add to the policies list
         if (savedPolicy) {
           setSlaPolicies(prevPolicies => [...prevPolicies, savedPolicy as SLAPolicy]);
         }
       }
-      
+
       // Update the priority's SLA hours to match the policy
       console.log(`Updating priority ${priority.id} with SLA hours: ${slaForm.resolutionHours}`);
       if (priority && priority.slaHours !== slaForm.resolutionHours) {
@@ -1723,26 +1767,26 @@ const SettingsPage: React.FC = () => {
           ...priority,
           slaHours: slaForm.resolutionHours
         });
-        
+
         // Update the priorities list
-        setPriorities(prevPriorities => 
-          prevPriorities.map(p => 
-            p.id === priority.id 
-              ? { ...p, slaHours: slaForm.resolutionHours } 
+        setPriorities(prevPriorities =>
+          prevPriorities.map(p =>
+            p.id === priority.id
+              ? { ...p, slaHours: slaForm.resolutionHours }
               : p
           )
         );
       }
-      
+
       // Sync the updated SLA policies to the settings table
       await syncSLAPoliciesToSettings();
-      
+
       // Show success message
       notificationManager.showSuccess('SLA policy saved successfully');
     } catch (err) {
       console.error('Error saving SLA policy:', err);
       setSlaError('Failed to save SLA policy. Please try again.');
-      
+
       notificationManager.showError('Failed to save SLA policy');
     } finally {
       setSavingSlaPolicies(false);
@@ -1758,7 +1802,7 @@ const SettingsPage: React.FC = () => {
         </Alert>
       );
     }
-    
+
     return (
       <Alert severity="info" sx={{ mt: 2 }}>
         SLA settings will be saved when you click "Save Ticket Settings"
@@ -1811,7 +1855,7 @@ const SettingsPage: React.FC = () => {
           />
         </CardContent>
       </EnhancedCard>
-      
+
       <EnhancedCard>
         <CardHeader title="System Settings" />
         <Divider />
@@ -1826,7 +1870,7 @@ const SettingsPage: React.FC = () => {
             helperText={validationErrors.generalSettings?.maxFileSize || "Maximum attachment size allowed for file uploads across the application"}
             required
           />
-          
+
           <FormSelect
             label="Default Time Zone"
             name="defaultTimeZone"
@@ -1838,7 +1882,7 @@ const SettingsPage: React.FC = () => {
           />
         </CardContent>
       </EnhancedCard>
-      
+
       <Box mt={2} display="flex" justifyContent="flex-end">
         <Button
           variant="contained"
@@ -1853,7 +1897,7 @@ const SettingsPage: React.FC = () => {
   );
 
   return (
-    <Container maxWidth={false} sx={{ 
+    <Container maxWidth={false} sx={{
       py: { xs: 2, md: 3 },
       position: 'relative',
       width: '100%',
@@ -1865,7 +1909,7 @@ const SettingsPage: React.FC = () => {
         right: 0,
         width: { xs: '100%', lg: '25%' },
         height: { xs: '40%', lg: '100%' },
-        background: theme.palette.mode === 'dark' 
+        background: theme.palette.mode === 'dark'
           ? `radial-gradient(circle at 100% 0%, ${alpha(theme.palette.primary.dark, 0.15)} 0%, transparent 70%)`
           : `radial-gradient(circle at 100% 0%, ${alpha(theme.palette.primary.light, 0.15)} 0%, transparent 70%)`,
         zIndex: -1,
@@ -1879,7 +1923,7 @@ const SettingsPage: React.FC = () => {
         left: 0,
         width: { xs: '100%', lg: '25%' },
         height: { xs: '30%', lg: '60%' },
-        background: theme.palette.mode === 'dark' 
+        background: theme.palette.mode === 'dark'
           ? `radial-gradient(circle at 0% 100%, ${alpha(theme.palette.secondary.dark, 0.15)} 0%, transparent 70%)`
           : `radial-gradient(circle at 0% 100%, ${alpha(theme.palette.secondary.light, 0.15)} 0%, transparent 70%)`,
         zIndex: -1,
@@ -1890,10 +1934,10 @@ const SettingsPage: React.FC = () => {
       <Grid container spacing={1}>
         {/* Header - Exact match to Ticket Management header */}
         <Grid item xs={12}>
-          <Card 
+          <Card
             elevation={0}
-            sx={{ 
-              p: 0, 
+            sx={{
+              p: 0,
               overflow: 'hidden',
               border: '1px solid',
               borderColor: alpha(theme.palette.primary.main, 0.2),
@@ -1930,9 +1974,9 @@ const SettingsPage: React.FC = () => {
 
         <Grid item xs={12}>
           {apiError && (
-            <Alert 
-              severity="error" 
-              sx={{ 
+            <Alert
+              severity="error"
+              sx={{
                 mb: 3,
                 borderRadius: 2,
                 border: `1px solid ${alpha(theme.palette.error.main, 0.3)}`,
@@ -1949,11 +1993,11 @@ const SettingsPage: React.FC = () => {
               {apiError}
             </Alert>
           )}
-          
+
           {unsavedChanges && (
-            <Alert 
-              severity="warning" 
-              sx={{ 
+            <Alert
+              severity="warning"
+              sx={{
                 mb: 3,
                 borderRadius: 2,
                 border: `1px solid ${alpha(theme.palette.warning.main, 0.3)}`,
@@ -1964,8 +2008,8 @@ const SettingsPage: React.FC = () => {
             </Alert>
           )}
 
-          <Paper 
-            sx={{ 
+          <Paper
+            sx={{
               width: '100%',
               borderRadius: 3,
               mb: 3,
@@ -1973,7 +2017,7 @@ const SettingsPage: React.FC = () => {
             }}
           >
             <Box sx={{ borderBottom: 1, borderColor: 'divider' }} ref={tabsRef}>
-              <Tabs 
+              <Tabs
                 value={value}
                 onChange={handleTabChange}
                 variant="scrollable"
@@ -1988,7 +2032,7 @@ const SettingsPage: React.FC = () => {
                   }
                 }}
               >
-                <Tab 
+                <Tab
                   label={
                     <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
                       <SettingsIcon fontSize="small" />
@@ -1997,7 +2041,7 @@ const SettingsPage: React.FC = () => {
                     </Box>
                   }
                 />
-                <Tab 
+                <Tab
                   label={
                     <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
                       <EmailIcon fontSize="small" />
@@ -2006,7 +2050,7 @@ const SettingsPage: React.FC = () => {
                     </Box>
                   }
                 />
-                <Tab 
+                <Tab
                   label={
                     <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
                       <TicketIcon fontSize="small" />
@@ -2015,7 +2059,7 @@ const SettingsPage: React.FC = () => {
                     </Box>
                   }
                 />
-                <Tab 
+                <Tab
                   label={
                     <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
                       <ClockIcon fontSize="small" />
@@ -2024,7 +2068,7 @@ const SettingsPage: React.FC = () => {
                     </Box>
                   }
                 />
-                <Tab 
+                <Tab
                   label={
                     <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
                       <IntegrationsIcon fontSize="small" />
@@ -2033,7 +2077,7 @@ const SettingsPage: React.FC = () => {
                     </Box>
                   }
                 />
-                <Tab 
+                <Tab
                   label={
                     <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
                       <AdvancedIcon fontSize="small" />
@@ -2044,11 +2088,11 @@ const SettingsPage: React.FC = () => {
                 />
               </Tabs>
             </Box>
-            
+
             {/* General Settings */}
-              <TabPanel value={value} index={0}>
+            <TabPanel value={value} index={0}>
               <EnhancedGrid container spacing={1}>
-                  <Grid item xs={12} md={6}>
+                <Grid item xs={12} md={6}>
                   <EnhancedCard
                     index={2}
                     elevation={0}
@@ -2061,8 +2105,8 @@ const SettingsPage: React.FC = () => {
                     }}>
                     <CardHeader
                       title={
-                        <Typography variant="h6" sx={{ 
-                          fontWeight: 700, 
+                        <Typography variant="h6" sx={{
+                          fontWeight: 700,
                           fontSize: '1.2rem',
                           color: theme.palette.text.primary,
                           letterSpacing: '0.5px',
@@ -2085,62 +2129,62 @@ const SettingsPage: React.FC = () => {
                       sx={{
                         p: 3,
                         pb: 2,
-                        background: theme.palette.mode === 'dark' 
+                        background: theme.palette.mode === 'dark'
                           ? alpha(theme.palette.background.paper, 0.4)
                           : alpha(theme.palette.background.paper, 0.7),
                       }}
                     />
                     <Divider />
                     <CardContent sx={{ p: 3 }}>
-                    {loadingSettings.general ? (
-                      <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '300px' }}>
-                        <CircularProgress />
-                      </Box>
-                    ) : (
-                      <>
-                        <FormField
-                          label="Company Name"
-                          name="companyName"
-                          value={generalSettings.companyName}
-                          onChange={handleGeneralSettingsChange}
-                          required
-                          error={!!getGeneralError('companyName')}
-                          helperText={getGeneralError('companyName')}
-                        />
-                        <FormField
-                          label="Support Email"
-                          name="supportEmail"
-                          value={generalSettings.supportEmail}
-                          onChange={handleGeneralSettingsChange}
-                          required
-                          error={!!getGeneralError('supportEmail')}
-                          helperText={getGeneralError('supportEmail')}
-                        />
-                        <FormField
-                          label="Max File Size (MB)"
-                          name="maxFileSize"
-                          value={generalSettings.maxFileSize}
-                          onChange={handleGeneralSettingsChange}
-                          type="number"
-                          required
-                          error={!!getGeneralError('maxFileSize')}
-                          helperText={getGeneralError('maxFileSize')}
-                        />
-                        <FormSelect
-                          label="Default Time Zone"
-                          name="defaultTimeZone"
-                          value={generalSettings.defaultTimeZone}
-                          onChange={(e: SelectChangeEvent) => handleSelectChange(e, 'general')}
-                          options={TIMEZONES}
-                          error={!!validationErrors.generalSettings?.defaultTimeZone}
-                          helperText={validationErrors.generalSettings?.defaultTimeZone || "Default time zone for the entire organization. This will be used as the default for all users."}
-                        />
-                      </>
-                    )}
+                      {loadingSettings.general ? (
+                        <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '300px' }}>
+                          <CircularProgress />
+                        </Box>
+                      ) : (
+                        <>
+                          <FormField
+                            label="Company Name"
+                            name="companyName"
+                            value={generalSettings.companyName}
+                            onChange={handleGeneralSettingsChange}
+                            required
+                            error={!!getGeneralError('companyName')}
+                            helperText={getGeneralError('companyName')}
+                          />
+                          <FormField
+                            label="Support Email"
+                            name="supportEmail"
+                            value={generalSettings.supportEmail}
+                            onChange={handleGeneralSettingsChange}
+                            required
+                            error={!!getGeneralError('supportEmail')}
+                            helperText={getGeneralError('supportEmail')}
+                          />
+                          <FormField
+                            label="Max File Size (MB)"
+                            name="maxFileSize"
+                            value={generalSettings.maxFileSize}
+                            onChange={handleGeneralSettingsChange}
+                            type="number"
+                            required
+                            error={!!getGeneralError('maxFileSize')}
+                            helperText={getGeneralError('maxFileSize')}
+                          />
+                          <FormSelect
+                            label="Default Time Zone"
+                            name="defaultTimeZone"
+                            value={generalSettings.defaultTimeZone}
+                            onChange={(e: SelectChangeEvent) => handleSelectChange(e, 'general')}
+                            options={TIMEZONES}
+                            error={!!validationErrors.generalSettings?.defaultTimeZone}
+                            helperText={validationErrors.generalSettings?.defaultTimeZone || "Default time zone for the entire organization. This will be used as the default for all users."}
+                          />
+                        </>
+                      )}
                     </CardContent>
                   </EnhancedCard>
-                  </Grid>
-                  <Grid item xs={12} md={6}>
+                </Grid>
+                <Grid item xs={12} md={6}>
                   <EnhancedCard
                     index={3}
                     elevation={0}
@@ -2153,8 +2197,8 @@ const SettingsPage: React.FC = () => {
                     }}>
                     <CardHeader
                       title={
-                        <Typography variant="h6" sx={{ 
-                          fontWeight: 700, 
+                        <Typography variant="h6" sx={{
+                          fontWeight: 700,
                           fontSize: '1.2rem',
                           color: theme.palette.text.primary,
                           letterSpacing: '0.5px',
@@ -2166,51 +2210,51 @@ const SettingsPage: React.FC = () => {
                       sx={{
                         p: 3,
                         pb: 2,
-                        background: theme.palette.mode === 'dark' 
+                        background: theme.palette.mode === 'dark'
                           ? alpha(theme.palette.background.paper, 0.4)
                           : alpha(theme.palette.background.paper, 0.7),
                       }}
                     />
                     <Divider />
                     <CardContent sx={{ p: 3, pt: 3 }}>
-                        <Typography variant="body2" color="textSecondary" paragraph>
-                          General settings affect the overall behavior of SupportFix.
-                        </Typography>
-                        <Typography variant="body2" color="textSecondary">
-                          <strong>Company Name:</strong> Used throughout the portal and in emails.
-                        </Typography>
-                        <Typography variant="body2" color="textSecondary">
-                          <strong>Support Email:</strong> The primary contact email for support.
-                        </Typography>
-                        <Typography variant="body2" color="textSecondary">
-                          <strong>Max File Size:</strong> Maximum attachment size in MB.
-                        </Typography>
-                        <Typography variant="body2" color="textSecondary">
-                          <strong>Default Time Zone:</strong> Used for displaying dates and times.
-                        </Typography>
-                      </CardContent>
-                    </EnhancedCard>
-                  </Grid>
-                  <Grid item xs={12}>
-                    <Box display="flex" justifyContent="flex-end" sx={{ mt: 1 }}>
-                      <Button
-                        variant="contained"
-                        color="primary"
-                        startIcon={loading ? <CircularProgress size={20} color="inherit" /> : <SaveIcon />}
-                        onClick={() => handleSaveGeneralSettings()}
-                        disabled={loading || !unsavedChanges}
-                      >
-                        Save General Settings
-                      </Button>
-                    </Box>
-                  </Grid>
+                      <Typography variant="body2" color="textSecondary" paragraph>
+                        General settings affect the overall behavior of SupportFix.
+                      </Typography>
+                      <Typography variant="body2" color="textSecondary">
+                        <strong>Company Name:</strong> Used throughout the portal and in emails.
+                      </Typography>
+                      <Typography variant="body2" color="textSecondary">
+                        <strong>Support Email:</strong> The primary contact email for support.
+                      </Typography>
+                      <Typography variant="body2" color="textSecondary">
+                        <strong>Max File Size:</strong> Maximum attachment size in MB.
+                      </Typography>
+                      <Typography variant="body2" color="textSecondary">
+                        <strong>Default Time Zone:</strong> Used for displaying dates and times.
+                      </Typography>
+                    </CardContent>
+                  </EnhancedCard>
+                </Grid>
+                <Grid item xs={12}>
+                  <Box display="flex" justifyContent="flex-end" sx={{ mt: 1 }}>
+                    <Button
+                      variant="contained"
+                      color="primary"
+                      startIcon={loading ? <CircularProgress size={20} color="inherit" /> : <SaveIcon />}
+                      onClick={() => handleSaveGeneralSettings()}
+                      disabled={loading || !unsavedChanges}
+                    >
+                      Save General Settings
+                    </Button>
+                  </Box>
+                </Grid>
               </EnhancedGrid>
-              </TabPanel>
+            </TabPanel>
 
             {/* Email Settings */}
-              <TabPanel value={value} index={1}>
+            <TabPanel value={value} index={1}>
               <EnhancedGrid container spacing={1}>
-                  <Grid item xs={12} md={6}>
+                <Grid item xs={12} md={6}>
                   <EnhancedCard
                     index={2}
                     elevation={0}
@@ -2223,8 +2267,8 @@ const SettingsPage: React.FC = () => {
                     }}>
                     <CardHeader
                       title={
-                        <Typography variant="h6" sx={{ 
-                          fontWeight: 700, 
+                        <Typography variant="h6" sx={{
+                          fontWeight: 700,
                           fontSize: '1.2rem',
                           color: theme.palette.text.primary,
                           letterSpacing: '0.5px',
@@ -2247,106 +2291,106 @@ const SettingsPage: React.FC = () => {
                       sx={{
                         p: 3,
                         pb: 2,
-                        background: theme.palette.mode === 'dark' 
+                        background: theme.palette.mode === 'dark'
                           ? alpha(theme.palette.background.paper, 0.4)
                           : alpha(theme.palette.background.paper, 0.7),
                       }}
                     />
                     <Divider />
                     <CardContent sx={{ p: 3 }}>
-                    {loadingSettings.email ? (
-                      <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '300px' }}>
-                        <CircularProgress />
-                      </Box>
-                    ) : emailSettings ? (
-                      <>
-                        <FormField
-                          label="SMTP Server"
-                          name="smtpServer"
-                          value={emailSettings.smtpServer || ''}
-                          onChange={handleEmailSettingsChange}
-                          required
-                          error={!!getEmailError('smtpServer')}
-                          helperText={getEmailError('smtpServer')}
-                        />
-                        <FormField
-                          label="SMTP Port"
-                          name="smtpPort"
-                          value={emailSettings.smtpPort || 587}
-                          onChange={handleEmailSettingsChange}
-                          type="number"
-                          required
-                          error={!!getEmailError('smtpPort')}
-                          helperText={getEmailError('smtpPort')}
-                        />
-                        <FormField
-                          label="SMTP Username"
-                          name="smtpUsername"
-                          value={emailSettings.smtpUsername || ''}
-                          onChange={handleEmailSettingsChange}
-                          required
-                          error={!!getEmailError('smtpUsername')}
-                          helperText={getEmailError('smtpUsername')}
-                        />
-                        <FormField
-                          label="SMTP Password"
-                          name="smtpPassword"
-                          value={emailSettings.smtpPassword || ''}
-                          onChange={handleEmailSettingsChange}
-                          type="password"
-                          required
-                          error={!!getEmailError('smtpPassword')}
-                          helperText={getEmailError('smtpPassword')}
-                        />
-                        <FormField
-                          label="From Name"
-                          name="emailFromName"
-                          value={emailSettings.emailFromName || ''}
-                          onChange={handleEmailSettingsChange}
-                          error={!!getEmailError('emailFromName')}
-                          helperText={getEmailError('emailFromName')}
-                        />
-                        <FormField
-                          label="Reply-To Email"
-                          name="emailReplyTo"
-                          value={emailSettings.emailReplyTo || ''}
-                          onChange={handleEmailSettingsChange}
-                          required
-                          error={!!getEmailError('emailReplyTo')}
-                          helperText={getEmailError('emailReplyTo')}
-                        />
-                        <FormControlLabel
-                          control={
-                            <Switch
-                              checked={emailSettings.enableEmailNotifications ?? true}
-                              onChange={handleEmailSettingsChange}
-                              name="enableEmailNotifications"
-                              color="primary"
-                            />
-                          }
-                          label="Enable Email Notifications"
-                          sx={{ mt: 2 }}
-                        />
-                      </>
-                    ) : (
-                      <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', minHeight: '300px', justifyContent: 'center' }}>
-                        <Typography color="error" gutterBottom>
-                          Failed to load email settings
-                        </Typography>
-                        <Button 
-                          variant="outlined" 
-                          startIcon={<RefreshIcon />}
-                          onClick={fetchEmailSettings}
-                          sx={{ mt: 2 }}
-                        >
-                          Retry
-                        </Button>
-                      </Box>
-                    )}
+                      {loadingSettings.email ? (
+                        <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '300px' }}>
+                          <CircularProgress />
+                        </Box>
+                      ) : emailSettings ? (
+                        <>
+                          <FormField
+                            label="SMTP Server"
+                            name="smtpServer"
+                            value={emailSettings.smtpServer || ''}
+                            onChange={handleEmailSettingsChange}
+                            required
+                            error={!!getEmailError('smtpServer')}
+                            helperText={getEmailError('smtpServer')}
+                          />
+                          <FormField
+                            label="SMTP Port"
+                            name="smtpPort"
+                            value={emailSettings.smtpPort || 587}
+                            onChange={handleEmailSettingsChange}
+                            type="number"
+                            required
+                            error={!!getEmailError('smtpPort')}
+                            helperText={getEmailError('smtpPort')}
+                          />
+                          <FormField
+                            label="SMTP Username"
+                            name="smtpUsername"
+                            value={emailSettings.smtpUsername || ''}
+                            onChange={handleEmailSettingsChange}
+                            required
+                            error={!!getEmailError('smtpUsername')}
+                            helperText={getEmailError('smtpUsername')}
+                          />
+                          <FormField
+                            label="SMTP Password"
+                            name="smtpPassword"
+                            value={emailSettings.smtpPassword || ''}
+                            onChange={handleEmailSettingsChange}
+                            type="password"
+                            required
+                            error={!!getEmailError('smtpPassword')}
+                            helperText={getEmailError('smtpPassword')}
+                          />
+                          <FormField
+                            label="From Name"
+                            name="emailFromName"
+                            value={emailSettings.emailFromName || ''}
+                            onChange={handleEmailSettingsChange}
+                            error={!!getEmailError('emailFromName')}
+                            helperText={getEmailError('emailFromName')}
+                          />
+                          <FormField
+                            label="Reply-To Email"
+                            name="emailReplyTo"
+                            value={emailSettings.emailReplyTo || ''}
+                            onChange={handleEmailSettingsChange}
+                            required
+                            error={!!getEmailError('emailReplyTo')}
+                            helperText={getEmailError('emailReplyTo')}
+                          />
+                          <FormControlLabel
+                            control={
+                              <Switch
+                                checked={emailSettings.enableEmailNotifications ?? true}
+                                onChange={handleEmailSettingsChange}
+                                name="enableEmailNotifications"
+                                color="primary"
+                              />
+                            }
+                            label="Enable Email Notifications"
+                            sx={{ mt: 2 }}
+                          />
+                        </>
+                      ) : (
+                        <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', minHeight: '300px', justifyContent: 'center' }}>
+                          <Typography color="error" gutterBottom>
+                            Failed to load email settings
+                          </Typography>
+                          <Button
+                            variant="outlined"
+                            startIcon={<RefreshIcon />}
+                            onClick={fetchEmailSettings}
+                            sx={{ mt: 2 }}
+                          >
+                            Retry
+                          </Button>
+                        </Box>
+                      )}
                     </CardContent>
                   </EnhancedCard>
-                  </Grid>
-                  <Grid item xs={12} md={6}>
+                </Grid>
+                <Grid item xs={12} md={6}>
                   <EnhancedCard
                     index={3}
                     elevation={0}
@@ -2359,8 +2403,8 @@ const SettingsPage: React.FC = () => {
                     }}>
                     <CardHeader
                       title={
-                        <Typography variant="h6" sx={{ 
-                          fontWeight: 700, 
+                        <Typography variant="h6" sx={{
+                          fontWeight: 700,
                           fontSize: '1.2rem',
                           color: theme.palette.text.primary,
                           letterSpacing: '0.5px',
@@ -2372,55 +2416,55 @@ const SettingsPage: React.FC = () => {
                       sx={{
                         p: 3,
                         pb: 2,
-                        background: theme.palette.mode === 'dark' 
+                        background: theme.palette.mode === 'dark'
                           ? alpha(theme.palette.background.paper, 0.4)
                           : alpha(theme.palette.background.paper, 0.7),
                       }}
                     />
                     <Divider />
                     <CardContent sx={{ p: 3 }}>
-                        <Typography variant="body2" color="textSecondary" paragraph>
-                          Configure the email settings to enable notification emails and ticket creation via email.
-                        </Typography>
-                        <Typography variant="body2" color="textSecondary" paragraph>
-                          Make sure your SMTP server details are correct and that the server allows connections from your
-                          service desk IP address.
-                        </Typography>
-                        <Alert severity="info" sx={{ mt: 2 }}>
-                          After saving, a test email will be sent to verify your configuration.
-                        </Alert>
-                        <Button 
-                          variant="outlined" 
-                          sx={{ mt: 2 }}
-                          disabled={loading}
-                          onClick={handleTestEmailSettings}
-                          startIcon={loading ? <CircularProgress size={20} /> : <EmailIcon />}
-                        >
-                          Send Test Email
-                        </Button>
+                      <Typography variant="body2" color="textSecondary" paragraph>
+                        Configure the email settings to enable notification emails and ticket creation via email.
+                      </Typography>
+                      <Typography variant="body2" color="textSecondary" paragraph>
+                        Make sure your SMTP server details are correct and that the server allows connections from your
+                        service desk IP address.
+                      </Typography>
+                      <Alert severity="info" sx={{ mt: 2 }}>
+                        After saving, a test email will be sent to verify your configuration.
+                      </Alert>
+                      <Button
+                        variant="outlined"
+                        sx={{ mt: 2 }}
+                        disabled={loading}
+                        onClick={handleTestEmailSettings}
+                        startIcon={loading ? <CircularProgress size={20} /> : <EmailIcon />}
+                      >
+                        Send Test Email
+                      </Button>
                     </CardContent>
                   </EnhancedCard>
-                  </Grid>
-                  <Grid item xs={12}>
-                    <Box display="flex" justifyContent="flex-end" sx={{ mt: 1 }}>
-                      <Button
-                        variant="contained"
-                        color="primary"
-                        startIcon={loading ? <CircularProgress size={20} color="inherit" /> : <SaveIcon />}
-                        onClick={() => handleSaveEmailSettings()}
-                        disabled={loading || !unsavedChanges}
-                      >
-                        Save Email Settings
-                      </Button>
-                    </Box>
-                  </Grid>
+                </Grid>
+                <Grid item xs={12}>
+                  <Box display="flex" justifyContent="flex-end" sx={{ mt: 1 }}>
+                    <Button
+                      variant="contained"
+                      color="primary"
+                      startIcon={loading ? <CircularProgress size={20} color="inherit" /> : <SaveIcon />}
+                      onClick={() => handleSaveEmailSettings()}
+                      disabled={loading || !unsavedChanges}
+                    >
+                      Save Email Settings
+                    </Button>
+                  </Box>
+                </Grid>
               </EnhancedGrid>
-              </TabPanel>
+            </TabPanel>
 
             {/* Ticket Settings */}
-              <TabPanel value={value} index={2}>
+            <TabPanel value={value} index={2}>
               <EnhancedGrid container spacing={1}>
-                  <Grid item xs={12} md={6}>
+                <Grid item xs={12} md={6}>
                   <EnhancedCard
                     index={2}
                     elevation={0}
@@ -2433,8 +2477,8 @@ const SettingsPage: React.FC = () => {
                     }}>
                     <CardHeader
                       title={
-                        <Typography variant="h6" sx={{ 
-                          fontWeight: 700, 
+                        <Typography variant="h6" sx={{
+                          fontWeight: 700,
                           fontSize: '1.2rem',
                           color: theme.palette.text.primary,
                           letterSpacing: '0.5px',
@@ -2457,82 +2501,82 @@ const SettingsPage: React.FC = () => {
                       sx={{
                         p: 3,
                         pb: 2,
-                        background: theme.palette.mode === 'dark' 
+                        background: theme.palette.mode === 'dark'
                           ? alpha(theme.palette.background.paper, 0.4)
                           : alpha(theme.palette.background.paper, 0.7),
                       }}
                     />
                     <Divider />
                     <CardContent sx={{ p: 3 }}>
-                    {loadingSettings.ticket ? (
-                      <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '300px' }}>
-                        <CircularProgress />
-                      </Box>
-                    ) : (
-                      <>
-                        <FormControl fullWidth margin="normal">
-                          <InputLabel id="default-priority-label">Default Priority</InputLabel>
-                          <Select
-                            labelId="default-priority-label"
-                            name="defaultPriority"
-                            value={ticketSettings.defaultPriority}
-                            onChange={(e: SelectChangeEvent) => handleSelectChange(e, 'ticket')}
-                            label="Default Priority"
-                          >
-                            <MenuItem value="low">Low</MenuItem>
-                            <MenuItem value="medium">Medium</MenuItem>
-                            <MenuItem value="high">High</MenuItem>
-                            <MenuItem value="urgent">Urgent</MenuItem>
-                          </Select>
-                        </FormControl>
-                        <FormField
-                          label="Days to Allow Ticket Reopening"
-                          name="closedTicketReopen"
-                          value={ticketSettings.closedTicketReopen}
-                          onChange={handleTicketSettingsChange}
-                          type="number"
-                          helperText={getTicketError('closedTicketReopen') || "Number of days after closing that a ticket can be reopened"}
-                          error={!!getTicketError('closedTicketReopen')}
-                        />
-                        <FormField
-                          label="Auto-Close Resolved Tickets (days)"
-                          name="autoCloseResolved"
-                          value={ticketSettings.autoCloseResolved}
-                          onChange={handleTicketSettingsChange}
-                          type="number"
-                          helperText={getTicketError('autoCloseResolved') || "Number of days before resolved tickets are automatically closed"}
-                          error={!!getTicketError('autoCloseResolved')}
-                        />
-                        <FormControlLabel
-                          control={
-                            <Switch
-                              checked={ticketSettings.enableCustomerSatisfaction}
-                              onChange={handleTicketSettingsChange}
-                              name="enableCustomerSatisfaction"
-                              color="primary"
-                            />
-                          }
-                          label="Enable Customer Satisfaction Surveys"
-                          sx={{ mt: 2, display: 'block' }}
-                        />
-                        <FormControlLabel
-                          control={
-                            <Switch
-                              checked={ticketSettings.requireCategory}
-                              onChange={handleTicketSettingsChange}
-                              name="requireCategory"
-                              color="primary"
-                            />
-                          }
-                          label="Require Category for Tickets"
-                          sx={{ mt: 1, display: 'block' }}
-                        />
-                      </>
-                    )}
+                      {loadingSettings.ticket ? (
+                        <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '300px' }}>
+                          <CircularProgress />
+                        </Box>
+                      ) : (
+                        <>
+                          <FormControl fullWidth margin="normal">
+                            <InputLabel id="default-priority-label">Default Priority</InputLabel>
+                            <Select
+                              labelId="default-priority-label"
+                              name="defaultPriority"
+                              value={ticketSettings.defaultPriority}
+                              onChange={(e: SelectChangeEvent) => handleSelectChange(e, 'ticket')}
+                              label="Default Priority"
+                            >
+                              <MenuItem value="low">Low</MenuItem>
+                              <MenuItem value="medium">Medium</MenuItem>
+                              <MenuItem value="high">High</MenuItem>
+                              <MenuItem value="urgent">Urgent</MenuItem>
+                            </Select>
+                          </FormControl>
+                          <FormField
+                            label="Days to Allow Ticket Reopening"
+                            name="closedTicketReopen"
+                            value={ticketSettings.closedTicketReopen}
+                            onChange={handleTicketSettingsChange}
+                            type="number"
+                            helperText={getTicketError('closedTicketReopen') || "Number of days after closing that a ticket can be reopened"}
+                            error={!!getTicketError('closedTicketReopen')}
+                          />
+                          <FormField
+                            label="Auto-Close Resolved Tickets (days)"
+                            name="autoCloseResolved"
+                            value={ticketSettings.autoCloseResolved}
+                            onChange={handleTicketSettingsChange}
+                            type="number"
+                            helperText={getTicketError('autoCloseResolved') || "Number of days before resolved tickets are automatically closed"}
+                            error={!!getTicketError('autoCloseResolved')}
+                          />
+                          <FormControlLabel
+                            control={
+                              <Switch
+                                checked={ticketSettings.enableCustomerSatisfaction}
+                                onChange={handleTicketSettingsChange}
+                                name="enableCustomerSatisfaction"
+                                color="primary"
+                              />
+                            }
+                            label="Enable Customer Satisfaction Surveys"
+                            sx={{ mt: 2, display: 'block' }}
+                          />
+                          <FormControlLabel
+                            control={
+                              <Switch
+                                checked={ticketSettings.requireCategory}
+                                onChange={handleTicketSettingsChange}
+                                name="requireCategory"
+                                color="primary"
+                              />
+                            }
+                            label="Require Category for Tickets"
+                            sx={{ mt: 1, display: 'block' }}
+                          />
+                        </>
+                      )}
                     </CardContent>
                   </EnhancedCard>
-                  </Grid>
-                  <Grid item xs={12} md={6}>
+                </Grid>
+                <Grid item xs={12} md={6}>
                   <EnhancedCard
                     index={3}
                     elevation={0}
@@ -2545,8 +2589,8 @@ const SettingsPage: React.FC = () => {
                     }}>
                     <CardHeader
                       title={
-                        <Typography variant="h6" sx={{ 
-                          fontWeight: 700, 
+                        <Typography variant="h6" sx={{
+                          fontWeight: 700,
                           fontSize: '1.2rem',
                           color: theme.palette.text.primary,
                           letterSpacing: '0.5px',
@@ -2569,7 +2613,7 @@ const SettingsPage: React.FC = () => {
                       sx={{
                         p: 3,
                         pb: 2,
-                        background: theme.palette.mode === 'dark' 
+                        background: theme.palette.mode === 'dark'
                           ? alpha(theme.palette.background.paper, 0.4)
                           : alpha(theme.palette.background.paper, 0.7),
                       }}
@@ -2579,45 +2623,45 @@ const SettingsPage: React.FC = () => {
                       <Typography variant="body2" color="textSecondary" paragraph>
                         These settings control how tickets behave in your service desk.
                       </Typography>
-                      
+
                       <Typography variant="body2" color="textSecondary" paragraph>
                         <strong>Default Priority:</strong> The default priority assigned to new tickets.
                       </Typography>
-                      
+
                       <Typography variant="body2" color="textSecondary" paragraph>
                         <strong>Ticket Reopening:</strong> How long closed tickets can be reopened.
                       </Typography>
-                      
+
                       <Typography variant="body2" color="textSecondary" paragraph>
                         <strong>Auto-Close:</strong> When resolved tickets are automatically closed.
                       </Typography>
-                      
+
                       <Typography variant="body2" color="textSecondary">
                         <strong>SLA Tracking:</strong> Enable to track response and resolution times.
                       </Typography>
                     </CardContent>
                   </EnhancedCard>
-                  </Grid>
-                  <Grid item xs={12}>
-                    <Box display="flex" justifyContent="flex-end" sx={{ mt: 1 }}>
-                      <Button
-                        variant="contained"
-                        color="primary"
-                        startIcon={loading ? <CircularProgress size={20} color="inherit" /> : <SaveIcon />}
-                        onClick={handleSaveTicketSettings}
-                        disabled={loading || !unsavedChanges}
-                      >
-                        Save SLA Settings
-                      </Button>
-                    </Box>
-                  </Grid>
+                </Grid>
+                <Grid item xs={12}>
+                  <Box display="flex" justifyContent="flex-end" sx={{ mt: 1 }}>
+                    <Button
+                      variant="contained"
+                      color="primary"
+                      startIcon={loading ? <CircularProgress size={20} color="inherit" /> : <SaveIcon />}
+                      onClick={handleSaveTicketSettings}
+                      disabled={loading || !unsavedChanges}
+                    >
+                      Save SLA Settings
+                    </Button>
+                  </Box>
+                </Grid>
               </EnhancedGrid>
-              </TabPanel>
+            </TabPanel>
 
             {/* SLA Settings */}
-              <TabPanel value={value} index={3}>
+            <TabPanel value={value} index={3}>
               <EnhancedGrid container spacing={1}>
-                  <Grid item xs={12} md={6}>
+                <Grid item xs={12} md={6}>
                   <EnhancedCard
                     index={2}
                     elevation={0}
@@ -2630,8 +2674,8 @@ const SettingsPage: React.FC = () => {
                     }}>
                     <CardHeader
                       title={
-                        <Typography variant="h6" sx={{ 
-                          fontWeight: 700, 
+                        <Typography variant="h6" sx={{
+                          fontWeight: 700,
                           fontSize: '1.2rem',
                           color: theme.palette.text.primary,
                           letterSpacing: '0.5px',
@@ -2654,7 +2698,7 @@ const SettingsPage: React.FC = () => {
                       sx={{
                         p: 3,
                         pb: 2,
-                        background: theme.palette.mode === 'dark' 
+                        background: theme.palette.mode === 'dark'
                           ? alpha(theme.palette.background.paper, 0.4)
                           : alpha(theme.palette.background.paper, 0.7),
                       }}
@@ -2672,11 +2716,11 @@ const SettingsPage: React.FC = () => {
                               {slaError}
                             </Alert>
                           )}
-                          
+
                           <Typography variant="body2" color="textSecondary" sx={{ mb: 2 }}>
                             Configure SLA policies for each ticket priority to set response and resolution time targets.
                           </Typography>
-                          
+
                           <Box>
                             <FormControl fullWidth margin="normal">
                               <InputLabel id="sla-priority-label">Ticket Priority</InputLabel>
@@ -2692,14 +2736,14 @@ const SettingsPage: React.FC = () => {
                                 {priorities.map((priority) => (
                                   <MenuItem key={priority.id} value={priority.id}>
                                     <Box sx={{ display: 'flex', alignItems: 'center' }}>
-                                      <Box 
-                                        sx={{ 
-                                          width: 10, 
-                                          height: 10, 
-                                          borderRadius: '50%', 
+                                      <Box
+                                        sx={{
+                                          width: 10,
+                                          height: 10,
+                                          borderRadius: '50%',
                                           backgroundColor: priority.color,
                                           mr: 1
-                                        }} 
+                                        }}
                                       />
                                       {priority.name}
                                     </Box>
@@ -2707,7 +2751,7 @@ const SettingsPage: React.FC = () => {
                                 ))}
                               </Select>
                             </FormControl>
-                            
+
                             <TextField
                               margin="normal"
                               name="firstResponseHours"
@@ -2720,7 +2764,7 @@ const SettingsPage: React.FC = () => {
                               InputProps={{ inputProps: { min: 1 } }}
                               helperText="Time to first respond to the ticket"
                             />
-                            
+
                             <TextField
                               margin="normal"
                               name="nextResponseHours"
@@ -2733,7 +2777,7 @@ const SettingsPage: React.FC = () => {
                               InputProps={{ inputProps: { min: 1 } }}
                               helperText="Time for subsequent responses"
                             />
-                            
+
                             <TextField
                               margin="normal"
                               name="resolutionHours"
@@ -2746,7 +2790,7 @@ const SettingsPage: React.FC = () => {
                               InputProps={{ inputProps: { min: 1 } }}
                               helperText="Time to resolve the ticket (also updates SLA hours)"
                             />
-                            
+
                             <FormControlLabel
                               control={
                                 <Switch
@@ -2760,7 +2804,7 @@ const SettingsPage: React.FC = () => {
                               label="Business Hours Only"
                               sx={{ mt: 2, display: 'block' }}
                             />
-                            
+
                             {/* Add direct save button for SLA policy */}
                             <Box sx={{ mt: 2, mb: 2 }}>
                               <Button
@@ -2774,171 +2818,171 @@ const SettingsPage: React.FC = () => {
                                 Save SLA Policy
                               </Button>
                             </Box>
-                            
+
                             {renderSLASaveText()}
                           </Box>
                         </>
                       )}
                     </CardContent>
                   </EnhancedCard>
-                  </Grid>
-                  <Grid item xs={12} md={6}>
-                    <EnhancedCard
-                      index={3}
-                      elevation={0}
-                      sx={{
-                        height: '100%',
-                        p: 0,
-                        border: `1px solid ${alpha(theme.palette.divider, 0.1)}`,
-                        overflow: 'hidden',
-                        ...gradientAccent(theme)
-                      }}>
-                      <CardHeader
-                        title={
-                          <Typography variant="h6" sx={{ 
-                            fontWeight: 700, 
-                            fontSize: '1.2rem',
-                            color: theme.palette.text.primary,
-                            letterSpacing: '0.5px',
-                            mb: 0.5
-                          }}>
-                            Existing SLA Policies
-                          </Typography>
-                        }
-                        action={
-                          loadingSlaPolicies ? (
-                            <CircularProgress size={24} />
-                          ) : (
-                            <Badge 
-                              badgeContent={slaPolicies.length} 
-                              color="primary"
-                              max={99}
-                              sx={{ '& .MuiBadge-badge': { fontSize: '0.7rem', height: '20px', minWidth: '20px' } }}
-                            >
-                              <ClockIcon />
-                            </Badge>
-                          )
-                        }
-                        sx={{
-                          p: 3,
-                          pb: 2,
-                          background: theme.palette.mode === 'dark' 
-                            ? alpha(theme.palette.background.paper, 0.4)
-                            : alpha(theme.palette.background.paper, 0.7),
-                        }}
-                      />
-                      <Divider />
-                      <CardContent sx={{ p: 3 }}>
-                        {loadingSlaPolicies ? (
-                          <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '300px' }}>
-                            <CircularProgress />
-                          </Box>
-                        ) : slaPolicies.length === 0 ? (
-                          <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: '200px', flexDirection: 'column' }}>
-                            <InfoIcon color="info" sx={{ fontSize: 40, mb: 2, opacity: 0.7 }} />
-                            <Typography variant="body1" align="center">
-                              No SLA policies configured
-                            </Typography>
-                            <Typography variant="body2" color="textSecondary" align="center" sx={{ mt: 1 }}>
-                              Select a priority from the left panel to create a policy
-                            </Typography>
-                          </Box>
-                        ) : (
-                          <TableContainer component={Paper} sx={{ borderRadius: 2, overflow: 'hidden', boxShadow: 'none', border: `1px solid ${alpha(theme.palette.divider, 0.1)}` }}>
-                            <Table size="small">
-                              <TableHead>
-                                <TableRow sx={{ backgroundColor: alpha(theme.palette.primary.main, 0.1) }}>
-                                  <TableCell>Priority</TableCell>
-                                  <TableCell align="center">First Response</TableCell>
-                                  <TableCell align="center">Next Response</TableCell>
-                                  <TableCell align="center">Resolution</TableCell>
-                                  <TableCell align="center">Business Hours</TableCell>
-                                </TableRow>
-                              </TableHead>
-                              <TableBody>
-                                {slaPolicies.map((policy) => {
-                                  // Find the priority name
-                                  const priority = priorities.find(p => p.id === policy.ticketPriorityId);
-                                  return (
-                                    <TableRow 
-                                      key={policy.id} 
-                                      hover
-                                      onClick={() => {
-                                        setSlaForm({
-                                          priorityId: policy.ticketPriorityId,
-                                          firstResponseHours: policy.firstResponseHours,
-                                          nextResponseHours: policy.nextResponseHours || 0,
-                                          resolutionHours: policy.resolutionHours,
-                                          businessHoursOnly: policy.businessHoursOnly,
-                                          isNew: false
-                                        });
-                                      }}
-                                      sx={{ 
-                                        cursor: 'pointer',
-                                        '&:hover': {
-                                          backgroundColor: alpha(theme.palette.primary.main, 0.05)
-                                        },
-                                        '&.Mui-selected': {
-                                          backgroundColor: alpha(theme.palette.primary.main, 0.1)
-                                        }
-                                      }}
-                                      selected={slaForm.priorityId === policy.ticketPriorityId}
-                                    >
-                                      <TableCell>
-                                        <Box sx={{ display: 'flex', alignItems: 'center' }}>
-                                          <Box 
-                                            sx={{ 
-                                              width: 12, 
-                                              height: 12, 
-                                              borderRadius: '50%', 
-                                              backgroundColor: priority?.color || '#ccc',
-                                              mr: 1
-                                            }} 
-                                          />
-                                          {priority?.name || 'Unknown'}
-                                        </Box>
-                                      </TableCell>
-                                      <TableCell align="center">{policy.firstResponseHours} hours</TableCell>
-                                      <TableCell align="center">{policy.nextResponseHours || '-'} {policy.nextResponseHours ? 'hours' : ''}</TableCell>
-                                      <TableCell align="center">{policy.resolutionHours} hours</TableCell>
-                                      <TableCell align="center">
-                                        {policy.businessHoursOnly ? (
-                                          <CheckIcon color="success" fontSize="small" />
-                                        ) : (
-                                          <CloseIcon color="error" fontSize="small" />
-                                        )}
-                                      </TableCell>
-                                    </TableRow>
-                                  );
-                                })}
-                              </TableBody>
-                            </Table>
-                          </TableContainer>
-                        )}
-                        <Typography variant="body2" color="textSecondary" sx={{ mt: 2 }}>
-                          Click on a policy in the table to edit its settings. SLA policies define response and resolution time expectations for each priority level.
+                </Grid>
+                <Grid item xs={12} md={6}>
+                  <EnhancedCard
+                    index={3}
+                    elevation={0}
+                    sx={{
+                      height: '100%',
+                      p: 0,
+                      border: `1px solid ${alpha(theme.palette.divider, 0.1)}`,
+                      overflow: 'hidden',
+                      ...gradientAccent(theme)
+                    }}>
+                    <CardHeader
+                      title={
+                        <Typography variant="h6" sx={{
+                          fontWeight: 700,
+                          fontSize: '1.2rem',
+                          color: theme.palette.text.primary,
+                          letterSpacing: '0.5px',
+                          mb: 0.5
+                        }}>
+                          Existing SLA Policies
                         </Typography>
-                      </CardContent>
-                    </EnhancedCard>
-                  </Grid>
-                  <Grid item xs={12}>
-                    <Box display="flex" justifyContent="flex-end" sx={{ mt: 1 }}>
-                      <Button
-                        variant="contained"
-                        color="primary"
-                        startIcon={loading ? <CircularProgress size={20} color="inherit" /> : <SaveIcon />}
-                        onClick={handleSaveTicketSettings}
-                        disabled={loading || !unsavedChanges}
-                      >
-                        Save SLA Settings
-                      </Button>
-                    </Box>
-                  </Grid>
+                      }
+                      action={
+                        loadingSlaPolicies ? (
+                          <CircularProgress size={24} />
+                        ) : (
+                          <Badge
+                            badgeContent={slaPolicies.length}
+                            color="primary"
+                            max={99}
+                            sx={{ '& .MuiBadge-badge': { fontSize: '0.7rem', height: '20px', minWidth: '20px' } }}
+                          >
+                            <ClockIcon />
+                          </Badge>
+                        )
+                      }
+                      sx={{
+                        p: 3,
+                        pb: 2,
+                        background: theme.palette.mode === 'dark'
+                          ? alpha(theme.palette.background.paper, 0.4)
+                          : alpha(theme.palette.background.paper, 0.7),
+                      }}
+                    />
+                    <Divider />
+                    <CardContent sx={{ p: 3 }}>
+                      {loadingSlaPolicies ? (
+                        <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '300px' }}>
+                          <CircularProgress />
+                        </Box>
+                      ) : slaPolicies.length === 0 ? (
+                        <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: '200px', flexDirection: 'column' }}>
+                          <InfoIcon color="info" sx={{ fontSize: 40, mb: 2, opacity: 0.7 }} />
+                          <Typography variant="body1" align="center">
+                            No SLA policies configured
+                          </Typography>
+                          <Typography variant="body2" color="textSecondary" align="center" sx={{ mt: 1 }}>
+                            Select a priority from the left panel to create a policy
+                          </Typography>
+                        </Box>
+                      ) : (
+                        <TableContainer component={Paper} sx={{ borderRadius: 2, overflow: 'hidden', boxShadow: 'none', border: `1px solid ${alpha(theme.palette.divider, 0.1)}` }}>
+                          <Table size="small">
+                            <TableHead>
+                              <TableRow sx={{ backgroundColor: alpha(theme.palette.primary.main, 0.1) }}>
+                                <TableCell>Priority</TableCell>
+                                <TableCell align="center">First Response</TableCell>
+                                <TableCell align="center">Next Response</TableCell>
+                                <TableCell align="center">Resolution</TableCell>
+                                <TableCell align="center">Business Hours</TableCell>
+                              </TableRow>
+                            </TableHead>
+                            <TableBody>
+                              {slaPolicies.map((policy) => {
+                                // Find the priority name - handle both string and number IDs
+                                const priority = priorities.find(p => Number(p.id) === Number(policy.ticketPriorityId));
+                                return (
+                                  <TableRow
+                                    key={policy.id}
+                                    hover
+                                    onClick={() => {
+                                      setSlaForm({
+                                        priorityId: policy.ticketPriorityId,
+                                        firstResponseHours: policy.firstResponseHours,
+                                        nextResponseHours: policy.nextResponseHours || 0,
+                                        resolutionHours: policy.resolutionHours,
+                                        businessHoursOnly: policy.businessHoursOnly,
+                                        isNew: false
+                                      });
+                                    }}
+                                    sx={{
+                                      cursor: 'pointer',
+                                      '&:hover': {
+                                        backgroundColor: alpha(theme.palette.primary.main, 0.05)
+                                      },
+                                      '&.Mui-selected': {
+                                        backgroundColor: alpha(theme.palette.primary.main, 0.1)
+                                      }
+                                    }}
+                                    selected={slaForm.priorityId === policy.ticketPriorityId}
+                                  >
+                                    <TableCell>
+                                      <Box sx={{ display: 'flex', alignItems: 'center' }}>
+                                        <Box
+                                          sx={{
+                                            width: 12,
+                                            height: 12,
+                                            borderRadius: '50%',
+                                            backgroundColor: priority?.color || '#ccc',
+                                            mr: 1
+                                          }}
+                                        />
+                                        {priority?.name || 'Unknown'}
+                                      </Box>
+                                    </TableCell>
+                                    <TableCell align="center">{policy.firstResponseHours} hours</TableCell>
+                                    <TableCell align="center">{policy.nextResponseHours || '-'} {policy.nextResponseHours ? 'hours' : ''}</TableCell>
+                                    <TableCell align="center">{policy.resolutionHours} hours</TableCell>
+                                    <TableCell align="center">
+                                      {policy.businessHoursOnly ? (
+                                        <CheckIcon color="success" fontSize="small" />
+                                      ) : (
+                                        <CloseIcon color="error" fontSize="small" />
+                                      )}
+                                    </TableCell>
+                                  </TableRow>
+                                );
+                              })}
+                            </TableBody>
+                          </Table>
+                        </TableContainer>
+                      )}
+                      <Typography variant="body2" color="textSecondary" sx={{ mt: 2 }}>
+                        Click on a policy in the table to edit its settings. SLA policies define response and resolution time expectations for each priority level.
+                      </Typography>
+                    </CardContent>
+                  </EnhancedCard>
+                </Grid>
+                <Grid item xs={12}>
+                  <Box display="flex" justifyContent="flex-end" sx={{ mt: 1 }}>
+                    <Button
+                      variant="contained"
+                      color="primary"
+                      startIcon={loading ? <CircularProgress size={20} color="inherit" /> : <SaveIcon />}
+                      onClick={handleSaveTicketSettings}
+                      disabled={loading || !unsavedChanges}
+                    >
+                      Save SLA Settings
+                    </Button>
+                  </Box>
+                </Grid>
               </EnhancedGrid>
-              </TabPanel>
+            </TabPanel>
 
             {/* Integrations Settings */}
-              <TabPanel value={value} index={4}>
+            <TabPanel value={value} index={4}>
               <EnhancedGrid container spacing={1}>
                 {loadingSettings.integration ? (
                   <Grid item xs={12}>
@@ -2964,8 +3008,8 @@ const SettingsPage: React.FC = () => {
                           title={
                             <Box sx={{ display: 'flex', alignItems: 'center' }}>
                               <SlackIcon sx={{ mr: 1.5, color: '#4A154B' }} />
-                              <Typography variant="h6" sx={{ 
-                                fontWeight: 700, 
+                              <Typography variant="h6" sx={{
+                                fontWeight: 700,
                                 fontSize: '1.2rem',
                                 color: theme.palette.text.primary,
                                 letterSpacing: '0.5px',
@@ -2992,7 +3036,7 @@ const SettingsPage: React.FC = () => {
                           sx={{
                             p: 3,
                             pb: 2,
-                            background: theme.palette.mode === 'dark' 
+                            background: theme.palette.mode === 'dark'
                               ? alpha(theme.palette.background.paper, 0.4)
                               : alpha(theme.palette.background.paper, 0.7),
                           }}
@@ -3002,7 +3046,7 @@ const SettingsPage: React.FC = () => {
                           <Typography variant="body2" color="textSecondary" paragraph>
                             Integrate with Slack to send notifications about tickets and updates.
                           </Typography>
-                          
+
                           <Box sx={{ opacity: integrationSettings.slackEnabled ? 1 : 0.5, pointerEvents: integrationSettings.slackEnabled ? 'auto' : 'none' }}>
                             <FormField
                               label="Webhook URL"
@@ -3014,7 +3058,7 @@ const SettingsPage: React.FC = () => {
                               error={!!getIntegrationError('slackWebhookUrl')}
                               helperText={getIntegrationError('slackWebhookUrl')}
                             />
-                            
+
                             <FormField
                               label="Channel"
                               name="slackChannel"
@@ -3025,7 +3069,7 @@ const SettingsPage: React.FC = () => {
                               error={!!getIntegrationError('slackChannel')}
                               helperText={getIntegrationError('slackChannel') || 'Channel name (e.g. #support)'}
                             />
-                            
+
                             <FormControlLabel
                               control={
                                 <Switch
@@ -3039,7 +3083,7 @@ const SettingsPage: React.FC = () => {
                               label="Notify on new tickets"
                               sx={{ mt: 2, display: 'block' }}
                             />
-                            
+
                             <FormControlLabel
                               control={
                                 <Switch
@@ -3053,7 +3097,7 @@ const SettingsPage: React.FC = () => {
                               label="Notify on ticket updates"
                               sx={{ mt: 1, display: 'block' }}
                             />
-                            
+
                             <Button
                               variant="outlined"
                               color="primary"
@@ -3068,7 +3112,7 @@ const SettingsPage: React.FC = () => {
                         </CardContent>
                       </EnhancedCard>
                     </Grid>
-                    
+
                     {/* Jira Integration */}
                     <Grid item xs={12} md={6}>
                       <EnhancedCard
@@ -3085,8 +3129,8 @@ const SettingsPage: React.FC = () => {
                           title={
                             <Box sx={{ display: 'flex', alignItems: 'center' }}>
                               <JiraIcon sx={{ mr: 1.5, color: '#0052CC' }} />
-                              <Typography variant="h6" sx={{ 
-                                fontWeight: 700, 
+                              <Typography variant="h6" sx={{
+                                fontWeight: 700,
                                 fontSize: '1.2rem',
                                 color: theme.palette.text.primary,
                                 letterSpacing: '0.5px',
@@ -3113,7 +3157,7 @@ const SettingsPage: React.FC = () => {
                           sx={{
                             p: 3,
                             pb: 2,
-                            background: theme.palette.mode === 'dark' 
+                            background: theme.palette.mode === 'dark'
                               ? alpha(theme.palette.background.paper, 0.4)
                               : alpha(theme.palette.background.paper, 0.7),
                           }}
@@ -3123,7 +3167,7 @@ const SettingsPage: React.FC = () => {
                           <Typography variant="body2" color="textSecondary" paragraph>
                             Integrate with Jira to sync tickets and issues between systems.
                           </Typography>
-                          
+
                           <Box sx={{ opacity: integrationSettings.jiraEnabled ? 1 : 0.5, pointerEvents: integrationSettings.jiraEnabled ? 'auto' : 'none' }}>
                             <FormField
                               label="Jira URL"
@@ -3166,7 +3210,7 @@ const SettingsPage: React.FC = () => {
                               error={!!getIntegrationError('jiraProject')}
                               helperText={getIntegrationError('jiraProject')}
                             />
-                            
+
                             <FormControlLabel
                               control={
                                 <Switch
@@ -3180,7 +3224,7 @@ const SettingsPage: React.FC = () => {
                               label="Create Jira issues for new tickets"
                               sx={{ mt: 2, display: 'block' }}
                             />
-                            
+
                             <Button
                               variant="outlined"
                               color="primary"
@@ -3195,7 +3239,7 @@ const SettingsPage: React.FC = () => {
                         </CardContent>
                       </EnhancedCard>
                     </Grid>
-                    
+
                     <Grid item xs={12}>
                       <Box display="flex" justifyContent="flex-end" sx={{ mt: 1 }}>
                         <Button
@@ -3212,10 +3256,10 @@ const SettingsPage: React.FC = () => {
                   </>
                 )}
               </EnhancedGrid>
-              </TabPanel>
+            </TabPanel>
 
             {/* Advanced Settings */}
-              <TabPanel value={value} index={5}>
+            <TabPanel value={value} index={5}>
               <EnhancedGrid container spacing={1}>
                 {loadingSettings.advanced ? (
                   <Grid item xs={12}>
@@ -3239,8 +3283,8 @@ const SettingsPage: React.FC = () => {
                         }}>
                         <CardHeader
                           title={
-                            <Typography variant="h6" sx={{ 
-                              fontWeight: 700, 
+                            <Typography variant="h6" sx={{
+                              fontWeight: 700,
                               fontSize: '1.2rem',
                               color: theme.palette.text.primary,
                               letterSpacing: '0.5px',
@@ -3252,7 +3296,7 @@ const SettingsPage: React.FC = () => {
                           sx={{
                             p: 3,
                             pb: 2,
-                            background: theme.palette.mode === 'dark' 
+                            background: theme.palette.mode === 'dark'
                               ? alpha(theme.palette.background.paper, 0.4)
                               : alpha(theme.palette.background.paper, 0.7),
                           }}
@@ -3271,7 +3315,7 @@ const SettingsPage: React.FC = () => {
                             label="Enable API Access"
                             sx={{ mb: 2, display: 'block' }}
                           />
-                          
+
                           <Box sx={{ opacity: advancedSettings.apiEnabled ? 1 : 0.5, pointerEvents: advancedSettings.apiEnabled ? 'auto' : 'none' }}>
                             <FormField
                               label="API Rate Limit (requests/hour)"
@@ -3283,7 +3327,7 @@ const SettingsPage: React.FC = () => {
                               error={!!getAdvancedError('apiRateLimitPerHour')}
                               helperText={getAdvancedError('apiRateLimitPerHour')}
                             />
-                            
+
                             <FormField
                               label="Rate Limit Window (minutes)"
                               name="apiRateLimitWindowMinutes"
@@ -3294,7 +3338,7 @@ const SettingsPage: React.FC = () => {
                               error={!!getAdvancedError('apiRateLimitWindowMinutes')}
                               helperText={getAdvancedError('apiRateLimitWindowMinutes') || 'Time window for rate limiting (e.g., 15 minutes)'}
                             />
-                            
+
                             <FormControlLabel
                               control={
                                 <Switch
@@ -3308,11 +3352,11 @@ const SettingsPage: React.FC = () => {
                               label="Enable API Documentation"
                               sx={{ mt: 2, display: 'block' }}
                             />
-                            
+
                             <Typography variant="body2" color="textSecondary" sx={{ mt: 2 }}>
                               API Base URL: <code>{window.location.origin}/api/v1</code>
                             </Typography>
-                            
+
                             <Button
                               variant="outlined"
                               color="primary"
@@ -3329,7 +3373,7 @@ const SettingsPage: React.FC = () => {
                         </CardContent>
                       </EnhancedCard>
                     </Grid>
-                    
+
                     {/* Security Settings */}
                     <Grid item xs={12} md={6}>
                       <EnhancedCard
@@ -3344,8 +3388,8 @@ const SettingsPage: React.FC = () => {
                         }}>
                         <CardHeader
                           title={
-                            <Typography variant="h6" sx={{ 
-                              fontWeight: 700, 
+                            <Typography variant="h6" sx={{
+                              fontWeight: 700,
                               fontSize: '1.2rem',
                               color: theme.palette.text.primary,
                               letterSpacing: '0.5px',
@@ -3357,7 +3401,7 @@ const SettingsPage: React.FC = () => {
                           sx={{
                             p: 3,
                             pb: 2,
-                            background: theme.palette.mode === 'dark' 
+                            background: theme.palette.mode === 'dark'
                               ? alpha(theme.palette.background.paper, 0.4)
                               : alpha(theme.palette.background.paper, 0.7),
                           }}
@@ -3373,7 +3417,7 @@ const SettingsPage: React.FC = () => {
                             error={!!getAdvancedError('maxLoginAttempts')}
                             helperText={getAdvancedError('maxLoginAttempts') || 'Number of login attempts before account lockout'}
                           />
-                          
+
                           <FormField
                             label="Password Expiry (days)"
                             name="passwordExpiryDays"
@@ -3383,7 +3427,7 @@ const SettingsPage: React.FC = () => {
                             error={!!getAdvancedError('passwordExpiryDays')}
                             helperText={getAdvancedError('passwordExpiryDays') || 'Days before password expires (0 = never)'}
                           />
-                          
+
                           <FormField
                             label="Session Timeout (minutes)"
                             name="sessionTimeoutMinutes"
@@ -3393,7 +3437,7 @@ const SettingsPage: React.FC = () => {
                             error={!!getAdvancedError('sessionTimeoutMinutes')}
                             helperText={getAdvancedError('sessionTimeoutMinutes') || 'Inactive session timeout in minutes'}
                           />
-                          
+
                           <FormControlLabel
                             control={
                               <Switch
@@ -3409,7 +3453,7 @@ const SettingsPage: React.FC = () => {
                         </CardContent>
                       </EnhancedCard>
                     </Grid>
-                    
+
                     {/* Performance and AI Settings */}
                     <Grid item xs={12} md={6}>
                       <EnhancedCard
@@ -3424,8 +3468,8 @@ const SettingsPage: React.FC = () => {
                         }}>
                         <CardHeader
                           title={
-                            <Typography variant="h6" sx={{ 
-                              fontWeight: 700, 
+                            <Typography variant="h6" sx={{
+                              fontWeight: 700,
                               fontSize: '1.2rem',
                               color: theme.palette.text.primary,
                               letterSpacing: '0.5px',
@@ -3437,7 +3481,7 @@ const SettingsPage: React.FC = () => {
                           sx={{
                             p: 3,
                             pb: 2,
-                            background: theme.palette.mode === 'dark' 
+                            background: theme.palette.mode === 'dark'
                               ? alpha(theme.palette.background.paper, 0.4)
                               : alpha(theme.palette.background.paper, 0.7),
                           }}
@@ -3453,7 +3497,7 @@ const SettingsPage: React.FC = () => {
                             error={!!getAdvancedError('cacheDurationMinutes')}
                             helperText={getAdvancedError('cacheDurationMinutes') || 'Duration to cache API responses (0 = disabled)'}
                           />
-                          
+
                           <FormField
                             label="Max Concurrent Uploads"
                             name="maxConcurrentFileUploads"
@@ -3466,7 +3510,7 @@ const SettingsPage: React.FC = () => {
                         </CardContent>
                       </EnhancedCard>
                     </Grid>
-                    
+
                     {/* AI Features */}
                     <Grid item xs={12} md={6}>
                       <EnhancedCard
@@ -3481,20 +3525,20 @@ const SettingsPage: React.FC = () => {
                         }}>
                         <CardHeader
                           title={
-                            <Typography variant="h6" sx={{ 
-                              fontWeight: 700, 
+                            <Typography variant="h6" sx={{
+                              fontWeight: 700,
                               fontSize: '1.2rem',
                               color: theme.palette.text.primary,
                               letterSpacing: '0.5px',
                               mb: 0.5
                             }}>
-                              AI Features
+                              AI Configuration
                             </Typography>
                           }
                           sx={{
                             p: 3,
                             pb: 2,
-                            background: theme.palette.mode === 'dark' 
+                            background: theme.palette.mode === 'dark'
                               ? alpha(theme.palette.background.paper, 0.4)
                               : alpha(theme.palette.background.paper, 0.7),
                           }}
@@ -3510,10 +3554,10 @@ const SettingsPage: React.FC = () => {
                                 color="primary"
                               />
                             }
-                            label="Enable AI-Powered Suggestions"
-                            sx={{ mb: 2, display: 'block' }}
+                            label="Enable AI Suggestions"
+                            sx={{ mb: 1, display: 'block' }}
                           />
-                          
+
                           <FormControlLabel
                             control={
                               <Switch
@@ -3523,10 +3567,10 @@ const SettingsPage: React.FC = () => {
                                 color="primary"
                               />
                             }
-                            label="Enable Automatic Ticket Tagging"
-                            sx={{ mb: 2, display: 'block' }}
+                            label="Enable Auto-Tagging"
+                            sx={{ mb: 1, display: 'block' }}
                           />
-                          
+
                           <FormControlLabel
                             control={
                               <Switch
@@ -3537,28 +3581,58 @@ const SettingsPage: React.FC = () => {
                               />
                             }
                             label="Enable Sentiment Analysis"
-                            sx={{ mb: 2, display: 'block' }}
+                            sx={{ mb: 3, display: 'block' }}
                           />
-                          
-                          <FormControl fullWidth margin="normal">
-                            <InputLabel id="ai-model-label">AI Model</InputLabel>
-                            <Select
-                              labelId="ai-model-label"
-                              name="aiModelName"
-                              value={advancedSettings.aiModelName}
-                              onChange={(e) => handleAdvancedSettingsChange(e as any)}
-                              label="AI Model"
-                            >
-                              <MenuItem value="gpt-3.5-turbo">GPT-3.5 Turbo</MenuItem>
-                              <MenuItem value="gpt-4">GPT-4</MenuItem>
-                              <MenuItem value="claude-instant">Claude Instant</MenuItem>
-                              <MenuItem value="claude-3-opus">Claude 3 Opus</MenuItem>
-                            </Select>
-                          </FormControl>
+
+                          <Divider sx={{ mb: 3 }} />
+
+                          <FormSelect
+                            label="AI Provider"
+                            name="aiProvider"
+                            value={advancedSettings.aiProvider || 'gemini'}
+                            onChange={(e: SelectChangeEvent) => handleAdvancedSettingsChange(e as any)}
+                            options={[
+                              { value: 'gemini', label: 'Google Gemini' },
+                              { value: 'openai', label: 'OpenAI (Coming Soon)' },
+                              { value: 'custom', label: 'Custom' }
+                            ]}
+                            helperText="Select the AI provider to use"
+                          />
+
+                          <FormField
+                            label="Model Name"
+                            name="aiModelName"
+                            value={advancedSettings.aiModelName || ''}
+                            onChange={handleAdvancedSettingsChange}
+                            placeholder={advancedSettings.aiProvider === 'gemini' ? 'gemini-2.5-pro-exp-03-25' : 'gpt-4'}
+                            helperText="The specific model identifier to use"
+                          />
+
+                          <FormField
+                            label="API Key"
+                            name="aiApiKey"
+                            value={advancedSettings.aiApiKey || ''}
+                            onChange={handleAdvancedSettingsChange}
+                            type="password"
+                            placeholder={advancedSettings.aiApiKey ? '••••••••••••' : 'Enter API Key'}
+                            helperText="Your API key (stored securely)"
+                          />
+
+                          <Button
+                            variant="outlined"
+                            color="primary"
+                            onClick={handleTestAIConfig}
+                            startIcon={loading ? <CircularProgress size={20} /> : <CheckCircleIcon />}
+                            disabled={loading || !advancedSettings.aiApiKey}
+                            sx={{ mt: 2 }}
+                            fullWidth
+                          >
+                            Test AI Configuration
+                          </Button>
                         </CardContent>
                       </EnhancedCard>
                     </Grid>
-                    
+
                     <Grid item xs={12}>
                       <Box display="flex" justifyContent="flex-end" sx={{ mt: 1 }}>
                         <Button
@@ -3575,7 +3649,7 @@ const SettingsPage: React.FC = () => {
                   </>
                 )}
               </EnhancedGrid>
-              </TabPanel>
+            </TabPanel>
           </Paper>
 
           {/* Unsaved changes dialog */}

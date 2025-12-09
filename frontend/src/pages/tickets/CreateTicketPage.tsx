@@ -75,11 +75,11 @@ const availableTags = [
 const FILE_SIZE_LIMIT = 10 * 1024 * 1024;
 // Accepted file types
 const ACCEPTED_FILE_TYPES = [
-  'image/jpeg', 
-  'image/png', 
-  'image/gif', 
-  'application/pdf', 
-  'application/msword', 
+  'image/jpeg',
+  'image/png',
+  'image/gif',
+  'application/pdf',
+  'application/msword',
   'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
   'text/plain',
   'application/zip'
@@ -110,7 +110,7 @@ const CreateTicketPage: React.FC = () => {
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [activeStep, setActiveStep] = useState(0);
   const [submitting, setSubmitting] = useState(false);
-  
+
   const steps = ['Ticket Details', 'Additional Information & Submit'];
 
   const handleNext = () => {
@@ -149,7 +149,7 @@ const CreateTicketPage: React.FC = () => {
         setSubmitError('Authentication error: User not found. Please log in again.');
         return;
       }
-      
+
       try {
         setSubmitError(null);
         setSubmitting(true);
@@ -167,7 +167,7 @@ const CreateTicketPage: React.FC = () => {
         if (values.assigneeId) formData.append('assigneeId', Number(values.assigneeId).toString());
         // Append tags as a JSON string (backend will parse)
         if (selectedTags.length > 0) {
-          formData.append('tags', JSON.stringify(selectedTags)); 
+          formData.append('tags', JSON.stringify(selectedTags));
         }
         // Append other fields like dueDate if they exist
         // if (values.dueDate) formData.append('dueDate', values.dueDate.toISOString());
@@ -176,11 +176,11 @@ const CreateTicketPage: React.FC = () => {
         files.forEach((file) => {
           formData.append('attachments', file, file.name); // Use 'attachments' as the field name
         });
-        
+
         // Use the TicketContext createTicket function, assuming it's adapted for FormData
         // OR call apiClient directly if createTicket isn't designed for FormData
         // const newTicket = await createTicket(formData); 
-        
+
         // --- Direct API Call Example (if createTicket context function isn't ready for FormData) ---
         // You might need to adjust your apiClient setup if it doesn't automatically handle FormData
         const response = await apiClient.post('/tickets', formData, {
@@ -191,13 +191,13 @@ const CreateTicketPage: React.FC = () => {
         });
         const newTicket = response; // Assuming API returns ticket data
         // --- End Direct API Call Example ---
-        
+
         // Show a success toast notification
         addNotification('Ticket created successfully!', 'success', {
           title: 'Success',
           duration: 5000
         });
-        
+
         if (newTicket) {
           navigate('/tickets');
         } else {
@@ -206,7 +206,7 @@ const CreateTicketPage: React.FC = () => {
         }
       } catch (error: any) {
         console.error('Error creating ticket:', error);
-        
+
         // Extract detailed error message from API response if available
         let errorMessage = 'Failed to create ticket. Please try again.';
         if (error.response?.data?.message) {
@@ -214,9 +214,9 @@ const CreateTicketPage: React.FC = () => {
         } else if (error.message) {
           errorMessage = error.message;
         }
-        
+
         setSubmitError(errorMessage);
-        
+
         // Show error notification with the detailed message
         addNotification(errorMessage, 'error', {
           title: 'Error Creating Ticket',
@@ -248,15 +248,15 @@ const CreateTicketPage: React.FC = () => {
     }
 
     setIsAnalyzing(true);
-    
+
     // Simulating AI analysis - in a real app, this would be an API call
     setTimeout(() => {
       const description = formik.values.description.toLowerCase();
-      
+
       let suggestedType = '';
       let suggestedPriority = '2'; // Medium by default
       let suggestedTags: string[] = [];
-      
+
       // Simple keyword matching for demonstration
       if (description.includes('printer') || description.includes('scanner')) {
         suggestedType = '1'; // Hardware
@@ -271,49 +271,49 @@ const CreateTicketPage: React.FC = () => {
         suggestedType = '4'; // Security
         suggestedTags.push('security', 'access');
       }
-      
+
       // Priority suggestion based on keywords
       if (
-        description.includes('urgent') || 
-        description.includes('critical') || 
+        description.includes('urgent') ||
+        description.includes('critical') ||
         description.includes('emergency') ||
         description.includes('asap')
       ) {
         suggestedPriority = '4'; // Urgent
       } else if (
-        description.includes('important') || 
+        description.includes('important') ||
         description.includes('high priority') ||
         description.includes('serious')
       ) {
         suggestedPriority = '3'; // High
       } else if (
-        description.includes('when possible') || 
+        description.includes('when possible') ||
         description.includes('low priority') ||
         description.includes('minor')
       ) {
         suggestedPriority = '1'; // Low
       }
-      
+
       // Generate a better subject line if the current one is generic
       let suggestedSubject = formik.values.subject;
       if (!formik.values.subject || formik.values.subject.length < 10) {
         // Extract the first sentence or first 50 chars
         const firstSentence = description.split('.')[0];
-        suggestedSubject = firstSentence.length > 50 
+        suggestedSubject = firstSentence.length > 50
           ? firstSentence.substring(0, 50) + '...'
           : firstSentence;
-        
+
         // Capitalize first letter
         suggestedSubject = suggestedSubject.charAt(0).toUpperCase() + suggestedSubject.slice(1);
       }
-      
+
       setAiSuggestions({
         subject: suggestedSubject,
         tags: suggestedTags,
         priority: suggestedPriority,
         type: suggestedType
       });
-      
+
       setIsAnalyzing(false);
     }, 1500);
   };
@@ -321,45 +321,45 @@ const CreateTicketPage: React.FC = () => {
   // Apply AI suggestions to form
   const applyAiSuggestions = () => {
     if (!aiSuggestions) return;
-    
+
     if (aiSuggestions.subject && (!formik.values.subject || formik.values.subject.length < 10)) {
       formik.setFieldValue('subject', aiSuggestions.subject);
     }
-    
+
     if (aiSuggestions.type) {
       formik.setFieldValue('typeId', aiSuggestions.type);
     }
-    
+
     if (aiSuggestions.priority) {
       formik.setFieldValue('priorityId', aiSuggestions.priority);
     }
-    
+
     if (aiSuggestions.tags.length > 0) {
       setSelectedTags([...new Set([...selectedTags, ...aiSuggestions.tags])]);
       formik.setFieldValue('tags', [...new Set([...selectedTags, ...aiSuggestions.tags])]);
     }
-    
+
     setAiSuggestions(null);
   };
 
   const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
     if (event.target.files) {
       const newFiles = Array.from(event.target.files);
-      
+
       // Filter out files that exceed the size limit or have invalid types
       const validFiles = newFiles.filter(file => {
         const isValidSize = file.size <= FILE_SIZE_LIMIT;
         const isValidType = ACCEPTED_FILE_TYPES.includes(file.type);
-        
+
         if (!isValidSize) {
           setSubmitError(`File ${file.name} exceeds the maximum size limit of 10MB`);
         } else if (!isValidType) {
           setSubmitError(`File ${file.name} has an unsupported file type`);
         }
-        
+
         return isValidSize && isValidType;
       });
-      
+
       setFiles((prevFiles) => [...prevFiles, ...validFiles]);
     }
   };
@@ -383,7 +383,7 @@ const CreateTicketPage: React.FC = () => {
   useEffect(() => {
     if (
       formik.values.description.length > 50 &&
-      !isAnalyzing && 
+      !isAnalyzing &&
       !aiSuggestions
     ) {
       analyzeWithAI();
@@ -401,17 +401,19 @@ const CreateTicketPage: React.FC = () => {
                 fullWidth
                 id="subject"
                 name="subject"
-                label="Subject"
+                label="Subject *"
                 variant="outlined"
                 value={formik.values.subject}
                 onChange={formik.handleChange}
                 onBlur={formik.handleBlur}
                 error={formik.touched.subject && Boolean(formik.errors.subject)}
                 helperText={
-                  (formik.touched.subject && formik.errors.subject) || 
-                  'Minimum 5 characters required'
+                  (formik.touched.subject && formik.errors.subject) ||
+                  `Minimum 5 characters required (${formik.values.subject.length}/5)`
                 }
                 placeholder="Briefly describe the issue"
+                data-testid="ticket-subject-input"
+                inputProps={{ 'data-testid': 'subject-input-field' }}
               />
             </Grid>
 
@@ -420,7 +422,7 @@ const CreateTicketPage: React.FC = () => {
                 fullWidth
                 id="description"
                 name="description"
-                label="Description"
+                label="Description *"
                 multiline
                 rows={6}
                 variant="outlined"
@@ -429,10 +431,12 @@ const CreateTicketPage: React.FC = () => {
                 onBlur={formik.handleBlur}
                 error={formik.touched.description && Boolean(formik.errors.description)}
                 helperText={
-                  (formik.touched.description && formik.errors.description) || 
-                  'Describe the issue in detail. Be as specific as possible.'
+                  (formik.touched.description && formik.errors.description) ||
+                  `Describe the issue in detail (${formik.values.description.length}/10 characters minimum)`
                 }
                 placeholder="Please provide as much detail as possible about the issue you're experiencing..."
+                data-testid="ticket-description-input"
+                inputProps={{ 'data-testid': 'description-input-field' }}
               />
               {isAnalyzing && (
                 <Box sx={{ mt: 1, display: 'flex', alignItems: 'center' }}>
@@ -454,8 +458,8 @@ const CreateTicketPage: React.FC = () => {
                         AI Suggestions
                       </Typography>
                       <Box flexGrow={1} />
-                      <Button 
-                        size="small" 
+                      <Button
+                        size="small"
                         startIcon={<LightbulbIcon />}
                         onClick={applyAiSuggestions}
                         variant="contained"
@@ -475,7 +479,7 @@ const CreateTicketPage: React.FC = () => {
                           </Typography>
                         </Grid>
                       )}
-                      
+
                       {aiSuggestions.type && (
                         <Grid item xs={12} sm={6}>
                           <Typography variant="caption" color="text.secondary">
@@ -486,7 +490,7 @@ const CreateTicketPage: React.FC = () => {
                           </Typography>
                         </Grid>
                       )}
-                      
+
                       {aiSuggestions.priority && (
                         <Grid item xs={12} sm={6}>
                           <Typography variant="caption" color="text.secondary">
@@ -497,7 +501,7 @@ const CreateTicketPage: React.FC = () => {
                           </Typography>
                         </Grid>
                       )}
-                      
+
                       {aiSuggestions.tags.length > 0 && (
                         <Grid item xs={12}>
                           <Typography variant="caption" color="text.secondary">
@@ -505,12 +509,12 @@ const CreateTicketPage: React.FC = () => {
                           </Typography>
                           <Box sx={{ mt: 0.5 }}>
                             {aiSuggestions.tags.map(tag => (
-                              <Chip 
-                                key={tag} 
-                                label={tag} 
-                                size="small" 
-                                variant="outlined" 
-                                sx={{ mr: 0.5, mb: 0.5 }} 
+                              <Chip
+                                key={tag}
+                                label={tag}
+                                size="small"
+                                variant="outlined"
+                                sx={{ mr: 0.5, mb: 0.5 }}
                               />
                             ))}
                           </Box>
@@ -531,7 +535,7 @@ const CreateTicketPage: React.FC = () => {
                 fullWidth
                 error={formik.touched.departmentId && Boolean(formik.errors.departmentId)}
               >
-                <InputLabel id="department-label">Department</InputLabel>
+                <InputLabel id="department-label">Department *</InputLabel>
                 <Select
                   labelId="department-label"
                   id="departmentId"
@@ -539,7 +543,8 @@ const CreateTicketPage: React.FC = () => {
                   value={formik.values.departmentId}
                   onChange={formik.handleChange}
                   onBlur={formik.handleBlur}
-                  label="Department"
+                  label="Department *"
+                  data-testid="department-select"
                 >
                   {departments.map((department) => (
                     <MenuItem key={department.id} value={department.id}>
@@ -558,7 +563,7 @@ const CreateTicketPage: React.FC = () => {
                 fullWidth
                 error={formik.touched.typeId && Boolean(formik.errors.typeId)}
               >
-                <InputLabel id="type-label">Type</InputLabel>
+                <InputLabel id="type-label">Type *</InputLabel>
                 <Select
                   labelId="type-label"
                   id="typeId"
@@ -566,7 +571,8 @@ const CreateTicketPage: React.FC = () => {
                   value={formik.values.typeId}
                   onChange={formik.handleChange}
                   onBlur={formik.handleBlur}
-                  label="Type"
+                  label="Type *"
+                  data-testid="type-select"
                 >
                   {ticketTypes.map((type) => (
                     <MenuItem key={type.id} value={type.id}>
@@ -585,7 +591,7 @@ const CreateTicketPage: React.FC = () => {
                 fullWidth
                 error={formik.touched.priorityId && Boolean(formik.errors.priorityId)}
               >
-                <InputLabel id="priority-label">Priority</InputLabel>
+                <InputLabel id="priority-label">Priority *</InputLabel>
                 <Select
                   labelId="priority-label"
                   id="priorityId"
@@ -593,7 +599,8 @@ const CreateTicketPage: React.FC = () => {
                   value={formik.values.priorityId}
                   onChange={formik.handleChange}
                   onBlur={formik.handleBlur}
-                  label="Priority"
+                  label="Priority *"
+                  data-testid="priority-select"
                 >
                   {priorities.map((priority) => (
                     <MenuItem key={priority.id} value={priority.id}>
@@ -767,11 +774,11 @@ const CreateTicketPage: React.FC = () => {
             </Step>
           ))}
         </Stepper>
-        
+
         <form onSubmit={formik.handleSubmit}>
           <Grid container spacing={3}>
             {renderStep(activeStep)}
-            
+
             <Grid item xs={12}>
               <Divider sx={{ mt: 2, mb: 2 }} />
               <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
@@ -779,44 +786,84 @@ const CreateTicketPage: React.FC = () => {
                   disabled={activeStep === 0}
                   onClick={handleBack}
                   variant="outlined"
+                  data-testid="back-step-button"
+                  sx={{ px: 3, py: 1.5 }}
                 >
                   Back
                 </Button>
                 <Box>
                   {activeStep === steps.length - 1 ? (
-                    <Button
-                      type="submit"
-                      variant="contained"
-                      color="primary"
-                      disabled={submitting || !isFormReadyToSubmit()}
-                      startIcon={submitting ? <CircularProgress size={24} color="inherit" /> : <SendIcon />}
+                    <Tooltip
+                      title={!isFormReadyToSubmit() ? 'Please fill in all required fields' : 'Submit your ticket'}
+                      arrow
                     >
-                      {submitting ? 'Submitting...' : 'Submit Ticket'}
-                    </Button>
+                      <span>
+                        <Button
+                          type="submit"
+                          variant="contained"
+                          color="primary"
+                          disabled={submitting || !isFormReadyToSubmit()}
+                          startIcon={submitting ? <CircularProgress size={20} color="inherit" /> : <SendIcon />}
+                          data-testid="submit-ticket-button"
+                          sx={{
+                            px: 4,
+                            py: 1.5,
+                            fontWeight: 'bold',
+                            fontSize: '1rem',
+                            boxShadow: 3,
+                            '&:hover': {
+                              boxShadow: 6,
+                              transform: 'translateY(-2px)'
+                            }
+                          }}
+                        >
+                          {submitting ? 'Submitting...' : '✓ Submit Ticket'}
+                        </Button>
+                      </span>
+                    </Tooltip>
                   ) : (
-                    <Button
-                      variant="contained"
-                      onClick={handleNext}
-                      disabled={
-                        !formik.values.subject || 
-                        !formik.values.description || 
-                        (formik.touched.subject && Boolean(formik.errors.subject)) ||
-                        (formik.touched.description && Boolean(formik.errors.description)) ||
-                        formik.values.subject.length < 5 ||
-                        formik.values.description.length < 10
+                    <Tooltip
+                      title={
+                        (!formik.values.subject || formik.values.subject.length < 5)
+                          ? 'Subject must be at least 5 characters'
+                          : (!formik.values.description || formik.values.description.length < 10)
+                            ? 'Description must be at least 10 characters'
+                            : 'Continue to additional information'
                       }
-                      sx={{ 
-                        ml: 1,
-                        px: 3,
-                        transition: 'transform 0.3s ease',
-                        '&:hover': {
-                          transform: 'translateY(-3px)'
-                        }
-                      }}
+                      arrow
                     >
-                      Next
-                      <ArrowForwardIcon sx={{ ml: 1 }} />
-                    </Button>
+                      <span>
+                        <Button
+                          variant="contained"
+                          onClick={handleNext}
+                          disabled={
+                            !formik.values.subject ||
+                            !formik.values.description ||
+                            (formik.touched.subject && Boolean(formik.errors.subject)) ||
+                            (formik.touched.description && Boolean(formik.errors.description)) ||
+                            formik.values.subject.length < 5 ||
+                            formik.values.description.length < 10
+                          }
+                          data-testid="next-step-button"
+                          endIcon={<ArrowForwardIcon />}
+                          sx={{
+                            ml: 1,
+                            px: 4,
+                            py: 1.5,
+                            fontWeight: 'bold',
+                            fontSize: '1rem',
+                            boxShadow: 2,
+                            transition: 'all 0.3s ease',
+                            '&:hover': {
+                              transform: 'translateY(-2px)',
+                              boxShadow: 4
+                            }
+                          }}
+                        >
+                          Next Step
+                        </Button>
+                      </span>
+                    </Tooltip>
                   )}
                 </Box>
               </Box>

@@ -11,7 +11,7 @@ interface LogEntry {
   timestamp: string;
   level: string;
   message: string;
-  metadata?: any;
+  metadata?: Record<string, unknown>;
 }
 
 class LogBuffer {
@@ -43,11 +43,11 @@ class LogBuffer {
     const year = logDate.getFullYear();
     const month = String(logDate.getMonth() + 1).padStart(2, '0');
     const day = String(logDate.getDate()).padStart(2, '0');
-    
+
     const dateKey = `${year}-${month}-${day}`;
-    return { 
+    return {
       dateKey,
-      fileKey: `logs/${source}/${logType}/${dateKey}.json` 
+      fileKey: `logs/${source}/${logType}/${dateKey}.json`
     };
   }
 
@@ -69,25 +69,25 @@ class LogBuffer {
       if (!this.buffer[dateKey]) {
         this.buffer[dateKey] = {};
       }
-      
+
       if (!this.buffer[dateKey][source]) {
         this.buffer[dateKey][source] = {};
       }
-      
+
       if (!this.buffer[dateKey][source][logType]) {
         this.buffer[dateKey][source][logType] = [];
       }
-      
+
       // Add to buffer
       this.buffer[dateKey][source][logType].push(parsedEntry);
-      
+
       // Track error count for this buffer key
       if (logType === 'error') {
         if (!this.errorCount[fileKey]) {
           this.errorCount[fileKey] = 0;
         }
         this.errorCount[fileKey]++;
-        
+
         // Force flush if error count threshold exceeded
         if (this.errorCount[fileKey] >= FORCE_FLUSH_ERROR_COUNT) {
           this.flush(dateKey, source, logType).catch(err => {
@@ -95,8 +95,9 @@ class LogBuffer {
           });
         }
       }
-    } catch (error: any) {
-      console.error(`Error adding log to buffer: ${error.message}`);
+    } catch (error: unknown) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      console.error(`Error adding log to buffer: ${errorMessage}`);
     }
   }
 
@@ -106,9 +107,9 @@ class LogBuffer {
     const bufferToFlush = { ...this.buffer };
     this.buffer = {};
     this.errorCount = {};
-    
+
     // Keep track of failed flushes
-    const failedFlushes: Array<{dateKey: string, source: string, logType: string, logs: LogEntry[]}> = [];
+    const failedFlushes: Array<{ dateKey: string, source: string, logType: string, logs: LogEntry[] }> = [];
 
     // Process each date key
     for (const dateKey in bufferToFlush) {
@@ -117,26 +118,26 @@ class LogBuffer {
           if (bufferToFlush[dateKey][source][logType].length === 0) {
             continue;
           }
-          
+
           try {
             await this.uploadLogs(
-              dateKey, 
-              source, 
-              logType, 
+              dateKey,
+              source,
+              logType,
               bufferToFlush[dateKey][source][logType]
             );
             // Log success but only in debug environments to avoid log spam
             if (process.env.NODE_ENV !== 'production') {
               console.log(`Successfully flushed ${bufferToFlush[dateKey][source][logType].length} logs for ${dateKey}/${source}/${logType}`);
             }
-          } catch (error: any) {
+          } catch (error: unknown) {
             const errorMessage = error instanceof Error ? error.message : String(error);
             console.error(`Error flushing logs for ${dateKey}/${source}/${logType}: ${errorMessage}`);
-            
+
             // Save failed flush for retry
             failedFlushes.push({
               dateKey,
-              source, 
+              source,
               logType,
               logs: bufferToFlush[dateKey][source][logType]
             });
@@ -144,23 +145,23 @@ class LogBuffer {
         }
       }
     }
-    
+
     // Put failed flushes back in the buffer for retry on next flush
     for (const failed of failedFlushes) {
       const { dateKey, source, logType, logs } = failed;
-      
+
       // Reinitialize buffer hierarchies if they don't exist
       if (!this.buffer[dateKey]) this.buffer[dateKey] = {};
       if (!this.buffer[dateKey][source]) this.buffer[dateKey][source] = {};
       if (!this.buffer[dateKey][source][logType]) this.buffer[dateKey][source][logType] = [];
-      
+
       // Put logs back
       this.buffer[dateKey][source][logType] = [
         ...this.buffer[dateKey][source][logType],
         ...logs
       ];
     }
-    
+
     // Log summary of failed flushes if any
     if (failedFlushes.length > 0) {
       console.warn(`${failedFlushes.length} log flushes failed and will be retried later.`);
@@ -169,22 +170,22 @@ class LogBuffer {
 
   // Flush specific logs by date, source, and type
   public async flush(dateKey: string, source: string, logType: string): Promise<void> {
-    if (!this.buffer[dateKey] || 
-        !this.buffer[dateKey][source] || 
-        !this.buffer[dateKey][source][logType] ||
-        this.buffer[dateKey][source][logType].length === 0) {
+    if (!this.buffer[dateKey] ||
+      !this.buffer[dateKey][source] ||
+      !this.buffer[dateKey][source][logType] ||
+      this.buffer[dateKey][source][logType].length === 0) {
       return;
     }
 
     // Get logs to flush
     const logsToFlush = [...this.buffer[dateKey][source][logType]];
-    
+
     // Clear from buffer
     this.buffer[dateKey][source][logType] = [];
     if (this.errorCount[`logs/${source}/${logType}/${dateKey}.json`]) {
       this.errorCount[`logs/${source}/${logType}/${dateKey}.json`] = 0;
     }
-    
+
     // Upload
     await this.uploadLogs(dateKey, source, logType, logsToFlush);
   }
@@ -201,21 +202,21 @@ class LogBuffer {
     }
 
     const { fileKey } = this.getBufferKey(new Date(dateKey), source, logType);
-    
+
     try {
       let existingLogs: LogEntry[] = [];
-      
+
       try {
         // Check if file already exists
         const { data: existingFile, error: checkError } = await supabase.storage
           .from(logBucketName)
           .download(fileKey);
-        
+
         // Handle potential download errors more gracefully
         if (checkError) {
-          const errorMessage = typeof checkError === 'object' ? 
+          const errorMessage = typeof checkError === 'object' ?
             JSON.stringify(checkError) : String(checkError);
-          
+
           // If it's just a "not found" error, that's expected for new files
           if (errorMessage.includes('not found') || errorMessage.includes('Not Found') || errorMessage.includes('404')) {
             console.log(`Creating new log file: ${fileKey}`);
@@ -228,7 +229,7 @@ class LogBuffer {
           try {
             const text = await existingFile.text();
             existingLogs = JSON.parse(text);
-            
+
             // Ensure it's an array
             if (!Array.isArray(existingLogs)) {
               existingLogs = [];
@@ -242,10 +243,10 @@ class LogBuffer {
         // Handle unexpected errors but continue with empty logs
         console.warn(`Unexpected error downloading log file: ${fileKey}`, downloadError);
       }
-      
+
       // Combine existing and new logs
       const combinedLogs = [...existingLogs, ...logs];
-      
+
       // Upload combined logs - always attempt to upload even if download failed
       const { error: uploadError } = await supabase.storage
         .from(logBucketName)
@@ -253,13 +254,13 @@ class LogBuffer {
           contentType: 'application/json',
           upsert: true, // Overwrite if exists
         });
-        
+
       if (uploadError) {
-        const errorMessage = typeof uploadError === 'object' ? 
+        const errorMessage = typeof uploadError === 'object' ?
           JSON.stringify(uploadError) : String(uploadError);
         throw new Error(`Supabase log storage upload failed: ${errorMessage}`);
       }
-    } catch (error: any) {
+    } catch (error: unknown) {
       // We need to use console.error here to avoid an infinite loop of logging
       const errorMessage = error instanceof Error ? error.message : String(error);
       console.error(`Log upload error for ${fileKey}: ${errorMessage}`);
@@ -282,7 +283,7 @@ export const uploadLogToStorage = async (
     console.log('Skipping log upload to Supabase due to missing credentials');
     return;
   }
-  
+
   try {
     // Normalize log type
     let normalizedLogType = 'general';
@@ -291,12 +292,13 @@ export const uploadLogToStorage = async (
     } else if (logType === 'http') {
       normalizedLogType = 'http';
     }
-    
+
     // Add to buffer instead of directly uploading
     logBuffer.addLog(logEntry, normalizedLogType, source);
-  } catch (error: any) {
+  } catch (error: unknown) {
     // We need to use console.error here to avoid an infinite loop of logging
-    console.error(`Error buffering log: ${error.message}`);
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    console.error(`Error buffering log: ${errorMessage}`);
   }
 };
 
@@ -304,8 +306,9 @@ export const uploadLogToStorage = async (
 export const flushAllLogs = async (): Promise<void> => {
   try {
     await logBuffer.flushAll();
-  } catch (error: any) {
-    console.error(`Error flushing logs: ${error.message}`);
+  } catch (error: unknown) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    console.error(`Error flushing logs: ${errorMessage}`);
   }
 };
 

@@ -11,7 +11,11 @@ interface UserSocket {
   socketId: string;
 }
 
-interface NotificationPayload {
+interface SocketEventPayload {
+  [key: string]: unknown;
+}
+
+interface NotificationPayload extends SocketEventPayload {
   id?: number;
   title: string;
   message: string;
@@ -19,7 +23,13 @@ interface NotificationPayload {
   link?: string;
   isRead?: boolean;
   createdAt?: Date;
-  [key: string]: any;
+  metadata?: Record<string, unknown>;
+}
+
+interface SocketUser {
+  id: number;
+  role: string;
+  socketId: string;
 }
 
 class SocketService {
@@ -57,7 +67,7 @@ class SocketService {
 
     // Setup connection handler
     this.io.on('connection', this.handleConnection.bind(this));
-    
+
     logger.info('Socket.IO server initialized');
     return this.io;
   }
@@ -72,13 +82,13 @@ class SocketService {
   private authenticateSocket = async (socket: Socket, next: (err?: Error) => void) => {
     try {
       let token: string | undefined;
-      
+
       // First try: handshake.auth.token
       if (socket.handshake.auth && socket.handshake.auth.token) {
         token = socket.handshake.auth.token;
         logger.debug(`Socket Auth: Using token from handshake.auth`);
       }
-      
+
       // Second try: Authorization header
       if (!token && socket.handshake.headers.authorization) {
         const authHeader = socket.handshake.headers.authorization;
@@ -87,7 +97,7 @@ class SocketService {
           logger.debug(`Socket Auth: Using token from Authorization header`);
         }
       }
-      
+
       // Third try: Cookies (httpOnly)
       if (!token && socket.handshake.headers.cookie) {
         const cookies = this.parseCookies(socket.handshake.headers.cookie);
@@ -96,36 +106,37 @@ class SocketService {
           logger.debug(`Socket Auth: Using token from cookie`);
         }
       }
-      
+
       // If no token found, reject connection
       if (!token) {
         logger.warn('Socket Auth: No token found in any authentication method');
         return next(new Error('Authentication error: Token not provided'));
       }
-      
+
       try {
         // Verify the token
         const decoded = authService.verifyToken(token);
-        
+
         if (!decoded || !decoded.userId) {
           return next(new Error('Authentication error: Invalid token payload'));
         }
-        
+
         // Get user info to ensure the user exists and is active
         try {
           const userId = decoded.userId;
           logger.debug(`Socket Auth: Token verified for user ${userId}`);
-        
-        // Attach user data to socket
-          (socket as any).user = { 
-            id: userId, 
+
+          // Attach user data to socket
+          const socketWithUser = socket as Socket & { user: SocketUser };
+          socketWithUser.user = {
+            id: userId,
             role: decoded.role || 'customer',
             socketId: socket.id
           };
-          
+
           // Add user to their room for targeted messaging
           socket.join(`user:${userId}`);
-          
+
           // Prevent reconnection abuse by limiting connections 
           // per user (e.g., max 5 connections per user)
           const userSocketsCount = this.connectedUsers.get(userId)?.length || 0;
@@ -133,8 +144,8 @@ class SocketService {
             logger.warn(`Socket Auth: User ${userId} has too many connections (${userSocketsCount})`);
             // Don't disconnect, just warn in logs
           }
-        
-        next();
+
+          next();
         } catch (error) {
           logger.error(`Socket Auth: Error getting user: ${error}`);
           return next(new Error('Authentication error: User not found or inactive'));
@@ -146,7 +157,7 @@ class SocketService {
             logger.debug(`Socket Auth: Token expired`);
             return next(new Error('Authentication error: Token expired'));
           }
-          
+
           logger.debug(`Socket Auth: Invalid token: ${error.message}`);
           return next(new Error('Authentication error: Invalid token'));
         }
@@ -161,8 +172,8 @@ class SocketService {
   /**
    * Parse cookies from header string
    */
-  private parseCookies(cookieHeader: string): {[key: string]: string} {
-    const list: {[key: string]: string} = {};
+  private parseCookies(cookieHeader: string): { [key: string]: string } {
+    const list: { [key: string]: string } = {};
     cookieHeader.split(';').forEach((cookie) => {
       const parts = cookie.split('=');
       const key = parts.shift()!.trim();
@@ -176,8 +187,9 @@ class SocketService {
    * Handle new socket connection
    */
   private handleConnection(socket: Socket): void {
-    const userId = (socket as any).user?.id;
-    
+    const socketWithUser = socket as Socket & { user?: SocketUser };
+    const userId = socketWithUser.user?.id;
+
     if (!userId) {
       logger.warn('Connection attempt without valid user ID');
       socket.disconnect();
@@ -190,15 +202,15 @@ class SocketService {
     if (!this.connectedUsers.has(userId)) {
       this.connectedUsers.set(userId, []);
     }
-    
+
     this.connectedUsers.get(userId)?.push(socket.id);
 
     // Join user to their private room
     socket.join(`user:${userId}`);
 
     // Notify client that connection is successful
-    socket.emit('connected', { 
-      status: 'connected', 
+    socket.emit('connected', {
+      status: 'connected',
       userId,
       timestamp: new Date().toISOString()
     });
@@ -218,11 +230,11 @@ class SocketService {
     // Handle disconnect
     socket.on('disconnect', (reason) => {
       logger.info(`User ${userId} disconnected from socket ${socket.id}, reason: ${reason}`);
-      
+
       // Remove socket from connected users
       const userSockets = this.connectedUsers.get(userId) || [];
       const updatedSockets = userSockets.filter(id => id !== socket.id);
-      
+
       if (updatedSockets.length > 0) {
         this.connectedUsers.set(userId, updatedSockets);
       } else {
@@ -234,9 +246,9 @@ class SocketService {
   /**
    * Handle client notification
    */
-  private handleClientNotification(userId: number, data: any, socket: Socket): void {
+  private handleClientNotification(userId: number, data: SocketEventPayload, socket: Socket): void {
     logger.info(`Received notification from user ${userId}:`, data);
-    
+
     // Process notification based on type
     // Implementation depends on application requirements
   }
@@ -266,17 +278,17 @@ class SocketService {
    * @param eventType Event type
    * @param payload Notification payload
    */
-  sendToUser(userId: number, eventType: string, payload: any): boolean {
+  sendToUser(userId: number, eventType: string, payload: SocketEventPayload): boolean {
     if (!this.io) {
       logger.error('Socket.IO server not initialized');
       return false;
     }
 
     logger.info(`Sending ${eventType} to user ${userId}`);
-    
+
     // Send to user's room
     this.io.to(`user:${userId}`).emit(eventType, payload);
-    
+
     // Check if user has active connections
     return this.isUserConnected(userId);
   }
@@ -288,13 +300,13 @@ class SocketService {
    * @param payload Notification payload
    * @returns Map of user IDs to delivery status
    */
-  sendToUsers(userIds: number[], eventType: string, payload: any): Map<number, boolean> {
+  sendToUsers(userIds: number[], eventType: string, payload: SocketEventPayload): Map<number, boolean> {
     const results = new Map<number, boolean>();
-    
+
     userIds.forEach(userId => {
       results.set(userId, this.sendToUser(userId, eventType, payload));
     });
-    
+
     return results;
   }
 

@@ -1,7 +1,8 @@
+import { AppDataSource } from '../config/database';
 import { Ticket } from '../models/Ticket';
-import { TicketStatus } from '../models/TicketStatus';
-import { TicketPriority } from '../models/TicketPriority';
-import { User, UserRole } from '../models/User';
+import { User } from '../models/User';
+import { SLAPolicyTicket } from '../models/SLAPolicyTicket';
+import { logger } from '../utils/logger';
 import notificationService from './notification.service';
 
 /**
@@ -115,7 +116,7 @@ interface AutomationRule {
   conditions: Array<{
     field: string;
     operator: ConditionOperator;
-    value: any;
+    value: string | number | boolean;
   }>;
   actions: Array<{
     type: AutomationAction;
@@ -213,26 +214,26 @@ class WorkflowService {
    * @param ticket Ticket to calculate SLA for
    * @returns SLA deadline timestamps
    */
-  calculateSLADeadlines(ticket: Ticket): { 
-    firstResponseDeadline: Date; 
+  calculateSLADeadlines(ticket: Ticket): {
+    firstResponseDeadline: Date;
     resolutionDeadline: Date;
   } {
     const priorityName = ticket.priority?.name?.toLowerCase() || 'medium';
     const slaConfig = SLA_CONFIGS[priorityName];
     const createdAt = new Date(ticket.createdAt);
-    
+
     const firstResponseDeadline = new Date(createdAt);
     firstResponseDeadline.setMinutes(firstResponseDeadline.getMinutes() + slaConfig.firstResponseTime);
-    
+
     const resolutionDeadline = new Date(createdAt);
     resolutionDeadline.setMinutes(resolutionDeadline.getMinutes() + slaConfig.resolutionTime);
-    
+
     return {
       firstResponseDeadline,
       resolutionDeadline,
     };
   }
-  
+
   /**
    * Check if a ticket is meeting its SLA
    * @param ticket Ticket to check
@@ -248,27 +249,27 @@ class WorkflowService {
   } {
     const now = new Date();
     const { firstResponseDeadline, resolutionDeadline } = this.calculateSLADeadlines(ticket);
-    
+
     // Calculate remaining time in minutes
     const firstResponseRemainingMinutes = Math.floor((firstResponseDeadline.getTime() - now.getTime()) / 60000);
     const resolutionRemainingMinutes = Math.floor((resolutionDeadline.getTime() - now.getTime()) / 60000);
-    
+
     // Calculate percentage of SLA time used
     const priorityName = ticket.priority?.name?.toLowerCase() || 'medium';
     const slaConfig = SLA_CONFIGS[priorityName];
     const createdAt = new Date(ticket.createdAt);
     const elapsedMinutesSinceCreation = Math.floor((now.getTime() - createdAt.getTime()) / 60000);
-    
+
     const firstResponsePercentage = Math.min(
-      100, 
+      100,
       Math.floor((elapsedMinutesSinceCreation / slaConfig.firstResponseTime) * 100)
     );
-    
+
     const resolutionPercentage = Math.min(
-      100, 
+      100,
       Math.floor((elapsedMinutesSinceCreation / slaConfig.resolutionTime) * 100)
     );
-    
+
     return {
       isFirstResponseBreached: firstResponseRemainingMinutes <= 0,
       isResolutionBreached: resolutionRemainingMinutes <= 0,
@@ -278,7 +279,7 @@ class WorkflowService {
       resolutionPercentage,
     };
   }
-  
+
   /**
    * Check for tickets needing escalation and apply escalation actions
    * @returns Number of tickets escalated
@@ -286,90 +287,90 @@ class WorkflowService {
   async processEscalations(): Promise<number> {
     // This would retrieve tickets from the database and check their SLA status
     // For now, this is a mock implementation
-    console.log('Processing ticket escalations...');
+    logger.info('Processing ticket escalations...');
     return 0;
   }
-  
+
   /**
    * Execute an automation rule
    * @param rule Automation rule to execute
    * @param context Trigger context (ticket, etc.)
    * @returns Success status
    */
-  async executeAutomationRule(rule: AutomationRule, context: any): Promise<boolean> {
+  async executeAutomationRule(rule: AutomationRule, context: Record<string, unknown>): Promise<boolean> {
     try {
       // Skip inactive rules
       if (!rule.isActive) {
         return false;
       }
-      
+
       // Check if conditions match
       const conditionsMatch = rule.conditions.every(condition => {
         const fieldValue = context[condition.field];
-        
+
         switch (condition.operator) {
           case ConditionOperator.EQUALS:
             return fieldValue === condition.value;
           case ConditionOperator.NOT_EQUALS:
             return fieldValue !== condition.value;
           case ConditionOperator.CONTAINS:
-            return typeof fieldValue === 'string' && 
+            return typeof fieldValue === 'string' && typeof condition.value === 'string' &&
               fieldValue.toLowerCase().includes(condition.value.toLowerCase());
           case ConditionOperator.NOT_CONTAINS:
-            return typeof fieldValue !== 'string' || 
-              !fieldValue.toLowerCase().includes(condition.value.toLowerCase());
+            return typeof fieldValue !== 'string' ||
+              (typeof condition.value === 'string' && !fieldValue.toLowerCase().includes(condition.value.toLowerCase()));
           case ConditionOperator.GREATER_THAN:
-            return fieldValue > condition.value;
+            return typeof fieldValue === 'number' && typeof condition.value === 'number' && fieldValue > condition.value;
           case ConditionOperator.LESS_THAN:
-            return fieldValue < condition.value;
+            return typeof fieldValue === 'number' && typeof condition.value === 'number' && fieldValue < condition.value;
           default:
             return false;
         }
       });
-      
+
       // If conditions don't match, skip this rule
       if (!conditionsMatch) {
         return false;
       }
-      
+
       // Execute actions
       for (const action of rule.actions) {
         await this.executeAction(action, context);
       }
-      
+
       return true;
     } catch (error) {
-      console.error(`Error executing automation rule ${rule.id}:`, error);
+      logger.error(`Error executing automation rule ${rule.id}:`, error);
       return false;
     }
   }
-  
+
   /**
    * Execute an automation action
    * @param action Action to execute
    * @param context Action context
    */
-  private async executeAction(action: { type: AutomationAction; params: Record<string, any> }, context: any): Promise<void> {
-    const ticket = context.ticket;
-    
+  private async executeAction(action: { type: AutomationAction; params: Record<string, unknown> }, context: Record<string, unknown>): Promise<void> {
+    const ticket = context.ticket as any; // Type assertion for context ticket
+
     switch (action.type) {
       case AutomationAction.ASSIGN_TICKET:
         // In a real implementation, this would update the database
-        console.log(`Assigning ticket ${ticket.id} to agent ${action.params.agentId}`);
+        logger.info(`Assigning ticket ${ticket.id} to agent ${action.params.agentId}`);
         break;
-        
+
       case AutomationAction.CHANGE_PRIORITY:
-        console.log(`Changing ticket ${ticket.id} priority to ${action.params.priority}`);
+        logger.info(`Changing ticket ${ticket.id} priority to ${action.params.priority}`);
         break;
-        
+
       case AutomationAction.CHANGE_STATUS:
-        console.log(`Changing ticket ${ticket.id} status to ${action.params.status}`);
+        logger.info(`Changing ticket ${ticket.id} status to ${action.params.status}`);
         break;
-        
+
       case AutomationAction.SEND_NOTIFICATION:
-        const recipients = action.params.recipients;
-        
-        if (recipients.includes('requester') && ticket.requester?.email) {
+        const recipients = action.params.recipients as any; // Type assertion
+
+        if (Array.isArray(recipients) && recipients.includes('requester') && ticket.requester?.email) {
           await notificationService.sendTicketUpdateNotification(
             ticket.requester.email,
             ticket.id,
@@ -377,33 +378,38 @@ class WorkflowService {
             'automation'
           );
         }
-        
+
         // Additional notification logic would go here...
-        console.log(`Sending notification for ticket ${ticket.id} to ${recipients.join(', ')}`);
+        if (Array.isArray(recipients)) {
+          logger.info(`Sending notification for ticket ${ticket.id} to ${recipients.join(', ')}`);
+        }
         break;
-        
+
       case AutomationAction.ADD_INTERNAL_NOTE:
-        console.log(`Adding internal note to ticket ${ticket.id}: ${action.params.content}`);
+        logger.info(`Adding internal note to ticket ${ticket.id}: ${action.params.content}`);
         break;
-        
+
       case AutomationAction.APPLY_TAGS:
-        console.log(`Applying tags to ticket ${ticket.id}: ${action.params.tags.join(', ')}`);
+        const tags = action.params.tags as any; // Type assertion
+        if (Array.isArray(tags)) {
+          logger.info(`Applying tags to ticket ${ticket.id}: ${tags.join(', ')}`);
+        }
         break;
     }
   }
-  
+
   /**
    * Trigger automation rules on an event
    * @param trigger Trigger type
    * @param context Trigger context
    * @returns Number of rules executed
    */
-  async triggerAutomation(trigger: AutomationTrigger, context: any): Promise<number> {
+  async triggerAutomation(trigger: AutomationTrigger, context: Record<string, unknown>): Promise<number> {
     // Find rules matching this trigger
     const matchingRules = this.automationRules.filter(rule => rule.trigger === trigger);
-    
+
     let executedCount = 0;
-    
+
     // Execute matching rules
     for (const rule of matchingRules) {
       const executed = await this.executeAutomationRule(rule, context);
@@ -411,10 +417,10 @@ class WorkflowService {
         executedCount++;
       }
     }
-    
+
     return executedCount;
   }
-  
+
   /**
    * Get all automation rules
    * @returns List of automation rules
@@ -422,7 +428,7 @@ class WorkflowService {
   getAutomationRules(): AutomationRule[] {
     return this.automationRules;
   }
-  
+
   /**
    * Add or update an automation rule
    * @param rule Rule to add or update
@@ -430,7 +436,7 @@ class WorkflowService {
    */
   saveAutomationRule(rule: AutomationRule): AutomationRule {
     const existingIndex = this.automationRules.findIndex(r => r.id === rule.id);
-    
+
     if (existingIndex >= 0) {
       // Update existing rule
       this.automationRules[existingIndex] = rule;
@@ -438,10 +444,10 @@ class WorkflowService {
       // Add new rule
       this.automationRules.push(rule);
     }
-    
+
     return rule;
   }
-  
+
   /**
    * Delete an automation rule
    * @param ruleId ID of rule to delete
@@ -450,15 +456,15 @@ class WorkflowService {
   deleteAutomationRule(ruleId: string): boolean {
     const initialLength = this.automationRules.length;
     this.automationRules = this.automationRules.filter(rule => rule.id !== ruleId);
-    
+
     return this.automationRules.length < initialLength;
   }
 }
 
 export default new WorkflowService();
-export { 
-  AutomationTrigger, 
-  AutomationAction, 
+export {
+  AutomationTrigger,
+  AutomationAction,
   ConditionOperator,
   type AutomationRule
 }; 

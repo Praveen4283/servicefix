@@ -1,5 +1,6 @@
 import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, ManyToOne, JoinColumn } from 'typeorm';
 import { User } from './User';
+import type { NotificationMetadata } from '../types/common';
 
 @Entity('notifications')
 export class Notification {
@@ -32,7 +33,7 @@ export class Notification {
   type: string; // 'ticket_assigned', 'ticket_updated', 'mention', etc.
 
   @Column({ type: 'jsonb', nullable: true })
-  metadata: any;
+  metadata: NotificationMetadata;
 
   @CreateDateColumn({ name: 'created_at' })
   createdAt: Date;

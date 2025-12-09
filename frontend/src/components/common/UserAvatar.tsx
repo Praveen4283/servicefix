@@ -1,4 +1,4 @@
-import React from 'react';
+
 import { Avatar, Box, Typography, Chip, Tooltip, useTheme } from '@mui/material';
 
 interface User {
@@ -39,7 +39,7 @@ const UserAvatar: React.FC<UserAvatarProps> = ({
   tooltipPlacement = 'bottom',
 }) => {
   const theme = useTheme();
-  
+
   if (!user) {
     return (
       <Box sx={{ display: 'flex', alignItems: 'center' }}>
@@ -52,7 +52,7 @@ const UserAvatar: React.FC<UserAvatarProps> = ({
           }}
         >
           ?
-        </Avatar>
+        </Avatar >
         {showName && (
           <Typography
             variant={size === 'small' ? 'caption' : 'body2'}
@@ -61,32 +61,32 @@ const UserAvatar: React.FC<UserAvatarProps> = ({
             Unassigned
           </Typography>
         )}
-      </Box>
+      </Box >
     );
   }
-  
+
   // Get user's name from available properties
   const getDisplayName = () => {
     if (user.name) {
       return user.name;
     }
-    
+
     if (user.firstName && user.lastName) {
       return `${user.firstName} ${user.lastName}`;
     }
-    
+
     if (user.firstName) {
       return user.firstName;
     }
-    
+
     if (user.email) {
       // Return email without domain
       return user.email.split('@')[0];
     }
-    
+
     return 'Unknown User';
   };
-  
+
   // Get user's initials for avatar
   const getInitials = () => {
     if (user.name) {
@@ -96,26 +96,26 @@ const UserAvatar: React.FC<UserAvatarProps> = ({
       }
       return user.name[0].toUpperCase();
     }
-    
+
     if (user.firstName && user.lastName) {
       return `${user.firstName[0]}${user.lastName[0]}`.toUpperCase();
     }
-    
+
     if (user.firstName) {
       return user.firstName[0].toUpperCase();
     }
-    
+
     if (user.email) {
       return user.email[0].toUpperCase();
     }
-    
+
     return '?';
   };
-  
+
   // Get status color
   const getStatusColor = () => {
     if (!user.status) return undefined;
-    
+
     switch (user.status) {
       case 'online':
         return theme.palette.success.main;
@@ -128,12 +128,12 @@ const UserAvatar: React.FC<UserAvatarProps> = ({
         return theme.palette.grey[500];
     }
   };
-  
+
   const displayName = getDisplayName();
   const contentBox = (
-    <Box 
-      sx={{ 
-        display: 'flex', 
+    <Box
+      sx={{
+        display: 'flex',
         alignItems: 'center',
         cursor: (clickable || onClick) ? 'pointer' : 'default',
         '&:hover': {
@@ -154,7 +154,7 @@ const UserAvatar: React.FC<UserAvatarProps> = ({
         >
           {getInitials()}
         </Avatar>
-        
+
         {showStatus && user.status && (
           <Box
             sx={{
@@ -170,7 +170,7 @@ const UserAvatar: React.FC<UserAvatarProps> = ({
           />
         )}
       </Box>
-      
+
       {(showName || showEmail || showRole) && (
         <Box sx={{ ml: 1 }}>
           {showName && (
@@ -181,7 +181,7 @@ const UserAvatar: React.FC<UserAvatarProps> = ({
               {displayName}
             </Typography>
           )}
-          
+
           {showEmail && user.email && (
             <Typography
               variant="caption"
@@ -190,7 +190,7 @@ const UserAvatar: React.FC<UserAvatarProps> = ({
               {user.email}
             </Typography>
           )}
-          
+
           {showRole && user.role && (
             <Chip
               label={user.role}
@@ -203,7 +203,7 @@ const UserAvatar: React.FC<UserAvatarProps> = ({
       )}
     </Box>
   );
-  
+
   // If onClick is provided but not showing any text details, wrap in tooltip
   if ((!showName && !showEmail && !showRole) || (onClick && !showName)) {
     return (
@@ -212,7 +212,7 @@ const UserAvatar: React.FC<UserAvatarProps> = ({
       </Tooltip>
     );
   }
-  
+
   return contentBox;
 };
 

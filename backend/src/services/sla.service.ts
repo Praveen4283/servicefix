@@ -7,6 +7,7 @@ import notificationService from './notification.service';
 import { logger } from '../utils/logger';
 import { addBusinessHours, isWithinBusinessHours, createUTCDate } from '../utils/dateUtils';
 import { AppDataSource } from '../config/database';
+import { slaCache } from '../utils/slaCache';
 
 /**
  * SLA configuration based on ticket priority
@@ -81,14 +82,27 @@ interface SLAPausePeriod {
   endedAt?: Date;
 }
 
+/**
+ * Result of SLA status calculation
+ */
+export interface SLAStatusResult {
+  isFirstResponseBreached: boolean;
+  isResolutionBreached: boolean;
+  firstResponseRemainingMinutes: number;
+  resolutionRemainingMinutes: number;
+  firstResponsePercentage: number;
+  resolutionPercentage: number;
+  slaInfo: SLAPolicyTicket | null;
+}
+
 class SLAService {
   /**
    * Calculate SLA deadlines for a ticket
    * @param ticket Ticket to calculate SLA for
    * @returns SLA deadline timestamps
    */
-  async calculateSLADeadlines(ticket: Ticket): Promise<{ 
-    firstResponseDueAt: Date; 
+  async calculateSLADeadlines(ticket: Ticket): Promise<{
+    firstResponseDueAt: Date;
     resolutionDueAt: Date;
   }> {
     const ticketRepository = AppDataSource.getRepository(Ticket);
@@ -123,36 +137,35 @@ class SLAService {
     }
 
     const createdAt = createUTCDate(ticket.createdAt);
-    
+
     let firstResponseDueAt, resolutionDueAt;
-    
+
     // Calculate deadlines based on business hours setting
     firstResponseDueAt = addBusinessHours(createdAt, slaConfig.firstResponseHours, useBusinessHours);
     resolutionDueAt = addBusinessHours(createdAt, slaConfig.resolutionHours, useBusinessHours);
-    
+
     return {
       firstResponseDueAt,
       resolutionDueAt,
     };
   }
-  
+
   /**
-   * Check if a ticket is meeting its SLA
-   * @param ticket Ticket to check
-   * @returns SLA status information
+   * Calculate the current SLA status for a ticket
+   * Includes caching to reduce database load
    */
-  async checkSLAStatus(ticket: Ticket): Promise<{
-    isFirstResponseBreached: boolean;
-    isResolutionBreached: boolean;
-    firstResponseRemainingMinutes: number;
-    resolutionRemainingMinutes: number;
-    firstResponsePercentage: number;
-    resolutionPercentage: number;
-    slaInfo: SLAPolicyTicket | null;
-  }> {
+  async calculateSLAStatus(ticket: Ticket): Promise<SLAStatusResult> {
+    // Check cache first
+    const cacheKey = `ticket:${ticket.id}:sla_status`;
+    const cached = slaCache.get<SLAStatusResult>(cacheKey);
+    if (cached) {
+      logger.debug(`[SLA] Cache hit for ticket ${ticket.id}`);
+      return cached;
+    }
+
     const now = createUTCDate();
     const slaPolicyTicketRepository = AppDataSource.getRepository(SLAPolicyTicket);
-    
+
     // Get SLA information for the ticket
     const slaInfo = await slaPolicyTicketRepository.findOne({
       where: { ticketId: ticket.id } as any,
@@ -160,7 +173,7 @@ class SLAService {
     });
 
     let firstResponseDueAt, resolutionDueAt;
-    
+
     if (slaInfo) {
       firstResponseDueAt = slaInfo.firstResponseDueAt;
       resolutionDueAt = slaInfo.resolutionDueAt;
@@ -170,20 +183,20 @@ class SLAService {
       firstResponseDueAt = deadlines.firstResponseDueAt;
       resolutionDueAt = deadlines.resolutionDueAt;
     }
-    
+
     // Check if the SLA is currently paused
     let isPaused = false;
     if (slaInfo?.metadata) {
       try {
         let metadata;
-        
+
         // Check if metadata is already an object or needs to be parsed from string
         if (typeof slaInfo.metadata === 'string') {
           metadata = JSON.parse(slaInfo.metadata);
         } else {
           metadata = slaInfo.metadata;
         }
-        
+
         if (Array.isArray(metadata.pausePeriods) && metadata.pausePeriods.length > 0) {
           const lastPausePeriod = metadata.pausePeriods[metadata.pausePeriods.length - 1];
           if (lastPausePeriod && !lastPausePeriod.endedAt) {
@@ -194,7 +207,7 @@ class SLAService {
         logger.error('Error parsing SLA metadata:', err);
       }
     }
-    
+
     // If SLA is paused, return special values
     if (isPaused) {
       return {
@@ -209,40 +222,40 @@ class SLAService {
         slaInfo
       };
     }
-    
+
     // Calculate remaining time in minutes
     const firstResponseRemainingMinutes = Math.floor((firstResponseDueAt.getTime() - now.getTime()) / 60000);
     const resolutionRemainingMinutes = Math.floor((resolutionDueAt.getTime() - now.getTime()) / 60000);
-    
+
     // Calculate percentage of SLA time used
     const createdAt = createUTCDate(ticket.createdAt);
     const totalFirstResponseMinutes = Math.floor((firstResponseDueAt.getTime() - createdAt.getTime()) / 60000);
     const totalResolutionMinutes = Math.floor((resolutionDueAt.getTime() - createdAt.getTime()) / 60000);
-    
+
     // For elapsed time, consider pause periods if they exist
     let elapsedMinutesSinceCreation = Math.floor((now.getTime() - createdAt.getTime()) / 60000);
-    
+
     // Subtract any pause periods from the elapsed time
     if (slaInfo?.metadata) {
       try {
         let metadata;
-        
+
         // Check if metadata is already an object or needs to be parsed from string
         if (typeof slaInfo.metadata === 'string') {
           metadata = JSON.parse(slaInfo.metadata);
         } else {
           metadata = slaInfo.metadata;
         }
-        
+
         if (Array.isArray(metadata.pausePeriods)) {
           let totalPausedMinutes = 0;
-          
+
           for (const period of metadata.pausePeriods) {
             if (period.startedAt) {
               const startDate = createUTCDate(period.startedAt);
               // For periods with an end time, use it; otherwise use current time (for ongoing pauses)
               const endDate = period.endedAt ? createUTCDate(period.endedAt) : now;
-              
+
               // Only count if the pause started after ticket creation
               if (startDate > createdAt) {
                 const pausedMs = endDate.getTime() - startDate.getTime();
@@ -251,7 +264,7 @@ class SLAService {
               }
             }
           }
-          
+
           // Subtract pause time from elapsed time
           elapsedMinutesSinceCreation = Math.max(0, elapsedMinutesSinceCreation - totalPausedMinutes);
         }
@@ -259,19 +272,19 @@ class SLAService {
         logger.error('Error calculating pause durations:', err);
       }
     }
-    
+
     // Calculate SLA percentages based on adjusted elapsed time
     const firstResponsePercentage = Math.min(
-      100, 
+      100,
       Math.floor((elapsedMinutesSinceCreation / totalFirstResponseMinutes) * 100)
     );
-    
+
     const resolutionPercentage = Math.min(
-      100, 
+      100,
       Math.floor((elapsedMinutesSinceCreation / totalResolutionMinutes) * 100)
     );
-    
-    return {
+
+    const result = {
       isFirstResponseBreached: firstResponseRemainingMinutes <= 0,
       isResolutionBreached: resolutionRemainingMinutes <= 0,
       firstResponseRemainingMinutes,
@@ -280,7 +293,15 @@ class SLAService {
       resolutionPercentage,
       slaInfo,
     };
+
+    // Cache the result for 5 minutes
+    slaCache.set(cacheKey, result);
+    logger.debug(`[SLA] Cached status for ticket ${ticket.id}`);
+
+    return result;
   }
+
+
 
   /**
    * Assign an SLA policy to a ticket
@@ -310,8 +331,8 @@ class SLAService {
     }
 
     // Check if ticket already has an SLA policy
-    let slaPolicyTicket = await slaPolicyTicketRepository.findOne({ 
-      where: { ticketId } as any 
+    let slaPolicyTicket = await slaPolicyTicketRepository.findOne({
+      where: { ticketId } as any
     });
 
     if (slaPolicyTicket) {
@@ -351,7 +372,7 @@ class SLAService {
     logger.info(`Processing first response for ticket ${ticketId}`);
 
     // Get SLA information for the ticket
-    const slaInfo = await slaPolicyTicketRepository.findOne({ 
+    const slaInfo = await slaPolicyTicketRepository.findOne({
       where: { ticketId } as any,
       relations: ['slaPolicy']
     });
@@ -365,7 +386,7 @@ class SLAService {
     if (slaInfo.firstResponseMet === undefined) {
       // Check if response is within SLA
       const isWithinSLA = now <= slaInfo.firstResponseDueAt;
-      
+
       // Update SLA policy ticket
       slaInfo.firstResponseMet = isWithinSLA;
       await slaPolicyTicketRepository.save(slaInfo);
@@ -396,8 +417,8 @@ class SLAService {
     const now = createUTCDate();
 
     // Get SLA information for the ticket
-    const slaInfo = await slaPolicyTicketRepository.findOne({ 
-      where: { ticketId } as any 
+    const slaInfo = await slaPolicyTicketRepository.findOne({
+      where: { ticketId } as any
     });
 
     if (!slaInfo) {
@@ -408,7 +429,7 @@ class SLAService {
     if (slaInfo.resolutionMet === undefined) {
       // Check if resolution is within SLA
       const isWithinSLA = now <= slaInfo.resolutionDueAt;
-      
+
       // Update SLA status
       slaInfo.resolutionMet = isWithinSLA;
       await slaPolicyTicketRepository.save(slaInfo);
@@ -434,24 +455,24 @@ class SLAService {
   async updateTicketSLABreachStatus(ticketId: number): Promise<Ticket | null> {
     const ticketRepository = AppDataSource.getRepository(Ticket);
     const slaPolicyTicketRepository = AppDataSource.getRepository(SLAPolicyTicket);
-    
+
     // Get the ticket first
     const ticket = await ticketRepository.findOne({ where: { id: ticketId } as any });
     if (!ticket) {
       return null;
     }
-    
+
     // Get current SLA status
-    const slaStatus = await this.checkSLAStatus(ticket);
-    
+    const slaStatus = await this.calculateSLAStatus(ticket);
+
     if (!slaStatus) {
       return null;
     }
-    
+
     // Update ticket breach status
     ticket.firstResponseSlaBreached = slaStatus.isFirstResponseBreached;
     ticket.resolutionSlaBreached = slaStatus.isResolutionBreached;
-    
+
     // Set SLA status field
     if (ticket.slaStatus !== 'paused') {
       if (slaStatus.isResolutionBreached) {
@@ -464,7 +485,7 @@ class SLAService {
         ticket.slaStatus = 'active';
       }
     }
-    
+
     await ticketRepository.save(ticket);
     return ticket;
   }
@@ -476,7 +497,7 @@ class SLAService {
   async processEscalations(): Promise<number> {
     const ticketRepository = AppDataSource.getRepository(Ticket);
     const slaPolicyTicketRepository = AppDataSource.getRepository(SLAPolicyTicket);
-    
+
     // Get all active tickets with SLA policies
     const slaTickets = await slaPolicyTicketRepository.find({
       relations: ['ticket', 'ticket.assignee', 'slaPolicy'],
@@ -484,17 +505,17 @@ class SLAService {
         resolutionMet: undefined, // Only unresolved tickets
       } as any
     });
-    
+
     let escalatedCount = 0;
     const now = createUTCDate();
-    
+
     for (const slaTicket of slaTickets) {
       // Calculate SLA percentage
       const createdAt = createUTCDate(slaTicket.ticket.createdAt);
       const totalResolutionMinutes = Math.floor((slaTicket.resolutionDueAt.getTime() - createdAt.getTime()) / 60000);
       const elapsedMinutes = Math.floor((now.getTime() - createdAt.getTime()) / 60000);
       const slaPercentage = Math.floor((elapsedMinutes / totalResolutionMinutes) * 100);
-      
+
       // Find applicable escalation level
       for (const level of ESCALATION_LEVELS) {
         if (slaPercentage >= level.percentageOfSLA) {
@@ -505,17 +526,17 @@ class SLAService {
         }
       }
     }
-    
+
     return escalatedCount;
   }
-  
+
   /**
    * Apply escalation actions to a ticket
    */
   private async applyEscalationActions(ticket: Ticket, escalationLevel: EscalationLevel): Promise<void> {
     const ticketRepository = AppDataSource.getRepository(Ticket);
     const priorityRepository = AppDataSource.getRepository(TicketPriority);
-    
+
     for (const action of escalationLevel.actions) {
       switch (action) {
         case 'notify_agent':
@@ -524,38 +545,39 @@ class SLAService {
             logger.info(`SLA escalation level ${escalationLevel.level} for ticket ${ticket.id}: Agent notification to ${ticket.assignee.email}`);
           }
           break;
-          
+
         case 'notify_manager':
           // This would require fetching the manager's email
           // For now, we'll just log it
           logger.info(`SLA escalation level ${escalationLevel.level} for ticket ${ticket.id}: Manager notification`);
           break;
-          
+
         case 'reassign':
           // In a real implementation, this would reassign to another agent
           // For now, we'll just log it
           logger.info(`SLA escalation level ${escalationLevel.level} for ticket ${ticket.id}: Reassignment needed`);
           break;
-          
+
         case 'increase_priority':
           if (ticket.priority) {
             // Use a simple order without 'level' property
             const priorities = await priorityRepository.find({
               where: { organizationId: ticket.organizationId }
             });
-            
+
+
             // Sort by level if it exists, otherwise just use the array order
             priorities.sort((a, b) => {
-              // @ts-ignore - level might exist as a property even if not defined in type
-              if (a.level !== undefined && b.level !== undefined) {
-                // @ts-ignore
-                return b.level - a.level; // Sort DESC
+              const aLevel = (a as any).level;
+              const bLevel = (b as any).level;
+              if (typeof aLevel === 'number' && typeof bLevel === 'number') {
+                return bLevel - aLevel; // Sort DESC
               }
               return 0;
             });
-            
+
             const currentPriorityIndex = priorities.findIndex(p => p.id === ticket.priorityId);
-            
+
             if (currentPriorityIndex > 0) {
               // Increase to next higher priority
               const higherPriority = priorities[currentPriorityIndex - 1];
@@ -608,19 +630,19 @@ class SLAService {
    */
   async createSLAPolicy(data: Partial<SLAPolicy>): Promise<SLAPolicy> {
     const slaPolicyRepository = AppDataSource.getRepository(SLAPolicy);
-    
+
     // Check if policy already exists for this priority
     const existingPolicy = await slaPolicyRepository.findOne({
-      where: { 
-        organizationId: data.organizationId, 
-        ticketPriorityId: data.ticketPriorityId 
+      where: {
+        organizationId: data.organizationId,
+        ticketPriorityId: data.ticketPriorityId
       }
     });
-    
+
     if (existingPolicy) {
       throw new Error('An SLA policy already exists for this priority');
     }
-    
+
     const slaPolicy = slaPolicyRepository.create(data);
     return slaPolicyRepository.save(slaPolicy);
   }
@@ -631,40 +653,40 @@ class SLAService {
   async updateSLAPolicy(id: number, data: Partial<SLAPolicy>): Promise<SLAPolicy> {
     const slaPolicyRepository = AppDataSource.getRepository(SLAPolicy);
     const slaPolicy = await this.getSLAPolicyById(id);
-    
+
     if (!slaPolicy) {
       throw new Error(`SLA policy with ID ${id} not found`);
     }
-    
+
     // Check if priorityId is changing and if there's already a policy for that priority
     if (data.ticketPriorityId && data.ticketPriorityId !== slaPolicy.ticketPriorityId) {
       const existingPolicy = await slaPolicyRepository.findOne({
-        where: { 
-          organizationId: slaPolicy.organizationId, 
+        where: {
+          organizationId: slaPolicy.organizationId,
           ticketPriorityId: data.ticketPriorityId,
           id: Not(id) // Exclude the current policy
         } as any
       });
-      
+
       if (existingPolicy) {
         throw new Error('An SLA policy already exists for this priority');
       }
     }
-    
+
     // Merge the new data with the existing policy
     Object.assign(slaPolicy, data);
-    
+
     // Save the updated policy
     const updatedPolicy = await slaPolicyRepository.save(slaPolicy);
     logger.info(`SLA policy ${id} updated: ${JSON.stringify(updatedPolicy)}`);
-    
+
     // Explicitly fetch the policy again to ensure we have the latest data
     const refreshedPolicy = await this.getSLAPolicyById(id);
     if (!refreshedPolicy) {
       logger.error(`Failed to retrieve updated SLA policy ${id} after save`);
       return updatedPolicy; // Return what we have if refresh fails
     }
-    
+
     return refreshedPolicy;
   }
 
@@ -674,11 +696,11 @@ class SLAService {
   async deleteSLAPolicy(id: number): Promise<boolean> {
     const slaPolicyRepository = AppDataSource.getRepository(SLAPolicy);
     const slaPolicy = await this.getSLAPolicyById(id);
-    
+
     if (!slaPolicy) {
       return false;
     }
-    
+
     await slaPolicyRepository.remove(slaPolicy);
     return true;
   }
@@ -691,74 +713,74 @@ class SLAService {
       logger.warn(`Cannot assign SLA policy to ticket ${ticket.id}: No priority assigned`);
       return null;
     }
-    
+
     try {
       const slaPolicyRepository = AppDataSource.getRepository(SLAPolicy);
       const slaPolicyTicketRepository = AppDataSource.getRepository(SLAPolicyTicket);
       const ticketRepository = AppDataSource.getRepository(Ticket);
-      
+
       // Check if SLA is already assigned to this ticket first
       const existingSLA = await slaPolicyTicketRepository.findOne({
         where: { ticketId: ticket.id } as any,
         relations: ['slaPolicy']
       });
-      
+
       // Find SLA policy for this priority
       const slaPolicy = await slaPolicyRepository.findOne({
-        where: { 
+        where: {
           organizationId: ticket.organizationId,
           ticketPriorityId: ticket.priorityId
         }
       }) as SLAPolicy | null;
-      
+
       // Get ticket with priority information only if needed
       let fullTicket: Ticket | null = null;
       let matchingPolicy: SLAPolicy | null = slaPolicy;
-      
+
       // If no direct policy match, try to find policy based on priority name
       if (!matchingPolicy) {
         fullTicket = await ticketRepository.findOne({
           where: { id: ticket.id },
           relations: ['priority']
         });
-        
+
         if (fullTicket?.priority?.name) {
           const priorityName = fullTicket.priority.name.toLowerCase();
           logger.debug(`No direct SLA policy match, trying to find default SLA for priority name: ${priorityName}`);
-          
+
           // Look for any policy matching the priority name pattern
           const policies = await slaPolicyRepository.find({
             where: { organizationId: ticket.organizationId }
           });
-          
+
           // Try to find a policy with a name containing the priority name
-          matchingPolicy = policies.find(p => 
-            p.name.toLowerCase().includes(priorityName) || 
+          matchingPolicy = policies.find(p =>
+            p.name.toLowerCase().includes(priorityName) ||
             (p.description && p.description.toLowerCase().includes(priorityName))
           ) || null; // Convert undefined to null
-          
+
           if (matchingPolicy) {
             logger.debug(`Found matching SLA policy ${matchingPolicy.id} for priority name ${priorityName}`);
           }
         }
       }
-      
+
       // If same policy is already assigned, don't reassign
       if (existingSLA && matchingPolicy && existingSLA.slaPolicyId === matchingPolicy.id) {
         logger.info(`Ticket ${ticket.id} already has SLA policy ${existingSLA.slaPolicyId} assigned`);
         return existingSLA;
       }
-      
+
       if (!matchingPolicy) {
         logger.warn(`No SLA policy found for ticket ${ticket.id} with priority ID ${ticket.priorityId}`);
         return null;
       }
-      
+
       // Only log successful assignments when we're actually going to make a change
       if (!existingSLA || (existingSLA && existingSLA.slaPolicyId !== matchingPolicy.id)) {
         logger.info(`Assigning SLA policy ${matchingPolicy.id} to ticket ${ticket.id} for priority ID ${ticket.priorityId}`);
       }
-      
+
       // Create new SLA assignment or update existing one
       return this.assignSLAToTicket(ticket.id, matchingPolicy.id);
     } catch (error) {
@@ -774,19 +796,19 @@ class SLAService {
     // In a real implementation, you would:
     // 1. Calculate business hours if policy.businessHoursOnly is true
     // 2. Add the appropriate hours to the startTime
-    
+
     // For now, we'll use a simple implementation
     const startTimeUTC = createUTCDate(startTime);
-    
+
     const firstResponseDue = createUTCDate(startTimeUTC);
     firstResponseDue.setHours(firstResponseDue.getHours() + (policy.firstResponseHours || 0));
-    
+
     const nextResponseDue = createUTCDate(startTimeUTC);
     nextResponseDue.setHours(nextResponseDue.getHours() + (policy.nextResponseHours || 0));
-    
+
     const resolutionDue = createUTCDate(startTimeUTC);
     resolutionDue.setHours(resolutionDue.getHours() + (policy.resolutionHours || 0));
-    
+
     return { firstResponseDue, nextResponseDue, resolutionDue };
   }
 
@@ -817,7 +839,7 @@ class SLAService {
 
     // Get SLA data for those tickets
     const slaData = await slaPolicyTicketRepository.find({
-      where: { 
+      where: {
         ticketId: In(ticketIds) as any
       }
     });
@@ -850,38 +872,38 @@ class SLAService {
     try {
       const slaPolicyTicketRepository = AppDataSource.getRepository(SLAPolicyTicket);
       const ticketRepository = AppDataSource.getRepository(Ticket);
-      
+
       // Get SLA information for the ticket
-      const slaInfo = await slaPolicyTicketRepository.findOne({ 
+      const slaInfo = await slaPolicyTicketRepository.findOne({
         where: { ticketId } as any,
         relations: ['slaPolicy']
       });
-      
+
       // Get ticket
       const ticket = await ticketRepository.findOne({
         where: { id: ticketId }
       });
-      
+
       if (!slaInfo || !ticket || !slaInfo.slaPolicy) {
         logger.warn(`Cannot reset next response SLA for ticket ${ticketId}: SLA info not found`);
         return false;
       }
-      
+
       // If there's a next_response_hours setting, calculate new due date
       if (slaInfo.slaPolicy.nextResponseHours) {
         const now = createUTCDate();
         let nextResponseDueAt: Date;
-        
+
         if (slaInfo.slaPolicy.businessHoursOnly) {
           // Use direct interval calculation instead of manipulating hours
           // This preserves the exact time without rounding to specific hours
           const exactHours = slaInfo.slaPolicy.nextResponseHours;
           const exactMinutes = exactHours * 60;
-          
+
           // Convert hours to milliseconds for precise calculation
           const millisToAdd = exactMinutes * 60 * 1000;
           nextResponseDueAt = new Date(now.getTime() + millisToAdd);
-          
+
           logger.info(`Calculated next response due time based on exact hours: ${nextResponseDueAt}`);
         } else {
           // For non-business hours, continue to use direct hour addition
@@ -889,16 +911,16 @@ class SLAService {
           nextResponseDueAt.setTime(now.getTime() + (slaInfo.slaPolicy.nextResponseHours * 60 * 60 * 1000));
           logger.info(`Calculated next response due time without business hours: ${nextResponseDueAt}`);
         }
-        
+
         // Update SLA policy ticket with new next response due date
         slaInfo.nextResponseDueAt = nextResponseDueAt;
         slaInfo.nextResponseMet = undefined; // Reset the met status
         await slaPolicyTicketRepository.save(slaInfo);
-        
+
         logger.info(`Reset next response SLA for ticket ${ticketId} to ${nextResponseDueAt}`);
         return true;
       }
-      
+
       return false;
     } catch (error) {
       logger.error(`Error resetting next response SLA for ticket ${ticketId}:`, error);
@@ -913,28 +935,30 @@ class SLAService {
    */
   async pauseSLA(ticketId: number): Promise<SLAPolicyTicket | null> {
     const slaPolicyTicketRepository = AppDataSource.getRepository(SLAPolicyTicket);
-    
+
     // Find SLA policy ticket
     const slaInfo = await slaPolicyTicketRepository.findOne({
       where: { ticketId } as any,
       relations: ['slaPolicy']
     });
-    
+
     if (!slaInfo) {
       return null;
     }
-    
+
     // Check if SLA is already paused to prevent duplicate pause entries
     let isPaused = false;
     let pausePeriods: SLAPausePeriod[] = [];
-    
+
     // Parse existing metadata
     if (slaInfo.metadata) {
       try {
-        const metadata = JSON.parse(slaInfo.metadata);
+        const metadata = typeof slaInfo.metadata === 'string'
+          ? JSON.parse(slaInfo.metadata)
+          : slaInfo.metadata;
         if (Array.isArray(metadata.pausePeriods)) {
           pausePeriods = metadata.pausePeriods;
-          
+
           // Check if already paused (last period has no end date)
           const lastPausePeriod = pausePeriods[pausePeriods.length - 1];
           if (lastPausePeriod && !lastPausePeriod.endedAt) {
@@ -950,21 +974,21 @@ class SLAService {
         pausePeriods = [];
       }
     }
-    
+
     // If not already paused, add new pause period
     if (!isPaused) {
       const now = createUTCDate();
       pausePeriods.push({ startedAt: now });
-      
+
       // Update the SLA policy ticket with pause info
-      slaInfo.metadata = JSON.stringify({ pausePeriods });
+      slaInfo.metadata = { pausePeriods } as any;
       logger.info(`SLA for ticket ${ticketId} has been paused at ${now.toISOString()}`);
     }
-    
+
     // Save the updated SLA information
     return await slaPolicyTicketRepository.save(slaInfo);
   }
-  
+
   /**
    * Resume SLA for a ticket (when moved back to in-progress)
    * @param ticketId Ticket ID to resume SLA for
@@ -972,36 +996,38 @@ class SLAService {
    */
   async resumeSLA(ticketId: number): Promise<SLAPolicyTicket | null> {
     const slaPolicyTicketRepository = AppDataSource.getRepository(SLAPolicyTicket);
-    
+
     // Find SLA policy ticket
     const slaInfo = await slaPolicyTicketRepository.findOne({
       where: { ticketId } as any,
       relations: ['slaPolicy']
     });
-    
+
     if (!slaInfo) {
       return null;
     }
-    
+
     // Check if SLA is currently paused
     let isPaused = false;
     let pausePeriods: SLAPausePeriod[] = [];
     let latestPausePeriodIndex = -1;
     let totalPausedMinutes = 0;
     const now = createUTCDate();
-    
+
     // Parse existing metadata
     if (slaInfo.metadata) {
       try {
-        const metadata = JSON.parse(slaInfo.metadata);
+        const metadata = typeof slaInfo.metadata === 'string'
+          ? JSON.parse(slaInfo.metadata)
+          : slaInfo.metadata;
         if (Array.isArray(metadata.pausePeriods)) {
           pausePeriods = metadata.pausePeriods;
-          
+
           // Find the latest pause period that hasn't ended yet
-          latestPausePeriodIndex = pausePeriods.findIndex((period, index) => 
+          latestPausePeriodIndex = pausePeriods.findIndex((period, index) =>
             !period.endedAt && index === pausePeriods.length - 1
           );
-          
+
           if (latestPausePeriodIndex >= 0) {
             isPaused = true;
           }
@@ -1012,38 +1038,38 @@ class SLAService {
         pausePeriods = [];
       }
     }
-    
+
     // If not paused, nothing to resume
     if (!isPaused) {
       logger.info(`SLA for ticket ${ticketId} is not currently paused. No action needed.`);
       return slaInfo;
     }
-    
+
     // Update the latest pause period with end time
     pausePeriods[latestPausePeriodIndex].endedAt = now;
-    
+
     // Calculate total pause duration across all periods
     for (const period of pausePeriods) {
       if (period.startedAt && period.endedAt) {
         // Convert date strings to Date objects if needed
         const startDate = period.startedAt instanceof Date ? period.startedAt : createUTCDate(period.startedAt);
         const endDate = period.endedAt instanceof Date ? period.endedAt : createUTCDate();
-        
+
         // Calculate minutes this period was paused
         const pausedMs = endDate.getTime() - startDate.getTime();
         const pausedMinutes = Math.ceil(pausedMs / (1000 * 60));
-        
+
         // Only count positive durations
         if (pausedMinutes > 0) {
           totalPausedMinutes += pausedMinutes;
         }
       }
     }
-    
+
     // Update SLA deadlines based on paused time
     if (totalPausedMinutes > 0 && slaInfo.slaPolicy) {
       const useBusinessHours = slaInfo.slaPolicy.businessHoursOnly;
-      
+
       // Extend deadlines by the pause duration
       if (slaInfo.firstResponseDueAt && !slaInfo.firstResponseMet) {
         // Convert paused minutes to hours (rounding up)
@@ -1055,7 +1081,7 @@ class SLAService {
         );
         logger.info(`Extended first response deadline for ticket ${ticketId} by ${pausedHours} hours due to pause.`);
       }
-      
+
       if (slaInfo.nextResponseDueAt && !slaInfo.nextResponseMet) {
         const pausedHours = Math.ceil(totalPausedMinutes / 60);
         slaInfo.nextResponseDueAt = addBusinessHours(
@@ -1065,7 +1091,7 @@ class SLAService {
         );
         logger.info(`Extended next response deadline for ticket ${ticketId} by ${pausedHours} hours due to pause.`);
       }
-      
+
       if (slaInfo.resolutionDueAt && !slaInfo.resolutionMet) {
         const pausedHours = Math.ceil(totalPausedMinutes / 60);
         slaInfo.resolutionDueAt = addBusinessHours(
@@ -1076,11 +1102,11 @@ class SLAService {
         logger.info(`Extended resolution deadline for ticket ${ticketId} by ${pausedHours} hours due to pause.`);
       }
     }
-    
+
     // Update the metadata
-    slaInfo.metadata = JSON.stringify({ pausePeriods });
+    slaInfo.metadata = { pausePeriods } as any;
     logger.info(`SLA for ticket ${ticketId} has been resumed at ${now.toISOString()}.`);
-    
+
     // Save the updated SLA information
     return await slaPolicyTicketRepository.save(slaInfo);
   }

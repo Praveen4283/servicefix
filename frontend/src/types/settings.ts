@@ -43,7 +43,7 @@ export interface IntegrationSettings {
   slackChannel: string;
   slackNotifyOnNewTicket: boolean;
   slackNotifyOnTicketUpdates: boolean;
-  
+
   // Microsoft Teams Integration
   teamsEnabled: boolean;
   teamsWebhookUrl: string;
@@ -57,7 +57,7 @@ export interface IntegrationSettings {
   jiraApiToken: string;
   jiraProject: string;
   jiraCreateIssuesForTickets: boolean;
-  
+
   // GitHub Integration
   githubEnabled: boolean;
   githubAccessToken: string;
@@ -74,26 +74,28 @@ export interface AdvancedSettings {
   apiRateLimitPerHour: number;
   apiRateLimitWindowMinutes: number;
   enableApiDocumentation: boolean;
-  
+
   // Security settings
   maxLoginAttempts: number;
   passwordExpiryDays: number;
   sessionTimeoutMinutes: number;
   enforceMfa: boolean;
-  
+
   // Performance settings
   cacheDurationMinutes: number;
   maxConcurrentFileUploads: number;
-  
+
   // Custom fields
   enableCustomFields: boolean;
   maxCustomFieldsPerTicket: number;
-  
+
   // AI features
   enableAiSuggestions: boolean;
   enableAutoTagging: boolean;
   enableSentimentAnalysis: boolean;
   aiModelName: string;
+  aiProvider?: 'gemini' | 'openai' | 'custom';
+  aiApiKey?: string;
 }
 
 /**

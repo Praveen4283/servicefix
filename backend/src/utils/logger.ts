@@ -60,7 +60,7 @@ const fileTransports = [
     level: 'debug',
     format: formatOptions,
   }),
-  
+
   // Separate file for error logs
   new DailyRotateFile({
     filename: path.join(logDir, 'error-%DATE%.log'),
@@ -71,7 +71,7 @@ const fileTransports = [
     level: 'error',
     format: formatOptions,
   }),
-  
+
   // Separate file for HTTP logs
   new DailyRotateFile({
     filename: path.join(logDir, 'http-%DATE%.log'),
@@ -131,7 +131,7 @@ class SupabaseTransport extends Transport {
     try {
       // Format the log entry as a string
       const logEntry = `${info.timestamp} ${info.level}: ${info.message}${info.stack ? '\n' + info.stack : ''}${info.metadata ? '\n' + JSON.stringify(info.metadata) : ''}`;
-      
+
       // Determine log type based on level
       let logType = 'general';
       if (info.level === 'error') {
@@ -139,15 +139,17 @@ class SupabaseTransport extends Transport {
       } else if (info.level === 'http') {
         logType = 'http';
       }
-      
-      // Upload to Supabase - don't await to avoid slowing down the application
+
+      // NOTE: Using console.error here is intentional to avoid infinite recursion.
+      // If we used logger.error here, it would trigger this transport again.
       uploadLogToStorage(logEntry, logType, 'backend')
         .catch(error => console.error('Failed to upload log to Supabase:', error));
-      
+
     } catch (error) {
+      // NOTE: Using console.error here is intentional to avoid infinite recursion.
       console.error('Error in Supabase transport:', error);
     }
-    
+
     callback();
   }
 }

@@ -39,22 +39,8 @@ import { flushAllLogs, stopLogBuffering } from './utils/logStorage';
 // Import services
 import slaService from './services/sla.service';
 
-// Import routes
+// Import main routes
 import routes from './routes';
-import authRoutes from './routes/auth.routes';
-import userRoutes from './routes/user.routes';
-import ticketRoutes from './routes/ticket.routes';
-import knowledgeBaseRoutes from './routes/knowledgeBase.routes';
-import reportRoutes from './routes/report.routes';
-import aiRoutes from './routes/ai.routes';
-import chatbotRoutes from './routes/chatbot.routes';
-import notificationRoutes from './routes/notification.routes';
-import logRoutes from './routes/log.routes';
-import settingsRoutes from './routes/settings.routes';
-import slaRoutes from './routes/sla.routes';
-import ticketPriorityRoutes from './routes/ticketPriority.routes';
-import businessHoursRoutes from './routes/businessHours.routes';
-import { registerVersionedRoutes } from './utils/routeVersioning';
 
 // Check required environment variables
 const requiredEnvVars = [
@@ -82,7 +68,7 @@ export const JWT_REFRESH_EXPIRES_IN = process.env.JWT_REFRESH_EXPIRES_IN || '7d'
 // Create Express app
 const app = express();
 app.set('trust proxy', 1); // Trust first proxy - needed for Render deployment
-const PORT = process.env.PORT || 4000;
+const PORT = process.env.PORT || 5000;
 const server = http.createServer(app);
 
 // Function to get dynamic rate limit settings from database
@@ -92,48 +78,47 @@ const getRateLimitSettings = async (): Promise<{ enabled: boolean, limit: number
     let enabled = true;
     let limitPerHour = 1000;
     let windowMinutes = 15;
-    
+
     // Try to get settings from database
     const { pool } = require('./config/database');
     const result = await pool.query(
-      'SELECT settings_data FROM settings WHERE category = $1 LIMIT 1',
+      'SELECT api_enabled, api_rate_limit_per_hour, api_rate_limit_window_minutes FROM settings WHERE category = $1 LIMIT 1',
       ['advanced']
     );
-    
+
     if (result.rows.length > 0) {
-      const settings = result.rows[0].settings_data;
-      if (settings && typeof settings === 'object') {
-        enabled = settings.apiEnabled !== undefined ? settings.apiEnabled : true;
-        
-        // Get rate limit from settings
-        if (settings.apiRateLimitPerHour && settings.apiRateLimitPerHour > 0) {
-          limitPerHour = settings.apiRateLimitPerHour;
-        }
-        
-        // Get window time from settings if available, otherwise use default
-        if (settings.apiRateLimitWindowMinutes && settings.apiRateLimitWindowMinutes > 0) {
-          windowMinutes = settings.apiRateLimitWindowMinutes;
-        }
+      const row = result.rows[0];
+
+      enabled = row.api_enabled !== undefined ? row.api_enabled : true;
+
+      // Get rate limit from settings
+      if (row.api_rate_limit_per_hour && row.api_rate_limit_per_hour > 0) {
+        limitPerHour = row.api_rate_limit_per_hour;
+      }
+
+      // Get window time from settings if available, otherwise use default
+      if (row.api_rate_limit_window_minutes && row.api_rate_limit_window_minutes > 0) {
+        windowMinutes = row.api_rate_limit_window_minutes;
       }
     }
-    
+
     // Calculate the limit for the specified window
     const windowHours = windowMinutes / 60;
     const limit = Math.ceil(limitPerHour * windowHours);
-    
+
     // Cache settings in memory variables for faster access
     process.env.API_ENABLED = enabled ? 'true' : 'false';
     process.env.DYNAMIC_RATE_LIMIT = limit.toString();
     process.env.RATE_LIMIT_WINDOW_MINUTES = windowMinutes.toString();
-    
+
     logger.info(`Rate limit settings loaded from database: enabled=${enabled}, limit=${limitPerHour}/hour (${limit}/${windowMinutes}min)`);
-    
+
     return { enabled, limit, windowMinutes };
   } catch (error) {
     logger.error('Error getting rate limit settings from database:', error);
     // Return default values if database is unavailable
-    return { 
-      enabled: true, 
+    return {
+      enabled: true,
       limit: 250, // Default to 250 requests per 15 minutes (1000/hour)
       windowMinutes: 15
     };
@@ -154,7 +139,7 @@ let apiLimiter = rateLimit({
 const updateRateLimiter = async () => {
   try {
     const settings = await getRateLimitSettings();
-    
+
     // Update the rate limiter with the dynamic settings
     apiLimiter = rateLimit({
       windowMs: settings.windowMinutes * 60 * 1000, // Convert minutes to ms
@@ -164,7 +149,7 @@ const updateRateLimiter = async () => {
       legacyHeaders: false,
       skipSuccessfulRequests: false
     });
-    
+
     logger.info(`Rate limiter updated: ${settings.limit} requests per ${settings.windowMinutes} minutes`);
     return true;
   } catch (error) {
@@ -182,7 +167,7 @@ const checkApiEnabled = (req: Request, res: Response, next: NextFunction) => {
   if (req.path.startsWith('/settings/') || req.path === '/health') {
     return next();
   }
-  
+
   const apiEnabled = process.env.API_ENABLED !== 'false';
   if (!apiEnabled) {
     return res.status(503).json({
@@ -218,15 +203,15 @@ app.use(helmet({
 app.use(cors({
   origin: (origin, callback) => {
     // Get allowed origins from environment variable
-    const allowedOrigins = process.env.CORS_ORIGIN ? 
-      process.env.CORS_ORIGIN.split(',') : 
+    const allowedOrigins = process.env.CORS_ORIGIN ?
+      process.env.CORS_ORIGIN.split(',') :
       [process.env.FRONTEND_URL || 'http://localhost:3000'];
-    
+
     // Always allow requests with no origin (like mobile apps, curl, etc.)
     if (!origin) {
       return callback(null, true);
     }
-    
+
     // Check if origin is in the allowed list
     if (allowedOrigins.indexOf(origin) !== -1 || allowedOrigins.includes('*')) {
       return callback(null, true);
@@ -258,29 +243,13 @@ app.use('/api/', (req, res, next) => {
 app.use('/api/', csrfSkipper);
 app.use(csrfErrorHandler);
 
-// Routes - using the versioning utility
-const apiRouter = express.Router();
-registerVersionedRoutes(apiRouter, 'auth', authRoutes);
-registerVersionedRoutes(apiRouter, 'users', userRoutes);
-registerVersionedRoutes(apiRouter, 'tickets', ticketRoutes);
-registerVersionedRoutes(apiRouter, 'knowledge', knowledgeBaseRoutes);
-registerVersionedRoutes(apiRouter, 'reports', reportRoutes);
-registerVersionedRoutes(apiRouter, 'ai', aiRoutes);
-registerVersionedRoutes(apiRouter, 'chat', chatbotRoutes);
-registerVersionedRoutes(apiRouter, 'notifications', notificationRoutes);
-registerVersionedRoutes(apiRouter, 'logs', logRoutes);
-registerVersionedRoutes(apiRouter, 'settings', settingsRoutes);
-registerVersionedRoutes(apiRouter, 'sla', slaRoutes);
-registerVersionedRoutes(apiRouter, 'ticket-priorities', ticketPriorityRoutes);
-registerVersionedRoutes(apiRouter, 'business-hours', businessHoursRoutes);
-
-// Apply the API router to both /api and /api/v1 paths
-app.use('/api', apiRouter);
+// Routes - using routes/index.ts as the single source of truth
+app.use('/api', routes);
 
 // Health check endpoint
 app.get('/health', (req: Request, res: Response) => {
-  res.status(200).json({ 
-    status: 'ok', 
+  res.status(200).json({
+    status: 'ok',
     timestamp: new Date().toISOString(),
     version: process.env.npm_package_version || require('../package.json').version,
     environment: process.env.NODE_ENV || 'development',
@@ -293,8 +262,8 @@ app.use(errorHandler);
 
 // 404 handler
 app.use((req: Request, res: Response) => {
-  res.status(404).json({ 
-    status: 'error', 
+  res.status(404).json({
+    status: 'error',
     message: 'Route not found',
     path: req.originalUrl
   });
@@ -312,35 +281,38 @@ const startServer = async () => {
   Environment: ${process.env.NODE_ENV || 'development'}
 ===================================================
     `);
-    
+
     // Initialize application with our architecture improvements
     const initSuccess = await initializeApp();
-    
+
     if (!initSuccess) {
       logger.error('Failed to initialize application. Exiting...');
       process.exit(1);
     }
-    
-    // Now that database is connected, update rate limiter with settings from database
+
+    // CRITICAL: Update rate limiter BEFORE starting server to prevent race conditions
+    logger.info('Configuring rate limiter with database settings...');
     await updateRateLimiter();
-    
+
     // Initialize Supabase storage bucket
     await initBucket();
-    
+
     // Run database diagnostics to help troubleshoot connection issues
     await diagnoseDatabaseConnection();
-    
+
     // Initialize Socket.IO service
     initializeSocketService(server);
-    
-    // Start the server
+
+    // Start the server ONLY after all initialization is complete
+    // This prevents race conditions where requests arrive before rate limits are configured
     server.listen(PORT, () => {
       logger.info(`Server running on port ${PORT}`);
+      logger.info('All systems initialized successfully');
     });
-    
-    // Start scheduled jobs
+
+    // Start scheduled jobs after server is listening
     startScheduledJobs();
-    
+
   } catch (error: any) {
     logger.error(`Error starting server: ${error.message}`);
     process.exit(1);

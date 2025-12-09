@@ -4,6 +4,7 @@ import { logger } from '../utils/logger';
 import { pool, query } from '../config/database';
 import { v4 as uuidv4 } from 'uuid';
 import crypto from 'crypto';
+import type { JWTPayload, RefreshTokenPayload, UserData, AuthTokens } from '../types/common';
 
 // Ensure environment variables are set
 if (!process.env.JWT_SECRET) {
@@ -36,13 +37,13 @@ class AuthService {
    * @returns JWT token
    */
   generateToken(userId: string | number, role: string): string {
-    const payload = { 
-      userId, 
+    const payload = {
+      userId,
       role
     };
-    
+
     const options = { expiresIn: JWT_EXPIRES_IN } as jwt.SignOptions;
-    
+
     return jwt.sign(
       payload,
       JWT_SECRET,
@@ -57,13 +58,13 @@ class AuthService {
    */
   generateRefreshToken(userId: string | number): string {
     const payload: { userId: string | number; iat?: number; jti?: string } = { userId };
-    
+
     const options = { expiresIn: JWT_REFRESH_EXPIRES_IN } as jwt.SignOptions;
-    
+
     // Add issued time for token rotation policies
     payload.iat = Math.floor(Date.now() / 1000);
     payload.jti = crypto.randomBytes(16).toString('hex'); // Unique token ID
-    
+
     return jwt.sign(
       payload,
       JWT_REFRESH_SECRET,
@@ -80,7 +81,7 @@ class AuthService {
     try {
       // Log the IP for security purposes but don't store it in the database
       logger.info(`User ${userId} logged in from IP: ${ipAddress}`);
-      
+
       await query(
         `UPDATE users
          SET last_login_at = NOW()
@@ -98,22 +99,26 @@ class AuthService {
    * @param userId User ID
    * @param token Refresh token
    * @param expiresAt Expiration date
+   * @param ipAddress IP address from which token was created
+   * @param userAgent Optional user agent string for device identification
    * @param fingerprint Optional client fingerprint (stored in memory only)
    */
   async saveRefreshToken(
-    userId: string | number, 
-    token: string, 
-    expiresAt: Date, 
+    userId: string | number,
+    token: string,
+    expiresAt: Date,
+    ipAddress: string,
+    userAgent?: string,
     fingerprint?: string
   ): Promise<void> {
     try {
-      // Store fingerprint in the JWT itself, not in database
+      // Store IP address and user agent for security auditing
       await query(
-        `INSERT INTO user_tokens (user_id, refresh_token, expires_at)
-         VALUES ($1, $2, $3)`,
-        [userId, token, expiresAt]
+        `INSERT INTO user_tokens (user_id, refresh_token, expires_at, ip_address, user_agent, last_used_at)
+         VALUES ($1, $2, $3, $4, $5, NOW())`,
+        [userId, token, expiresAt, ipAddress, userAgent || null]
       );
-      
+
       // Implement token rotation policy - keep only the 5 most recent tokens per user
       await query(
         `DELETE FROM user_tokens 
@@ -134,11 +139,12 @@ class AuthService {
   /**
    * Verify JWT token
    * @param token JWT token
-   * @returns Decoded token
+   * @returns Decoded token payload or throws error
    */
-  verifyToken(token: string): any {
+  verifyToken(token: string): JWTPayload {
     try {
-      return jwt.verify(token, JWT_SECRET);
+      const decoded = jwt.verify(token, JWT_SECRET) as JWTPayload;
+      return decoded;
     } catch (error) {
       if (error instanceof jwt.TokenExpiredError) {
         throw AppError.unauthorized('Token expired', 'TOKEN_EXPIRED');
@@ -152,11 +158,12 @@ class AuthService {
   /**
    * Verify refresh JWT token
    * @param token JWT token
-   * @returns Decoded token
+   * @returns Decoded refresh token payload or throws error
    */
-  verifyRefreshToken(token: string): any {
+  verifyRefreshToken(token: string): RefreshTokenPayload {
     try {
-      return jwt.verify(token, JWT_REFRESH_SECRET);
+      const decoded = jwt.verify(token, JWT_REFRESH_SECRET) as RefreshTokenPayload;
+      return decoded;
     } catch (error) {
       if (error instanceof jwt.TokenExpiredError) {
         throw AppError.unauthorized('Refresh token expired', 'REFRESH_TOKEN_EXPIRED');
@@ -173,7 +180,7 @@ class AuthService {
    * @param fingerprint Optional client fingerprint for enhanced security
    * @returns New access token, optional new refresh token, and user data
    */
-  async refreshAccessToken(refreshToken: string, fingerprint?: string): Promise<{ token: string, refreshToken?: string | null, user: any }> {
+  async refreshAccessToken(refreshToken: string, fingerprint?: string): Promise<AuthTokens & { user: UserData }> {
     // Verify refresh token
     const decoded = this.verifyRefreshToken(refreshToken);
     const userId = decoded.userId;
@@ -202,10 +209,10 @@ class AuthService {
     }
 
     const user = userResult.rows[0];
-    
+
     // Generate new access token
     const newToken = this.generateToken(user.id, user.role);
-    
+
     // Implement token rotation if token is nearing expiry
     // Refresh tokens automatically if they're more than 70% through their lifetime
     let newRefreshToken = null;
@@ -213,24 +220,25 @@ class AuthService {
       const now = Math.floor(Date.now() / 1000);
       const tokenAge = now - decoded.iat;
       const tokenMaxAge = parseInt(process.env.JWT_REFRESH_EXPIRES_IN?.replace(/\D/g, '') || '7');
-      const tokenMaxAgeSeconds = tokenMaxAge * 
-                          (process.env.JWT_REFRESH_EXPIRES_IN?.includes('d') ? 86400 : 
-                           process.env.JWT_REFRESH_EXPIRES_IN?.includes('h') ? 3600 : 
-                           process.env.JWT_REFRESH_EXPIRES_IN?.includes('m') ? 60 : 1);
-      
+      const tokenMaxAgeSeconds = tokenMaxAge *
+        (process.env.JWT_REFRESH_EXPIRES_IN?.includes('d') ? 86400 :
+          process.env.JWT_REFRESH_EXPIRES_IN?.includes('h') ? 3600 :
+            process.env.JWT_REFRESH_EXPIRES_IN?.includes('m') ? 60 : 1);
+
       // If token is more than 70% through its lifetime, rotate it
       if (tokenAge > tokenMaxAgeSeconds * 0.7) {
         logger.debug(`Rotating refresh token for user ${userId} (age: ${tokenAge}s)`);
         newRefreshToken = this.generateRefreshToken(user.id);
-        
+
         // Calculate expiry date
         const expiryDays = parseInt(process.env.JWT_REFRESH_EXPIRES_IN?.replace(/\D/g, '') || '7');
         const expiresAt = new Date();
         expiresAt.setDate(expiresAt.getDate() + expiryDays);
-        
+
         // Save new refresh token with fingerprint if provided
-        await this.saveRefreshToken(user.id, newRefreshToken, expiresAt, fingerprint);
-        
+        // Note: We use '0.0.0.0' as placeholder IP for token rotation since we don't have req context
+        await this.saveRefreshToken(user.id, newRefreshToken, expiresAt, '0.0.0.0', undefined, fingerprint);
+
         // Mark old token as revoked
         await query(
           `UPDATE user_tokens 
@@ -295,19 +303,19 @@ class AuthService {
   async generatePasswordResetToken(userId: string | number): Promise<string> {
     // Generate a secure random token
     const resetToken = crypto.randomBytes(32).toString('hex');
-    
+
     // Hash the token for storage (so it's not plaintext in the database)
     const hashedToken = crypto.createHash('sha256').update(resetToken).digest('hex');
-    
+
     // Set expiration time (1 hour from now)
     const expiresAt = new Date(Date.now() + 60 * 60 * 1000);
-    
+
     // Save token to database
     await query(
       'UPDATE users SET reset_token = $1, reset_token_expires_at = $2 WHERE id = $3',
       [hashedToken, expiresAt, userId]
     );
-    
+
     // Return the original unhashed token (which will be sent to the user)
     return resetToken;
   }
@@ -320,26 +328,26 @@ class AuthService {
   async verifyPasswordResetToken(token: string): Promise<number> {
     // Hash the provided token for comparison
     const hashedToken = crypto.createHash('sha256').update(token).digest('hex');
-    
+
     // Look for a user with this token that hasn't expired
     const result = await query(
       'SELECT id, reset_token FROM users WHERE reset_token_expires_at > NOW()',
       []
     );
-    
+
     // No token found or all tokens expired
     if (result.rows.length === 0) {
       throw AppError.unauthorized('Invalid or expired reset token', 'INVALID_RESET_TOKEN');
     }
-    
+
     // Use constant-time comparison to prevent timing attacks
     let userId: number | null = null;
-    
+
     for (const user of result.rows) {
       // Use crypto.timingSafeEqual to prevent timing attacks
       const storedTokenBuffer = Buffer.from(user.reset_token, 'hex');
       const providedTokenBuffer = Buffer.from(hashedToken, 'hex');
-      
+
       try {
         if (crypto.timingSafeEqual(storedTokenBuffer, providedTokenBuffer)) {
           userId = user.id;
@@ -350,11 +358,11 @@ class AuthService {
         continue;
       }
     }
-    
+
     if (!userId) {
       throw AppError.unauthorized('Invalid or expired reset token', 'INVALID_RESET_TOKEN');
     }
-    
+
     return userId;
   }
 
@@ -379,12 +387,12 @@ class AuthService {
     if (typeof a !== 'string' || typeof b !== 'string') {
       return false;
     }
-    
+
     // Use Node.js built-in function for constant-time comparison
     // This helps prevent timing attacks when comparing security tokens
     try {
       return crypto.timingSafeEqual(
-        Buffer.from(a, 'utf8'), 
+        Buffer.from(a, 'utf8'),
         Buffer.from(b, 'utf8')
       );
     } catch (error) {
@@ -404,7 +412,7 @@ class AuthService {
     try {
       // Hash the token from the request using the same algorithm
       const hash = crypto.createHash('sha256').update(token).digest('hex');
-      
+
       // Use constant-time comparison to prevent timing attacks
       return this.constantTimeCompare(hash, hashedToken);
     } catch (error) {
@@ -427,11 +435,11 @@ class AuthService {
         WHERE user_id = $1 AND revoked = false`,
         [userId]
       );
-      
+
       if (result.rows.length === 0) {
         return false;
       }
-      
+
       // Find a matching token (using constant-time comparison)
       for (const row of result.rows) {
         // Check if token is expired
@@ -439,13 +447,13 @@ class AuthService {
         if (expiresAt < new Date()) {
           continue;
         }
-        
+
         // Compare tokens using constant-time comparison
         if (this.constantTimeCompare(token, row.token)) {
           return true;
         }
       }
-      
+
       return false;
     } catch (error) {
       logger.error('Error validating refresh token:', error);

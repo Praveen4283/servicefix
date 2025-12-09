@@ -1,4 +1,5 @@
 import apiClient from './apiClient';
+import { logger } from '../utils/frontendLogger';
 
 export interface TicketPriority {
   id: number;
@@ -14,7 +15,7 @@ const ticketPriorityService = {
   async getPriorities(): Promise<TicketPriority[]> {
     try {
       const response = await apiClient.get('/ticket-priorities');
-      
+
       // Handle different response structures - some endpoints return { data: { priorities: [] } }
       if (response.priorities) {
         return response.priorities;
@@ -23,11 +24,11 @@ const ticketPriorityService = {
       } else if (Array.isArray(response.data)) {
         return response.data;
       } else {
-        console.error('Unexpected priority data structure:', response);
+        logger.error('Unexpected priority data structure:', response);
         return [];
       }
     } catch (error) {
-      console.error('Error fetching priorities:', error);
+      logger.error('Error fetching priorities:', error);
       return [];
     }
   },

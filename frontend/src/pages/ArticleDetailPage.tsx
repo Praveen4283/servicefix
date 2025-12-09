@@ -42,6 +42,7 @@ import ReactMarkdown from 'react-markdown';
 import DOMPurify from 'dompurify';
 import apiClient from '../services/apiClient';
 import { showSuccess, showError } from '../utils/notificationUtils';
+import { logger } from '../utils/frontendLogger';
 
 // Mock article data - This would be replaced with actual API calls
 const mockArticleData = {
@@ -187,23 +188,23 @@ const ArticleDetailPage: React.FC = () => {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const theme = useTheme();
-  
+
   const [article, setArticle] = useState<ArticleData | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
   const [isBookmarked, setIsBookmarked] = useState<boolean>(false);
   const [feedbackSubmitted, setFeedbackSubmitted] = useState<boolean>(false);
-  
+
   useEffect(() => {
     const fetchArticle = async () => {
       setLoading(true);
       setError(null);
-      
+
       try {
         // In a real implementation, this would be an API call
         // const response = await apiClient.get(`/knowledge/articles/${id}`);
         // setArticle(response);
-        
+
         // For now, we'll use mock data
         setTimeout(() => {
           setArticle(mockArticleData);
@@ -215,38 +216,38 @@ const ArticleDetailPage: React.FC = () => {
         setLoading(false);
       }
     };
-    
+
     fetchArticle();
-    
+
     // Check if article is bookmarked
     const checkBookmarked = () => {
       const bookmarks = JSON.parse(localStorage.getItem('kbBookmarks') || '[]');
       setIsBookmarked(bookmarks.includes(id));
     };
-    
+
     checkBookmarked();
-    
+
     // Record view
     const recordView = async () => {
       try {
         // In a real implementation:
         // await apiClient.post(`/knowledge/articles/${id}/view`);
-        console.log('View recorded for article:', id);
+        logger.debug('View recorded for article:', id);
       } catch (err) {
         console.error('Error recording view:', err);
       }
     };
-    
+
     recordView();
   }, [id]);
-  
+
   const handleGoBack = () => {
     navigate(-1);
   };
-  
+
   const toggleBookmark = () => {
     const bookmarks = JSON.parse(localStorage.getItem('kbBookmarks') || '[]');
-    
+
     if (isBookmarked) {
       const updatedBookmarks = bookmarks.filter((bookmarkId: string) => bookmarkId !== id);
       localStorage.setItem('kbBookmarks', JSON.stringify(updatedBookmarks));
@@ -259,19 +260,19 @@ const ArticleDetailPage: React.FC = () => {
       showSuccess('Article added to bookmarks');
     }
   };
-  
+
   const handleFeedback = async (isHelpful: boolean) => {
     if (feedbackSubmitted) {
       showError('You have already submitted feedback for this article');
       return;
     }
-    
+
     try {
       // In a real implementation:
       // await apiClient.post(`/knowledge/articles/${id}/feedback`, { isHelpful });
-      
+
       setFeedbackSubmitted(true);
-      
+
       if (isHelpful) {
         setArticle(prev => prev ? { ...prev, helpfulCount: prev.helpfulCount + 1 } : null);
         showSuccess('Thank you for your feedback!');
@@ -284,7 +285,7 @@ const ArticleDetailPage: React.FC = () => {
       showError('Failed to submit feedback. Please try again.');
     }
   };
-  
+
   const handleShare = () => {
     if (navigator.share) {
       navigator.share({
@@ -292,7 +293,7 @@ const ArticleDetailPage: React.FC = () => {
         text: `Check out this knowledge base article: ${article?.title}`,
         url: window.location.href,
       }).then(() => {
-        console.log('Article shared successfully');
+        logger.debug('Article shared successfully');
       }).catch((error) => {
         console.error('Error sharing article:', error);
       });
@@ -308,15 +309,15 @@ const ArticleDetailPage: React.FC = () => {
         });
     }
   };
-  
+
   const handlePrint = () => {
     window.print();
   };
-  
+
   const handleArticleClick = (articleId: string) => {
     navigate(`/knowledge/${articleId}`);
   };
-  
+
   if (loading) {
     return (
       <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '70vh' }}>
@@ -324,7 +325,7 @@ const ArticleDetailPage: React.FC = () => {
       </Box>
     );
   }
-  
+
   if (error) {
     return (
       <Container maxWidth="lg" sx={{ py: 4 }}>
@@ -347,7 +348,7 @@ const ArticleDetailPage: React.FC = () => {
       </Container>
     );
   }
-  
+
   if (!article) {
     return (
       <Container maxWidth="lg" sx={{ py: 4 }}>
@@ -370,7 +371,7 @@ const ArticleDetailPage: React.FC = () => {
       </Container>
     );
   }
-  
+
   return (
     <Container maxWidth="lg" sx={{ py: 4 }}>
       {/* Breadcrumb Navigation */}
@@ -397,7 +398,7 @@ const ArticleDetailPage: React.FC = () => {
           {article.title}
         </Typography>
       </Breadcrumbs>
-      
+
       <Grid container spacing={3}>
         {/* Main Content */}
         <Grid item xs={12} md={8}>
@@ -456,7 +457,7 @@ const ArticleDetailPage: React.FC = () => {
                   </Box>
                 </Box>
               </Box>
-              
+
               <Box>
                 <Tooltip title={isBookmarked ? "Remove Bookmark" : "Bookmark"}>
                   <IconButton onClick={toggleBookmark} color={isBookmarked ? "primary" : "default"}>
@@ -475,18 +476,18 @@ const ArticleDetailPage: React.FC = () => {
                 </Tooltip>
               </Box>
             </Box>
-            
+
             <Divider sx={{ mb: 3 }} />
-            
+
             {/* Article Content */}
             <Box className="article-content" sx={{ mb: 4 }}>
               <ReactMarkdown>
                 {article.content}
               </ReactMarkdown>
             </Box>
-            
+
             <Divider sx={{ mb: 3 }} />
-            
+
             {/* Article Tags */}
             <Box sx={{ mb: 4 }}>
               <Typography variant="subtitle2" gutterBottom>
@@ -504,7 +505,7 @@ const ArticleDetailPage: React.FC = () => {
                 ))}
               </Box>
             </Box>
-            
+
             {/* Article Feedback */}
             <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
               <Typography variant="subtitle2">
@@ -534,7 +535,7 @@ const ArticleDetailPage: React.FC = () => {
             </Box>
           </Paper>
         </Grid>
-        
+
         {/* Sidebar */}
         <Grid item xs={12} md={4}>
           {/* Related Articles */}
@@ -567,7 +568,7 @@ const ArticleDetailPage: React.FC = () => {
               </List>
             </CardContent>
           </Card>
-          
+
           {/* Need More Help */}
           <Card sx={{ ...cardStyles, ...gradientAccent(theme) }}>
             <CardContent>

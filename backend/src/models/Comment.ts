@@ -2,6 +2,22 @@ import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, UpdateDateCol
 import { User } from './User';
 import { Ticket } from './Ticket';
 
+// Frontend format type for API responses
+export interface CommentFrontendFormat {
+  id: string;
+  content: string;
+  isInternal: boolean;
+  isSystem: boolean;
+  createdAt: string;
+  user: {
+    id: string;
+    firstName: string;
+    lastName: string;
+    avatar: string | null;
+    email: string;
+  };
+}
+
 @Entity('ticket_comments')
 export class Comment {
   @PrimaryGeneratedColumn()
@@ -37,7 +53,7 @@ export class Comment {
   updatedAt!: Date;
 
   // Helper method to convert to frontend format
-  toFrontendFormat(): any {
+  toFrontendFormat(): CommentFrontendFormat {
     return {
       id: String(this.id),
       content: this.content,

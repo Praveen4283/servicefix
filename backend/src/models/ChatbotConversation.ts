@@ -12,6 +12,7 @@ import {
 import { User } from './User';
 import { Organization } from './Organization';
 import { ChatMessage } from './ChatMessage';
+import type { ChatMetadata } from '../types/common';
 
 @Entity('chatbot_conversations')
 export class ChatbotConversation {
@@ -46,7 +47,7 @@ export class ChatbotConversation {
   status: string;
 
   @Column({ type: 'jsonb', nullable: true })
-  metadata?: any;
+  metadata?: ChatMetadata;
 
   @CreateDateColumn({ name: 'created_at', type: 'timestamp with time zone' })
   createdAt: Date;

@@ -1,6 +1,7 @@
 import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, UpdateDateColumn, ManyToOne, JoinColumn } from 'typeorm';
 import { Ticket } from './Ticket';
 import { SLAPolicy } from './SLAPolicy';
+import type { SLAMetadata } from '../types/common';
 
 @Entity('sla_policy_tickets')
 export class SLAPolicyTicket {
@@ -40,7 +41,7 @@ export class SLAPolicyTicket {
   resolutionMet?: boolean;
 
   @Column({ name: 'metadata', type: 'jsonb', nullable: true })
-  metadata?: any;
+  metadata?: SLAMetadata;
 
   @CreateDateColumn({ name: 'created_at' })
   createdAt: Date;

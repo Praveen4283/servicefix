@@ -2,21 +2,23 @@ import apiClient from './apiClient';
 import { Notification } from '../context/NotificationContext';
 import { withRetry } from '../utils/apiUtils';
 import { MetadataObject, JsonObject } from '../types/common';
+import { logger } from '../utils/frontendLogger';
+import { TIME, LIMITS, DEFAULTS } from '../constants/app.constants';
 
 // Local storage key for notifications
 const NOTIFICATIONS_STORAGE_KEY = 'app_notifications';
 const FAILED_NOTIFICATIONS_KEY = 'failed_notifications';
 
 // Constants for storage optimization
-const MAX_LOCAL_NOTIFICATIONS = 100;
-const STORAGE_CLEANUP_INTERVAL_MS = 86400000; // 24 hours
+const MAX_LOCAL_NOTIFICATIONS = LIMITS.MAX_LOCAL_NOTIFICATIONS;
+const STORAGE_CLEANUP_INTERVAL_MS = TIME.NOTIFICATION_STORAGE_CLEANUP_INTERVAL_MS;
 
 // Constants for throttling and notification expiration
-const NOTIFICATION_THROTTLE_MS = 500; // Min time between similar notifications
-const NOTIFICATION_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 days for auto-cleanup of read notifications
+const NOTIFICATION_THROTTLE_MS = TIME.NOTIFICATION_THROTTLE_MS;
+const NOTIFICATION_TTL_MS = TIME.NOTIFICATION_TTL_MS;
 
 // Constants for deduplication
-const DEDUPLICATION_WINDOW_MS = 3000; // 3 seconds window for deduplication
+const DEDUPLICATION_WINDOW_MS = TIME.NOTIFICATION_DEDUP_WINDOW_MS;
 
 // Debug flag
 const isDebugMode = process.env.NODE_ENV === 'development';
@@ -127,19 +129,18 @@ const notificationService = {
   ): Promise<boolean> => {
     try {
       // Check if this is a post-login notification
-      // @ts-ignore - Accessing custom property on window
       const isFreshLogin = window.__freshLogin === true;
-      
+
       if (isFreshLogin) {
-        console.log('[NotificationService] Detected fresh login notification, adding extra delay');
+        logger.debug('Detected fresh login notification, adding extra delay');
         // Wait a bit longer for proper cookie synchronization
-        await new Promise(resolve => setTimeout(resolve, 300));
+        await new Promise(resolve => setTimeout(resolve, TIME.NOTIFICATION_RETRY_DELAY_MS));
       }
-      
+
       // Call the backend API to create a notification with retry capability
       const result = await withRetry(
         async () => {
-          try {            
+          try {
             // Create the notification with post-login status included in the payload
             await apiClient.post('/notifications', {
               title,
@@ -152,25 +153,25 @@ const notificationService = {
                 isPostLogin: isFreshLogin
               }
             });
-            
-            console.log('[NotificationService] Notification created successfully', 
-               isFreshLogin ? '(with post-login metadata)' : '');
-            
+
+            logger.debug('Notification created successfully',
+              isFreshLogin ? '(with post-login metadata)' : '');
+
             return true;
           } catch (error: any) {
             // Check for CSRF error
             if (error?.status === 403 && error?.code === 'CSRF_ERROR') {
-              console.log('[NotificationService] CSRF error, will retry with new token');
-              
+              logger.warn('CSRF error, will retry with new token');
+
               // Wait longer before retry to ensure cookies are properly set
-              await new Promise(resolve => setTimeout(resolve, 400));
-              
+              await new Promise(resolve => setTimeout(resolve, TIME.NOTIFICATION_CSRF_RETRY_DELAY_MS));
+
               throw error; // Rethrow to trigger retry
             }
-            
+
             // For other errors, log and continue
-            console.error('[NotificationService] Error creating notification:', error);
-            
+            logger.error('[NotificationService] Error creating notification:', error);
+
             // Store failed notification for retry later
             storeFailedNotification({
               title,
@@ -180,17 +181,17 @@ const notificationService = {
               metadata,
               timestamp: Date.now()
             });
-            
+
             throw error; // Rethrow to trigger retry
           }
         },
         3, // 3 retries
-        500 // 500ms initial delay
+        TIME.NOTIFICATION_FETCH_RETRY_DELAY_MS
       );
-      
+
       return result === true;
     } catch (error) {
-      console.error('Failed to create backend notification after retries:', error);
+      logger.error('Failed to create backend notification after retries:', error);
       return false;
     }
   },
@@ -207,40 +208,40 @@ const notificationService = {
       if (options.limit) queryParams.append('limit', options.limit.toString());
       if (options.offset) queryParams.append('offset', options.offset.toString());
       if (options.unreadOnly) queryParams.append('unread', 'true');
-      
+
       // Always include recent flag to ensure we get the latest notifications
       queryParams.append('recent', 'true');
-      
+
       // Add cache-busting parameter if forceRefresh is true
       if (options.forceRefresh) {
         queryParams.append('_t', Date.now().toString());
       }
-      
+
       // Use explicit timestamp if provided
       if (options.timestamp) {
         queryParams.append('_ts', options.timestamp.toString());
       }
-      
+
       // Always request a reasonable limit if not specified
       if (!options.limit) {
         queryParams.append('limit', '50');
       }
-      
-      console.log('[NotificationService] Fetching notifications with params:', queryParams.toString());
-      
+
+      logger.debug('Fetching notifications with params:', queryParams.toString());
+
       // Fetch notifications from backend with retry capability
       const responseData = await withRetry(
         () => apiClient.get<ApiNotificationResponse>(`/notifications?${queryParams.toString()}`),
         3, // 3 retries
-        1000 // 1 second initial delay
+        TIME.NOTIFICATION_MARK_READ_RETRY_DELAY_MS
       );
-      
+
       // Log the actual response structure for debugging
-      console.log('[NotificationService] API response:', JSON.stringify(responseData));
-      
+      logger.debug('API response:', responseData);
+
       // Extract the notifications array from the response data
       let apiNotifications: ApiNotification[] | undefined;
-      
+
       // Handle different possible response structures
       if (responseData?.data?.notifications) {
         // API returns {success: true, data: {notifications: []}}
@@ -263,35 +264,35 @@ const notificationService = {
           apiNotifications = responseData.data.notifications;
           debugLog('Extracted from success/data/notifications structure:', apiNotifications.length);
         } else {
-          console.error('Data property exists but contains unexpected format:', responseData.data);
+          logger.error('Data property exists but contains unexpected format:', responseData.data);
           apiNotifications = [];
         }
       } else {
         // No recognizable structure
-        console.error('Error fetching notifications: Unrecognized response structure', responseData);
-        
+        logger.error('Error fetching notifications: Unrecognized response structure', responseData);
+
         // Create a system notification for the user
         const errorNotification: Notification = {
           id: generateId(),
           message: 'Unable to process notifications due to server response format.',
           type: 'warning',
-          duration: 5000,
+          duration: TIME.TOAST_DURATION_MS,
           timestamp: Date.now(),
           isRead: false,
           title: 'Notification Error',
           category: 'system'
         };
-        
+
         // Add the error notification to local storage
         await notificationService.addNotification(errorNotification);
-        
+
         return getNotificationsFromLocalStorage();
       }
 
       // Check if apiNotifications is actually an array before mapping
       if (!Array.isArray(apiNotifications)) {
-        console.error('Error fetching notifications: Expected notifications array, but received:', apiNotifications);
-        
+        logger.error('Error fetching notifications: Expected notifications array, but received:', apiNotifications);
+
         // Create a system notification for the user
         const errorNotification: Notification = {
           id: generateId(),
@@ -303,10 +304,10 @@ const notificationService = {
           title: 'Notification Error',
           category: 'system'
         };
-        
+
         // Add the error notification to local storage
         await notificationService.addNotification(errorNotification);
-        
+
         return getNotificationsFromLocalStorage();
       }
 
@@ -317,13 +318,13 @@ const notificationService = {
         try {
           // Try to parse the timestamp from various possible formats
           const dateSource = apiNotification.created_at || apiNotification.createdAt;
-          
+
           if (isDebugMode) {
             debugLog('------- Notification Timestamp Debug -------');
             debugLog(`Original date source: ${dateSource}`);
             debugLog(`Type of date source: ${typeof dateSource}`);
           }
-          
+
           if (typeof dateSource === 'number') {
             // If it's already a numeric timestamp
             timestamp = dateSource;
@@ -335,15 +336,15 @@ const notificationService = {
             // IMPORTANT: Force the date to UTC first, then get timestamp
             const dateObj = new Date(dateSource);
             timestamp = dateObj.getTime();
-            
+
             if (isDebugMode) {
               debugLog(`Parsed date object: ${dateObj.toString()}`);
               debugLog(`Date ISO string: ${dateObj.toISOString()}`);
               debugLog(`Resulting timestamp: ${timestamp}`);
             }
-            
+
             if (isNaN(timestamp)) {
-              console.warn('Invalid date string from notification:', dateSource);
+              logger.warn('Invalid date string from notification:', dateSource);
               timestamp = Date.now(); // Fallback to current time
               if (isDebugMode) {
                 debugLog(`Using fallback timestamp (now): ${timestamp}`);
@@ -351,26 +352,26 @@ const notificationService = {
             }
           } else {
             // If neither string nor number, use current time
-            console.warn('Unexpected date format:', dateSource);
+            logger.warn('Unexpected date format:', dateSource);
             timestamp = Date.now();
             if (isDebugMode) {
               debugLog(`Using fallback timestamp (now): ${timestamp}`);
             }
           }
         } catch (err) {
-          console.error('Error parsing date:', err);
+          logger.error('Error parsing date:', err);
           timestamp = Date.now(); // Fallback to current time
           if (isDebugMode) {
             debugLog(`Using fallback timestamp after error (now): ${timestamp}`);
           }
         }
-        
+
         // Handle read status - support both snake_case and camelCase
-        const isRead = 
+        const isRead =
           apiNotification.hasOwnProperty('is_read') ? Boolean(apiNotification.is_read) :
-          apiNotification.hasOwnProperty('isRead') ? Boolean(apiNotification.isRead) :
-          false;
-        
+            apiNotification.hasOwnProperty('isRead') ? Boolean(apiNotification.isRead) :
+              false;
+
         return {
           id: apiNotification.id.toString(),
           message: apiNotification.message || '',
@@ -383,7 +384,7 @@ const notificationService = {
         };
       });
 
-      console.log(`[NotificationService] Transformed ${transformedNotifications.length} notifications from API response`);
+      logger.debug(`Transformed ${transformedNotifications.length} notifications from API response`);
 
       // Merge with existing notifications in local storage (keeping most recent 100)
       const existingNotifications = getNotificationsFromLocalStorage();
@@ -395,8 +396,8 @@ const notificationService = {
       // Return the original transformed list (no filtering here)
       return transformedNotifications;
     } catch (error) {
-      console.error('Error fetching notifications:', error);
-      
+      logger.error('Error fetching notifications:', error);
+
       // Create a helpful system notification about the error
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
       const errorNotification: Notification = {
@@ -409,17 +410,17 @@ const notificationService = {
         title: 'Connection Error',
         category: 'system'
       };
-      
+
       // Add the error notification to local storage without using API (which failed)
       const notifications = getNotificationsFromLocalStorage();
       const updatedNotifications = [...notifications, errorNotification];
       saveNotificationsToLocalStorage(updatedNotifications);
-      
+
       // Return local notifications + the error notification
       return [...getNotificationsFromLocalStorage(), errorNotification];
     }
   },
-  
+
   /**
    * Mark a notification as read
    * @param id Notification ID
@@ -428,38 +429,38 @@ const notificationService = {
   markAsRead: async (id: string): Promise<void> => {
     try {
       // console.log(`Marking notification ${id} as read`); // Removed this line
-      
+
       // Update local storage immediately for UI responsiveness
       const notifications = getNotificationsFromLocalStorage();
-      const updatedNotifications = notifications.map(notification => 
+      const updatedNotifications = notifications.map(notification =>
         notification.id === id ? { ...notification, isRead: true } : notification
       );
       saveNotificationsToLocalStorage(updatedNotifications);
-      
+
       // Then update server
       try {
         // Use POST instead of PATCH to avoid CORS issues
         await withRetry(
           () => apiClient.post(`/notifications/${id}/read`),
           3, // 3 retries
-          1000 // 1 second initial delay
+          TIME.NOTIFICATION_MARK_READ_RETRY_DELAY_MS
         );
         // console.log(`Successfully marked notification ${id} as read on server`); // Removed this line
       } catch (apiError) {
         // Log the error but keep the local update
-        console.error(`Error marking notification ${id} as read on server:`, apiError);
+        logger.error(`Error marking notification ${id} as read on server:`, apiError);
       }
     } catch (error) {
-      console.error(`Error in markAsRead for notification ${id}:`, error);
+      logger.error(`Error in markAsRead for notification ${id}:`, error);
       // Still update local storage even if error occurs
       const notifications = getNotificationsFromLocalStorage();
-      const updatedNotifications = notifications.map(notification => 
+      const updatedNotifications = notifications.map(notification =>
         notification.id === id ? { ...notification, isRead: true } : notification
       );
       saveNotificationsToLocalStorage(updatedNotifications);
     }
   },
-  
+
   /**
    * Mark all notifications as read
    * @returns Promise that resolves when operation completes
@@ -467,21 +468,21 @@ const notificationService = {
   markAllAsRead: async (): Promise<void> => {
     try {
       // Use POST instead of PATCH to avoid CORS issues
-      await withRetry(() => apiClient.post('/notifications/read-all'), 3, 1000);
-      
+      await withRetry(() => apiClient.post('/notifications/read-all'), DEFAULTS.MAX_RETRIES, TIME.NOTIFICATION_MARK_READ_RETRY_DELAY_MS);
+
       // Update local storage
       const notifications = getNotificationsFromLocalStorage();
       const updatedNotifications = notifications.map(notification => ({ ...notification, isRead: true }));
       saveNotificationsToLocalStorage(updatedNotifications);
     } catch (error) {
-      console.error('Error marking all notifications as read:', error);
+      logger.error('Error marking all notifications as read:', error);
       // Update local storage even if API fails
       const notifications = getNotificationsFromLocalStorage();
       const updatedNotifications = notifications.map(notification => ({ ...notification, isRead: true }));
       saveNotificationsToLocalStorage(updatedNotifications);
     }
   },
-  
+
   /**
    * Add a new notification, applying deduplication logic.
    * @param notification Notification to add
@@ -489,19 +490,19 @@ const notificationService = {
    */
   addNotification: async (notification: Notification): Promise<Notification> => {
     const now = Date.now();
-    
+
     // Ensure login notifications are properly categorized
     if ((notification.title && notification.title.includes('Login')) ||
-        (notification.message && notification.message.includes('Welcome back'))) {
-      console.log('[NotificationService] Login notification detected, ensuring app category and unread status');
+      (notification.message && notification.message.includes('Welcome back'))) {
+      logger.debug('Login notification detected, ensuring app category and unread status');
       notification.category = 'app';
       notification.isRead = false;
     }
-    
+
     // Create a fingerprint for deduplication (ignoring category for specific messages)
     const isCommonAuthMessage = notification.message.startsWith('Welcome back') || notification.message === 'Profile updated successfully';
     const fingerprint = getNotificationFingerprint(notification, isCommonAuthMessage);
-    
+
     // Check for duplicates within the deduplication window
     const lastSimilarTimestamp = recentNotifications.get(fingerprint);
     if (lastSimilarTimestamp && (now - lastSimilarTimestamp < DEDUPLICATION_WINDOW_MS)) {
@@ -510,37 +511,37 @@ const notificationService = {
       const existing = getNotificationsFromLocalStorage().find(n => getNotificationFingerprint(n, isCommonAuthMessage) === fingerprint);
       return existing || notification;
     }
-    
+
     // Track this notification fingerprint to detect future duplicates
     recentNotifications.set(fingerprint, now);
-    
+
     // Clean up old fingerprints periodically (simple cleanup)
     if (recentNotifications.size > 100) {
-        const cutoff = now - 60000; // Older than 1 minute
-        recentNotifications.forEach((timestamp, key) => {
-            if (timestamp < cutoff) {
-                recentNotifications.delete(key);
-            }
-        });
+      const cutoff = now - 60000; // Older than 1 minute
+      recentNotifications.forEach((timestamp, key) => {
+        if (timestamp < cutoff) {
+          recentNotifications.delete(key);
+        }
+      });
     }
-    
+
     // Throttling logic based on *exact* fingerprint (including category now)
     const throttleFingerprint = getNotificationFingerprint(notification, false); // Use exact fingerprint for throttling
     if (notificationCountMap.has(throttleFingerprint)) {
       const count = notificationCountMap.get(throttleFingerprint)!;
-      
+
       // If this is a rapid repeat, increment counter instead of showing new notification
       if (now - lastNotificationTimestamp < NOTIFICATION_THROTTLE_MS) {
         notificationCountMap.set(throttleFingerprint, count + 1);
-        
+
         // Get stored notifications
         const notifications = getNotificationsFromLocalStorage();
-        
+
         // Find the most recent similar notification (using exact fingerprint)
         const existingIndex = notifications.findIndex(n =>
           getNotificationFingerprint(n, false) === throttleFingerprint
         );
-        
+
         if (existingIndex >= 0) {
           // Update the existing notification with a count
           const updatedNotification = {
@@ -548,7 +549,7 @@ const notificationService = {
             message: notifications[existingIndex].message.replace(/ \(\d+\)$/, '') + ` (${count + 1})`,
             timestamp: now // Update timestamp to keep it recent
           };
-          
+
           // Replace the old notification
           notifications[existingIndex] = updatedNotification;
           saveNotificationsToLocalStorage(notifications);
@@ -557,27 +558,27 @@ const notificationService = {
         }
       }
     }
-    
+
     // New or non-throttled notification
     notificationCountMap.set(throttleFingerprint, 1);
     lastNotificationTimestamp = now;
-    
+
     // Store in local storage
     const notifications = getNotificationsFromLocalStorage();
     // Ensure the new notification doesn't already exist by ID before adding
     if (!notifications.some(n => n.id === notification.id)) {
-        const updatedNotifications = [...notifications, notification];
-        saveNotificationsToLocalStorage(updatedNotifications);
-        console.log('[NotificationService] Added to local storage:', notification.id, notification.message, 'category:', notification.category, 'isRead:', notification.isRead);
+      const updatedNotifications = [...notifications, notification];
+      saveNotificationsToLocalStorage(updatedNotifications);
+      logger.debug('Added to local storage:', { id: notification.id, message: notification.message, category: notification.category, isRead: notification.isRead });
     } else {
-        // console.log('[Notification Skipped] Already exists by ID:', notification.message); // Removed this line
-        // Optionally update the existing one if needed, but for now, just skip adding
-        return notifications.find(n => n.id === notification.id) || notification;
+      // console.log('[Notification Skipped] Already exists by ID:', notification.message); // Removed this line
+      // Optionally update the existing one if needed, but for now, just skip adding
+      return notifications.find(n => n.id === notification.id) || notification;
     }
-    
+
     return notification;
   },
-  
+
   /**
    * Clear all notifications (app category only)
    * @returns Promise that resolves when operation completes
@@ -585,20 +586,20 @@ const notificationService = {
   clearNotifications: async (): Promise<void> => {
     try {
       await apiClient.delete('/notifications');
-      
+
       // Keep system notifications, remove app notifications
       const notifications = getNotificationsFromLocalStorage();
       const updatedNotifications = notifications.filter(n => n.category === 'system');
       saveNotificationsToLocalStorage(updatedNotifications);
     } catch (error) {
-      console.error('Error clearing notifications:', error);
+      logger.error('Error clearing notifications:', error);
       // Update local storage even if API fails
       const notifications = getNotificationsFromLocalStorage();
       const updatedNotifications = notifications.filter(n => n.category === 'system');
       saveNotificationsToLocalStorage(updatedNotifications);
     }
   },
-  
+
   /**
    * Remove a specific notification
    * @param id Notification ID
@@ -608,20 +609,20 @@ const notificationService = {
     try {
       // Call backend delete endpoint
       await apiClient.delete(`/notifications/${id}`);
-      
+
       // Update local storage
       const notifications = getNotificationsFromLocalStorage();
       const updatedNotifications = notifications.filter(notification => notification.id !== id);
       saveNotificationsToLocalStorage(updatedNotifications);
     } catch (error) {
-      console.error(`Error removing notification ${id}:`, error);
+      logger.error(`Error removing notification ${id}:`, error);
       // Update local storage even if API fails
       const notifications = getNotificationsFromLocalStorage();
       const updatedNotifications = notifications.filter(notification => notification.id !== id);
       saveNotificationsToLocalStorage(updatedNotifications);
     }
   },
-  
+
   /**
    * Get notifications from local storage (for initial load/offline support)
    * @returns Array of notifications
@@ -629,7 +630,7 @@ const notificationService = {
   getLocalNotifications: (): Notification[] => {
     return getNotificationsFromLocalStorage();
   },
-  
+
   /**
    * Retry sending failed notifications
    * @returns Promise that resolves when retry attempt is complete
@@ -638,32 +639,32 @@ const notificationService = {
     try {
       const failedNotifications = getFailedNotificationsFromStorage();
       if (failedNotifications.length === 0) return;
-      
-      console.log(`[NotificationService] Attempting to resend ${failedNotifications.length} failed notifications`);
-      
+
+      logger.info(`Attempting to resend ${failedNotifications.length} failed notifications`);
+
       // Try to get a fresh CSRF token first with multiple attempts
       let csrfSuccess = false;
       for (let i = 0; i < 3 && !csrfSuccess; i++) {
         try {
           await apiClient.get('/auth/csrf-token');
           csrfSuccess = true;
-          console.log('[NotificationService] Successfully refreshed CSRF token for retries');
+          logger.debug('Successfully refreshed CSRF token for retries');
           // Wait for cookie to be set
           await new Promise(resolve => setTimeout(resolve, 300));
         } catch (error) {
-          console.error('[NotificationService] Failed to refresh CSRF token for retries:', error);
+          logger.error('[NotificationService] Failed to refresh CSRF token for retries:', error);
           // Wait before trying again
           await new Promise(resolve => setTimeout(resolve, 500));
         }
       }
-      
+
       if (!csrfSuccess) {
-        console.error('[NotificationService] Could not refresh CSRF token after multiple attempts, aborting retries');
+        logger.error('[NotificationService] Could not refresh CSRF token after multiple attempts, aborting retries');
         return;
       }
-      
+
       const successfulRetries: number[] = [];
-      
+
       // Try to send each failed notification with a small delay between them
       for (let i = 0; i < failedNotifications.length; i++) {
         try {
@@ -671,7 +672,7 @@ const notificationService = {
           if (i > 0) {
             await new Promise(resolve => setTimeout(resolve, 200));
           }
-          
+
           const notification = failedNotifications[i];
           const success = await notificationService.createBackendNotification(
             notification.title || 'Notification',
@@ -680,29 +681,29 @@ const notificationService = {
             notification.link,
             notification.metadata
           );
-          
+
           if (success) {
             successfulRetries.push(i);
-            console.log(`[NotificationService] Successfully resent notification ${i+1}/${failedNotifications.length}`);
+            logger.debug(`Successfully resent notification ${i + 1}/${failedNotifications.length}`);
           }
         } catch (error) {
-          console.error(`[NotificationService] Failed to retry notification ${i+1}/${failedNotifications.length}:`, error);
+          logger.error(`[NotificationService] Failed to retry notification ${i + 1}/${failedNotifications.length}:`, error);
         }
       }
-      
+
       // Remove successful retries from storage
       if (successfulRetries.length > 0) {
-        const remainingNotifications = failedNotifications.filter((_, index) => 
+        const remainingNotifications = failedNotifications.filter((_, index) =>
           !successfulRetries.includes(index)
         );
         saveFailedNotificationsToStorage(remainingNotifications);
-        console.log(`[NotificationService] Successfully resent ${successfulRetries.length}/${failedNotifications.length} notifications`);
+        logger.info(`Successfully resent ${successfulRetries.length}/${failedNotifications.length} notifications`);
       }
     } catch (error) {
-      console.error('[NotificationService] Error during retry of failed notifications:', error);
+      logger.error('[NotificationService] Error during retry of failed notifications:', error);
     }
   },
-  
+
   /**
    * Initialize notification service
    * Call this when the app starts or user logs in
@@ -711,15 +712,15 @@ const notificationService = {
     try {
       // Retry any failed notifications from previous sessions
       await notificationService.retryFailedNotifications();
-      
+
       // Clear any stale notification counts
       notificationCountMap.clear();
       lastNotificationTimestamp = 0;
     } catch (error) {
-      console.error('Error initializing notification service:', error);
+      logger.error('Error initializing notification service:', error);
     }
   },
-  
+
   /**
    * Start periodic cleanup of local storage
    */
@@ -727,14 +728,14 @@ const notificationService = {
     if (cleanupInterval) {
       clearInterval(cleanupInterval);
     }
-    
+
     // Run cleanup immediately
     cleanupStorage();
-    
+
     // Then set up interval
     cleanupInterval = setInterval(cleanupStorage, STORAGE_CLEANUP_INTERVAL_MS);
   },
-  
+
   /**
    * Stop periodic cleanup
    */
@@ -752,12 +753,12 @@ const notificationService = {
    */
   syncNotifications: (notifications: Notification[]): void => {
     try {
-      console.log(`[NotificationService] Syncing ${notifications.length} notifications to local storage`);
-      
+      logger.debug(`Syncing ${notifications.length} notifications to local storage`);
+
       // Replace the local storage content with the provided notifications
       saveNotificationsToLocalStorage(notifications);
     } catch (error) {
-      console.error('Error syncing notifications to local storage:', error);
+      logger.error('Error syncing notifications to local storage:', error);
     }
   },
 
@@ -766,16 +767,16 @@ const notificationService = {
    */
   clearLocalStorage: (): void => {
     try {
-      console.log('[NotificationService] Clearing all notifications from local storage');
+      logger.debug('Clearing all notifications from local storage');
       localStorage.removeItem(NOTIFICATIONS_STORAGE_KEY);
       localStorage.removeItem(FAILED_NOTIFICATIONS_KEY);
-      
+
       // Reset the notification state
       lastNotificationTimestamp = 0;
       notificationCountMap.clear();
       recentNotifications.clear();
     } catch (error) {
-      console.error('Error clearing notifications from local storage:', error);
+      logger.error('Error clearing notifications from local storage:', error);
     }
   },
 
@@ -813,7 +814,7 @@ const notificationService = {
  */
 function mergeNotifications(existing: Notification[], incoming: Notification[]): Notification[] {
   const result = [...existing];
-  
+
   incoming.forEach(notification => {
     const existingIndex = result.findIndex(n => n.id === notification.id);
     if (existingIndex >= 0) {
@@ -824,7 +825,7 @@ function mergeNotifications(existing: Notification[], incoming: Notification[]):
       result.push(notification);
     }
   });
-  
+
   return result;
 }
 
@@ -859,21 +860,21 @@ function saveNotificationsToLocalStorage(notifications: Notification[]): void {
     localStorage.setItem(NOTIFICATIONS_STORAGE_KEY, JSON.stringify(notificationsToSave));
   } catch (error) {
     console.error('Error saving notifications to local storage:', error);
-    
+
     // If the error is likely due to localStorage being full
     if (error instanceof DOMException && (
-      error.name === 'QuotaExceededError' || 
+      error.name === 'QuotaExceededError' ||
       error.name === 'NS_ERROR_DOM_QUOTA_REACHED'
     )) {
       console.warn('Local storage quota exceeded, performing emergency cleanup');
-      
+
       // Emergency cleanup - force trim to half the normal limit
       const emergencyLimit = MAX_LOCAL_NOTIFICATIONS / 2;
-      
+
       // Keep only unread and newest notifications up to the emergency limit
       const allNotifications = [...notifications].sort((a, b) => b.timestamp - a.timestamp);
       let trimmed = allNotifications.slice(0, emergencyLimit);
-      
+
       // Fallback: if filtering fails, keep the newest MAX_LOCAL_NOTIFICATIONS / 2
       if (trimmed.length < MAX_LOCAL_NOTIFICATIONS / 2 && notifications.length > MAX_LOCAL_NOTIFICATIONS / 2) {
         trimmed = notifications.slice(0, MAX_LOCAL_NOTIFICATIONS / 2);
@@ -890,7 +891,7 @@ function saveNotificationsToLocalStorage(notifications: Notification[]): void {
 const cleanupStorage = () => {
   const notifications = getNotificationsFromLocalStorage();
   const now = Date.now();
-  
+
   // Filter out notifications that are read and older than TTL
   const validNotifications = notifications.filter(n => {
     if (n.isRead && n.timestamp) {
@@ -933,12 +934,12 @@ function storeFailedNotification(notification: {
   try {
     const failedNotifications = getFailedNotificationsFromStorage();
     failedNotifications.push(notification);
-    
+
     // Keep only the latest 50 failed notifications
     if (failedNotifications.length > 50) {
       failedNotifications.splice(0, failedNotifications.length - 50);
     }
-    
+
     saveFailedNotificationsToStorage(failedNotifications);
   } catch (error) {
     console.error('Error storing failed notification:', error);
@@ -956,7 +957,7 @@ function getFailedNotificationsFromStorage(): Array<{
   try {
     const storedData = localStorage.getItem(FAILED_NOTIFICATIONS_KEY);
     if (!storedData) return [];
-    
+
     const parsed = JSON.parse(storedData);
     return Array.isArray(parsed) ? parsed : [];
   } catch (error) {

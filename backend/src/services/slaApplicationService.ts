@@ -130,7 +130,7 @@ class SLAApplicationService {
 
       // Auto-assign new SLA policy based on new priority
       const slaPolicyTicket = await slaService.autoAssignSLAPolicy(ticket);
-      
+
       if (slaPolicyTicket) {
         logger.info(`SLA policy reassigned for ticket ${ticketId} due to priority change`);
         return {
@@ -168,7 +168,7 @@ class SLAApplicationService {
   }> {
     try {
       const ticketRepository = getRepository(Ticket);
-      
+
       // Get active tickets that need SLA status updates
       const activeTickets = await ticketRepository.find({
         where: {
@@ -183,8 +183,8 @@ class SLAApplicationService {
 
       for (const ticket of activeTickets) {
         try {
-          const slaStatus = await slaService.checkSLAStatus(ticket);
-          
+          const slaStatus = await slaService.calculateSLAStatus(ticket);
+
           // Update ticket SLA breach status if needed
           if (slaStatus.isFirstResponseBreached || slaStatus.isResolutionBreached) {
             await ticketRepository.update(ticket.id, {
@@ -221,7 +221,7 @@ class SLAApplicationService {
   }> {
     try {
       const ticketRepository = getRepository(Ticket);
-      
+
       // Get tickets that are approaching SLA deadlines
       const ticketsNeedingEscalation = await ticketRepository.find({
         where: {
@@ -236,11 +236,11 @@ class SLAApplicationService {
 
       for (const ticket of ticketsNeedingEscalation) {
         try {
-          const slaStatus = await slaService.checkSLAStatus(ticket);
-          
+          const slaStatus = await slaService.calculateSLAStatus(ticket);
+
           // Check if escalation is needed (e.g., 80% of SLA time passed)
-          const needsEscalation = 
-            slaStatus.firstResponsePercentage >= 80 || 
+          const needsEscalation =
+            slaStatus.firstResponsePercentage >= 80 ||
             slaStatus.resolutionPercentage >= 80;
 
           if (needsEscalation) {
@@ -272,7 +272,7 @@ class SLAApplicationService {
   private async triggerEscalationActions(ticket: Ticket, slaStatus: any): Promise<void> {
     // This would integrate with notification service and other escalation actions
     logger.info(`Escalation triggered for ticket ${ticket.id} - SLA at ${slaStatus.firstResponsePercentage}%`);
-    
+
     // TODO: Implement actual escalation actions
     // - Send notifications to managers
     // - Increase ticket priority

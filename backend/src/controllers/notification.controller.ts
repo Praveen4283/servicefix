@@ -3,6 +3,7 @@ import notificationService from '../services/notification.service';
 import socketService from '../services/socket.service';
 import { getRepository } from '../config/database'; // Import getRepository
 import { NotificationPreference } from '../models/NotificationPreference'; // Import NotificationPreference model
+import { logger } from '../utils/logger';
 
 /**
  * NotificationController handles API endpoints for notification management
@@ -46,7 +47,7 @@ class NotificationController {
         }
       });
     } catch (error) {
-      console.error('Error fetching notifications:', error);
+      logger.error('Error fetching notifications:', error);
       res.status(500).json({
         success: false,
         message: 'Failed to fetch notifications'
@@ -85,7 +86,7 @@ class NotificationController {
         message: 'Notification marked as read'
       });
     } catch (error) {
-      console.error('Error marking notification as read:', error);
+      logger.error('Error marking notification as read:', error);
       res.status(500).json({
         success: false,
         message: 'Failed to update notification'
@@ -115,7 +116,7 @@ class NotificationController {
         message: 'All notifications marked as read'
       });
     } catch (error) {
-      console.error('Error marking all notifications as read:', error);
+      logger.error('Error marking all notifications as read:', error);
       res.status(500).json({
         success: false,
         message: 'Failed to update notifications'
@@ -171,7 +172,7 @@ class NotificationController {
       });
 
     } catch (error) {
-      console.error('Error creating notification:', error);
+      logger.error('Error creating notification:', error);
       res.status(500).json({
         success: false,
         message: 'Internal server error while creating notification'
@@ -231,7 +232,7 @@ class NotificationController {
         message: 'Test notification created successfully'
       });
     } catch (error) {
-      console.error('Error creating test notification:', error);
+      logger.error('Error creating test notification:', error);
       res.status(500).json({
         success: false,
         message: 'Failed to create test notification'
@@ -315,7 +316,7 @@ class NotificationController {
         message: `Test notification sent to user ${targetUserId}`
       });
     } catch (error) {
-      console.error('Error sending test notification:', error);
+      logger.error('Error sending test notification:', error);
       res.status(500).json({
         success: false,
         message: 'Failed to send test notification'
@@ -344,7 +345,7 @@ class NotificationController {
       //   res.status(200).json({ success: true, data: defaultPrefs });
       //   return;
       // }
-      
+
       // Map to frontend expected format (camelCase)
       const formattedPreferences = preferences.map(p => ({
         id: p.id,
@@ -357,7 +358,7 @@ class NotificationController {
 
       res.status(200).json(formattedPreferences);
     } catch (error) {
-      console.error('Error fetching notification preferences:', error);
+      logger.error('Error fetching notification preferences:', error);
       res.status(500).json({ success: false, message: 'Failed to fetch notification preferences' });
     }
   }
@@ -373,21 +374,21 @@ class NotificationController {
         res.status(401).json({ success: false, message: 'User not authenticated' });
         return;
       }
-      
+
       const userIdNum = Number(userId); // Convert userId to number
 
       // Support both formats:
       // 1. Array format: { preferences: [ ... ] }
       // 2. New nested format: { notificationSettings: { type: { enabled, channels: {...} } } }
       let preferences = [];
-      
+
       if (req.body.preferences && Array.isArray(req.body.preferences)) {
         // Handle legacy format - array of preferences
         preferences = req.body.preferences;
       } else if (req.body.notificationSettings && typeof req.body.notificationSettings === 'object') {
         // Handle new nested format from ProfilePage
         const notificationSettings = req.body.notificationSettings;
-        
+
         // Convert from nested format to flat array
         preferences = Object.entries(notificationSettings).map(([eventType, setting]) => {
           // Check if it's the new format with enabled and channels
@@ -423,17 +424,17 @@ class NotificationController {
           return null;
         }).filter(Boolean); // Remove null entries
       } else {
-        res.status(400).json({ 
-          success: false, 
-          message: 'Invalid input format: preferences array or notificationSettings object is required' 
+        res.status(400).json({
+          success: false,
+          message: 'Invalid input format: preferences array or notificationSettings object is required'
         });
         return;
       }
 
       if (!preferences.length) {
-        res.status(400).json({ 
-          success: false, 
-          message: 'No valid notification preferences provided' 
+        res.status(400).json({
+          success: false,
+          message: 'No valid notification preferences provided'
         });
         return;
       }
@@ -445,10 +446,10 @@ class NotificationController {
         const { eventType, emailEnabled, pushEnabled, inAppEnabled } = prefData;
 
         if (!eventType) {
-          console.warn('Skipping preference update due to missing eventType');
+          logger.warn('Skipping preference update due to missing eventType');
           continue; // Skip if eventType is missing
         }
-        
+
         let preference = await preferenceRepository.findOne({ where: { userId: userIdNum, eventType } });
 
         if (!preference) {
@@ -461,7 +462,7 @@ class NotificationController {
 
         updatedPreferences.push(await preferenceRepository.save(preference));
       }
-      
+
       // Map to frontend expected format
       const formattedPreferences = updatedPreferences.map(p => ({
         id: p.id,
@@ -478,11 +479,11 @@ class NotificationController {
         data: formattedPreferences
       });
     } catch (error) {
-      console.error('Error updating notification preferences:', error);
+      logger.error('Error updating notification preferences:', error);
       res.status(500).json({ success: false, message: 'Failed to update notification preferences' });
     }
   }
-  
+
   /**
    * Update a single notification preference for the authenticated user
    * @route PUT /api/notifications/preferences/:eventType
@@ -494,7 +495,7 @@ class NotificationController {
         res.status(401).json({ success: false, message: 'User not authenticated' });
         return;
       }
-      
+
       const userIdNum = Number(userId); // Convert userId to number
       const { eventType } = req.params;
       const { emailEnabled, pushEnabled, inAppEnabled } = req.body;
@@ -516,7 +517,7 @@ class NotificationController {
       if (inAppEnabled !== undefined) preference.inAppEnabled = inAppEnabled;
 
       const updatedPreference = await preferenceRepository.save(preference);
-      
+
       // Map to frontend expected format
       const formattedPreference = {
         id: updatedPreference.id,
@@ -529,7 +530,7 @@ class NotificationController {
 
       res.status(200).json(formattedPreference);
     } catch (error) {
-      console.error(`Error updating notification preference for ${req.params.eventType}:`, error);
+      logger.error(`Error updating notification preference for ${req.params.eventType}:`, error);
       res.status(500).json({ success: false, message: 'Failed to update notification preference' });
     }
   }
@@ -545,13 +546,13 @@ class NotificationController {
         res.status(401).json({ success: false, message: 'User not authenticated' });
         return;
       }
-      
+
       const notificationIdParam = req.params.id;
       if (!notificationIdParam) {
         res.status(400).json({ success: false, message: 'Notification ID parameter is required' });
         return;
       }
-      
+
       // --- Start Validation ---
       const notificationId = parseInt(notificationIdParam, 10);
       if (isNaN(notificationId)) {
@@ -573,7 +574,7 @@ class NotificationController {
 
       res.status(200).json({ success: true, message: 'Notification deleted' });
     } catch (error) {
-      console.error('Error deleting notification:', error);
+      logger.error('Error deleting notification:', error);
       res.status(500).json({ success: false, message: 'Failed to delete notification' });
     }
   }
@@ -602,7 +603,7 @@ class NotificationController {
       res.status(200).json({ success: true, message: 'All notifications deleted successfully' });
 
     } catch (error) {
-      console.error('Error deleting all notifications:', error);
+      logger.error('Error deleting all notifications:', error);
       res.status(500).json({ success: false, message: 'Internal server error while deleting notifications' });
     }
   }

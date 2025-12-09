@@ -1,81 +1,7 @@
-/**
- * Utility functions for input validation
- */
-
 import { z } from 'zod';
 
 /**
- * Common Zod validation patterns for reuse across the application
- */
-export const ValidationPatterns = {
-  // Common ID pattern - positive integer
-  id: () => z.number().int().positive('ID must be a positive integer'),
-  
-  // Common string ID param from URL params (gets converted to number)
-  idParam: () => z.string()
-    .regex(/^\d+$/, 'Invalid ID format')
-    .transform(Number),
-  
-  // Email validation
-  email: () => z.string().email('Enter a valid email'),
-  
-  // Password validation with regex for complexity
-  password: () => z.string()
-    .min(8, 'Password must be at least 8 characters long')
-    .regex(
-      /^(?=.*\d)(?=.*[a-z])(?=.*[A-Z])(?=.*[!@#$%^&*])/,
-      'Password must contain at least one number, one uppercase letter, one lowercase letter, and one special character'
-    ),
-  
-  // Date validation
-  isoDate: () => z.string().datetime('Invalid date format'),
-  
-  // Common pagination params
-  pagination: () => z.object({
-    page: z.string().regex(/^\d+$/, 'Page must be a positive integer')
-      .transform(Number)
-      .refine(val => val >= 1, 'Page must be a positive integer')
-      .optional(),
-    limit: z.string().regex(/^\d+$/, 'Limit must be a number')
-      .transform(Number)
-      .refine(val => val >= 1 && val <= 100, 'Limit must be between 1 and 100')
-      .optional(),
-  }),
-  
-  // Tags array validation
-  tagsArray: () => z.preprocess(
-    (val) => typeof val === 'string' ? JSON.parse(val) : val,
-    z.array(z.string().trim().min(1, 'Tag names cannot be empty')).optional().nullable()
-  ),
-};
-
-/**
- * Helper to create request validation schema with proper types
- */
-export const createRequestSchema = <T extends z.ZodRawShape>({
-  body,
-  query,
-  params,
-}: {
-  body?: z.ZodObject<T>;
-  query?: z.ZodObject<T>;
-  params?: z.ZodObject<T>;
-} = {}) => {
-  const schema: Record<string, z.ZodTypeAny> = {};
-  
-  if (body) schema.body = body;
-  if (query) schema.query = query;
-  if (params) schema.params = params;
-  
-  return z.object(schema);
-};
-
-export default ValidationPatterns;
-
-/**
- * Validates if a string is a valid email format
- * @param email Email address to validate
- * @returns Boolean indicating if the email format is valid
+ * Email validation helper function
  */
 export const isValidEmail = (email: string): boolean => {
   const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -83,38 +9,218 @@ export const isValidEmail = (email: string): boolean => {
 };
 
 /**
- * Validates password strength
- * @param password Password to validate
- * @returns Object with valid flag and reason if invalid
+ * Validation pattern helpers
  */
-export const validatePassword = (password: string): { valid: boolean, reason?: string } => {
-  if (!password) {
-    return { valid: false, reason: 'Password is required' };
-  }
-  
-  if (password.length < 8) {
-    return { valid: false, reason: 'Password must be at least 8 characters long' };
-  }
-  
-  // Additional strength checks could be added here
-  // Example: require uppercase, lowercase, numbers, special chars
-  
-  return { valid: true };
+export const ValidationPatterns = {
+  email: () => z.string().email('Invalid email format'),
+  password: () => z.string()
+    .min(8, 'Password must be at least 8 characters')
+    .regex(/^(?=.*[A-Za-z])(?=.*\d)/, 'Password must contain at least one letter and one number'),
+  id: () => z.string().min(1, 'ID is required'),
 };
 
 /**
- * Validates if a user input is safe (no HTML or script injection)
- * @param input User input string
- * @returns Sanitized input string
+ * Helper to create request schema with body, params, query
  */
-export const sanitizeUserInput = (input: string): string => {
-  if (!input) return '';
-  
-  // Replace dangerous HTML characters
-  return input
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#x27;')
-    .replace(/\//g, '&#x2F;');
-}; 
+export const createRequestSchema = (schema: { body?: z.ZodTypeAny; params?: z.ZodTypeAny; query?: z.ZodTypeAny }) => {
+  return z.object(schema);
+};
+
+
+/**
+ * Common validation schemas
+ */
+
+// ID validation
+export const idSchema = z.string().min(1, 'ID is required');
+export const optionalIdSchema = z.string().optional();
+
+// Email validation
+export const emailSchema = z.string().email('Invalid email format');
+
+// Password validation (minimum 8 characters, at least one letter and one number)
+export const passwordSchema = z
+  .string()
+  .min(8, 'Password must be at least 8 characters')
+  .regex(/^(?=.*[A-Za-z])(?=.*\d)/, 'Password must contain at least one letter and one number');
+
+/**
+ * Ticket validation schemas
+ */
+
+// Create ticket schema
+export const createTicketSchema = z.object({
+  subject: z.string().min(1, 'Subject is required').max(200, 'Subject too long'),
+  description: z.string().min(1, 'Description is required'),
+  requesterId: idSchema,
+  priorityId: idSchema,
+  assigneeId: optionalIdSchema,
+  departmentId: optionalIdSchema,
+  typeId: optionalIdSchema,
+  dueDate: z.string().datetime().optional(),
+  tags: z.array(z.string()).optional(),
+});
+
+// Update ticket schema
+export const updateTicketSchema = z.object({
+  subject: z.string().min(1).max(200).optional(),
+  description: z.string().min(1).optional(),
+  assigneeId: optionalIdSchema,
+  departmentId: optionalIdSchema,
+  priorityId: optionalIdSchema,
+  statusId: optionalIdSchema,
+  typeId: optionalIdSchema,
+  dueDate: z.string().datetime().optional(),
+  tags: z.array(z.string()).optional(),
+});
+
+// Add comment schema
+export const addCommentSchema = z.object({
+  content: z.string().min(1, 'Comment content is required'),
+  isInternal: z.boolean().optional(),
+});
+
+/**
+ * Authentication validation schemas
+ */
+
+// Register schema
+export const registerSchema = z.object({
+  email: emailSchema,
+  password: passwordSchema,
+  firstName: z.string().min(1, 'First name is required').max(50),
+  lastName: z.string().min(1, 'Last name is required').max(50),
+  organizationId: idSchema,
+  role: z.enum(['user', 'agent', 'admin']).optional(),
+  avatar: z.string().url().optional(),
+  phone: z.string().optional(),
+  timezone: z.string().optional(),
+  language: z.string().optional(),
+});
+
+// Login schema
+export const loginSchema = z.object({
+  email: emailSchema,
+  password: z.string().min(1, 'Password is required'),
+});
+
+// Change password schema
+export const changePasswordSchema = z.object({
+  currentPassword: z.string().min(1, 'Current password is required'),
+  newPassword: passwordSchema,
+});
+
+// Reset password schema
+export const resetPasswordSchema = z.object({
+  token: z.string().min(1, 'Token is required'),
+  password: passwordSchema,
+});
+
+// Forgot password schema
+export const forgotPasswordSchema = z.object({
+  email: emailSchema,
+});
+
+/**
+ * Settings validation schemas
+ */
+
+// Email settings schema
+export const emailSettingsSchema = z.object({
+  smtpServer: z.string().min(1, 'SMTP server is required'),
+  smtpPort: z.number().int().min(1).max(65535),
+  smtpUsername: z.string().min(1, 'SMTP username is required'),
+  smtpPassword: z.string().optional(), // Optional for updates
+  emailFromName: z.string().min(1, 'From name is required'),
+  emailReplyTo: emailSchema,
+  enableEmailNotifications: z.boolean(),
+});
+
+// General settings schema
+export const generalSettingsSchema = z.object({
+  siteName: z.string().min(1).max(100).optional(),
+  siteUrl: z.string().url().optional(),
+  supportEmail: emailSchema.optional(),
+  timezone: z.string().optional(),
+  dateFormat: z.string().optional(),
+  timeFormat: z.string().optional(),
+});
+
+// AI settings schema
+export const aiSettingsSchema = z.object({
+  aiApiKey: z.string().optional(),
+  aiModelName: z.string().optional(),
+  aiProvider: z.enum(['gemini', 'openai', 'custom']).optional(),
+});
+
+/**
+ * User validation schemas
+ */
+
+// Update user schema
+export const updateUserSchema = z.object({
+  firstName: z.string().min(1).max(50).optional(),
+  lastName: z.string().min(1).max(50).optional(),
+  email: emailSchema.optional(),
+  role: z.enum(['user', 'agent', 'admin']).optional(),
+  isActive: z.boolean().optional(),
+  avatar: z.string().url().optional(),
+  phone: z.string().optional(),
+  timezone: z.string().optional(),
+  language: z.string().optional(),
+});
+
+/**
+ * Knowledge Base validation schemas
+ */
+
+// Create article schema
+export const createArticleSchema = z.object({
+  title: z.string().min(1, 'Title is required').max(200),
+  content: z.string().min(1, 'Content is required'),
+  categoryId: idSchema,
+  status: z.enum(['draft', 'published', 'archived']).optional(),
+  tags: z.array(z.string()).optional(),
+  excerpt: z.string().max(500).optional(),
+  metaTitle: z.string().max(200).optional(),
+  metaDescription: z.string().max(300).optional(),
+});
+
+// Update article schema
+export const updateArticleSchema = createArticleSchema.partial();
+
+/**
+ * Validation helper function
+ */
+export const validateSchema = <T>(schema: z.ZodSchema<T>, data: unknown): { success: boolean; data?: T; errors?: z.ZodError } => {
+  try {
+    const validated = schema.parse(data);
+    return { success: true, data: validated };
+  } catch (error) {
+    if (error instanceof z.ZodError) {
+      return { success: false, errors: error };
+    }
+    throw error;
+  }
+};
+
+/**
+ * Express middleware for validation
+ */
+export const validate = (schema: z.ZodSchema) => {
+  return (req: any, res: any, next: any) => {
+    const result = validateSchema(schema, req.body);
+    if (!result.success) {
+      return res.status(400).json({
+        status: 'error',
+        message: 'Validation failed',
+        errors: result.errors?.errors.map(err => ({
+          field: err.path.join('.'),
+          message: err.message,
+        })),
+      });
+    }
+    req.validatedBody = result.data;
+    next();
+  };
+};

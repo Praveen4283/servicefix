@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useState, useEffect, useCallback, ReactNode } from 'react';
 import { useAuth } from './AuthContext';
 import apiClient from '../services/apiClient';
+import { logger } from '../utils/frontendLogger';
 // import { useNotification } from './NotificationContext';
 // import { isDevelopment } from '../utils/environment';
 
@@ -230,7 +231,7 @@ export const TicketProvider: React.FC<{ children: ReactNode }> = ({ children }) 
 
         setError(null); // Clear previous errors
       } catch (err: any) {
-        console.error("Error fetching dropdown data:", err);
+        logger.error("Error fetching dropdown data:", err);
         setError("Failed to load essential form data. Please try refreshing.");
         // Keep existing mock data if in dev and fallback is enabled?
         // Or set states to empty arrays:
@@ -252,38 +253,38 @@ export const TicketProvider: React.FC<{ children: ReactNode }> = ({ children }) 
       setError('Authentication required');
       return;
     }
-    
+
     setIsLoading(true);
-    
+
     try {
       // Build query parameters
       const params = new URLSearchParams();
       params.append('page', page.toString());
       params.append('limit', limit.toString());
-      
+
       // Add filters to query parameters
       if (filters.isOpen !== undefined) {
         params.append('isOpen', filters.isOpen.toString());
       }
-      
+
       // Add assigneeId filter if provided - the controller uses 'assignee' rather than 'assigneeId'
       if (filters.assigneeId !== undefined) {
         params.append('assignee', filters.assigneeId.toString());
       }
-      
+
       // Add other filters here if needed
       // if (filters.priorityName) { ... }
-      
+
       const queryString = params.toString();
-      
+
       const response = await apiClient.get<any>(`/tickets?${queryString}`);
-      console.log('API response for tickets:', response);
-      
+      logger.debug('API response for tickets:', response);
+
       // Handling response structure which may be nested under 'data'
       const responseData = response.data || response;
       const fetchedTickets = responseData.tickets || [];
       const paginationData = responseData.pagination || { page, limit, total: 0, totalPages: 1 };
-      
+
       // Map snake_case date fields to camelCase for consistency
       const normalizedTickets = fetchedTickets.map((ticket: TicketBackendResponse) => {
         // Normalize dates by mapping snake_case to camelCase if needed
@@ -296,10 +297,10 @@ export const TicketProvider: React.FC<{ children: ReactNode }> = ({ children }) 
           lastActivity: ticket.lastActivity || new Date().toISOString() // Fallback for lastActivity
         } as Ticket;
       });
-      
+
       setTickets(normalizedTickets);
       setFilteredTickets(normalizedTickets);
-      
+
       // Normalize pagination structure
       const normalizedPagination: PaginationResponse = {
         page: paginationData.page || page,
@@ -308,7 +309,7 @@ export const TicketProvider: React.FC<{ children: ReactNode }> = ({ children }) 
         totalPages: paginationData.totalPages || 1,
         total: paginationData.total || 0 // Include original total for backward compatibility
       };
-      
+
       // Set state with only the standard fields
       setPagination({
         page: normalizedPagination.page,
@@ -316,10 +317,10 @@ export const TicketProvider: React.FC<{ children: ReactNode }> = ({ children }) 
         totalCount: normalizedPagination.totalCount,
         totalPages: normalizedPagination.totalPages
       });
-      
+
       return { tickets: normalizedTickets, pagination: normalizedPagination };
     } catch (error) {
-      console.error('Error fetching tickets:', error);
+      logger.error('Error fetching tickets:', error);
       setError('Failed to fetch tickets');
       setTickets([]);
       setFilteredTickets([]);
@@ -332,17 +333,17 @@ export const TicketProvider: React.FC<{ children: ReactNode }> = ({ children }) 
   // Fetch a single ticket by ID
   const fetchTicketById = useCallback(async (id: string) => {
     if (!isAuthenticated) return;
-    
+
     setIsLoading(true);
     setError(null);
-    
+
     try {
       // Use real API call
       const response = await apiClient.get<{ ticket: TicketBackendResponse }>(`/tickets/${id}`); // Expect { ticket: ... }
-      
+
       // Extract the ticket object directly from the response
       const fetchedTicket = response.ticket; // Access response.ticket directly
-      
+
       if (fetchedTicket) {
         // Create normalized ticket with proper camelCase date fields
         const normalizedTicket = {
@@ -361,16 +362,16 @@ export const TicketProvider: React.FC<{ children: ReactNode }> = ({ children }) 
             createdAt: attachment.createdAt || new Date().toISOString()
           }))
         } as TicketDetail;
-        
+
         setCurrentTicket(normalizedTicket);
       } else {
         // Handle case where ticket data might be missing in the response
-        console.error('Ticket data missing in API response:', response);
+        logger.error('Ticket data missing in API response:', response);
         setError('Received invalid ticket data format.');
         setCurrentTicket(null);
       }
     } catch (err) {
-      console.error('Error fetching ticket:', err);
+      logger.error('Error fetching ticket:', err);
       setError('Failed to fetch ticket details. Please try again.');
     } finally {
       setIsLoading(false);
@@ -382,24 +383,24 @@ export const TicketProvider: React.FC<{ children: ReactNode }> = ({ children }) 
    */
   const createTicket = async (ticketData: any): Promise<Ticket | undefined> => {
     if (!isAuthenticated) return;
-    
+
     setIsLoading(true);
     setError(null);
-    
+
     try {
       // Use real API call
       const response = await apiClient.post('/tickets', ticketData);
-      
+
       // Add the new ticket to the state
       const newTicket = response;
       setTickets(prevTickets => [...prevTickets, newTicket]);
       setFilteredTickets(prevTickets => [...prevTickets, newTicket]);
-      
+
       return newTicket;
     } catch (err) {
       setError('Failed to create ticket. Please try again.');
-      console.error('Error creating ticket:', err);
-      
+      logger.error('Error creating ticket:', err);
+
       return undefined;
     } finally {
       setIsLoading(false);
@@ -409,33 +410,33 @@ export const TicketProvider: React.FC<{ children: ReactNode }> = ({ children }) 
   // Update a ticket
   const updateTicket = useCallback(async (id: string, ticketData: any) => {
     if (!isAuthenticated) return;
-    
+
     setIsLoading(true);
     setError(null);
-    
+
     try {
       // Create a copy of ticketData to avoid modifying the original
       const processedData = { ...ticketData };
-      
+
       // Handle assigneeId conversion to number if it's a UUID string
       if (processedData.assigneeId !== undefined) {
         // If it's a string that doesn't look like a number, try to extract numeric part or set to null
         if (typeof processedData.assigneeId === 'string' && isNaN(Number(processedData.assigneeId))) {
-          console.log('Converting non-numeric assigneeId to null:', processedData.assigneeId);
+          logger.debug('Converting non-numeric assigneeId to null:', processedData.assigneeId);
           processedData.assigneeId = null;
-        } 
+        }
         // If it's a string that looks like a number, convert to number
         else if (typeof processedData.assigneeId === 'string') {
           processedData.assigneeId = Number(processedData.assigneeId);
         }
-        
-        console.log('Final assigneeId value:', processedData.assigneeId);
+
+        logger.debug('Final assigneeId value:', processedData.assigneeId);
       }
-      
+
       // Use the processed data for the API call
       const response = await apiClient.put(`/tickets/${id}`, processedData);
       const updatedTicket = response.ticket || response;
-      
+
       // Update the tickets list with the updated ticket
       setTickets(prevTickets =>
         prevTickets.map(ticket =>
@@ -444,7 +445,7 @@ export const TicketProvider: React.FC<{ children: ReactNode }> = ({ children }) 
             : ticket
         )
       );
-      
+
       // Also update filtered tickets list
       setFilteredTickets(prevTickets =>
         prevTickets.map(ticket =>
@@ -453,15 +454,15 @@ export const TicketProvider: React.FC<{ children: ReactNode }> = ({ children }) 
             : ticket
         )
       );
-      
+
       // If we are viewing the current ticket being updated, update the current ticket state
       if (currentTicket && currentTicket.id === id) {
         setCurrentTicket({ ...currentTicket, ...updatedTicket, updatedAt: new Date().toISOString() });
       }
-      
+
       return updatedTicket;
     } catch (err: any) {
-      console.error('Error updating ticket:', err);
+      logger.error('Error updating ticket:', err);
       setError(err.message || 'Failed to update ticket. Please try again.');
       throw err;
     } finally {
@@ -472,23 +473,23 @@ export const TicketProvider: React.FC<{ children: ReactNode }> = ({ children }) 
   // Delete a ticket
   const deleteTicket = useCallback(async (id: string) => {
     if (!isAuthenticated) return;
-    
+
     setIsLoading(true);
     setError(null);
-    
+
     try {
       // In a real app, this would be an API call
       await new Promise(resolve => setTimeout(resolve, 800)); // Simulate network request
-      
+
       setTickets(prevTickets => prevTickets.filter(ticket => ticket.id !== id));
       setFilteredTickets(prevTickets => prevTickets.filter(ticket => ticket.id !== id));
-      
+
       if (currentTicket && currentTicket.id === id) {
         setCurrentTicket(null);
       }
     } catch (err) {
       setError('Failed to delete ticket. Please try again.');
-      console.error('Error deleting ticket:', err);
+      logger.error('Error deleting ticket:', err);
     } finally {
       setIsLoading(false);
     }
@@ -497,27 +498,27 @@ export const TicketProvider: React.FC<{ children: ReactNode }> = ({ children }) 
   // Add a comment to a ticket
   const addComment = useCallback(async (ticketId: string, comment: string, isInternal: boolean) => {
     if (!isAuthenticated) return;
-    
+
     setIsLoading(true);
     setError(null);
-    
+
     try {
       // Use direct API call to add the comment
       const response = await apiClient.post(`/tickets/${ticketId}/comments`, {
         content: comment,
         isInternal
       });
-      
+
       // If the API call is successful, refresh the ticket data
       if (response) {
         if (currentTicket && currentTicket.id === ticketId) {
           await fetchTicketById(ticketId);
         }
       }
-      
+
       return response;
     } catch (err: any) {
-      console.error('Error adding comment:', err);
+      logger.error('Error adding comment:', err);
       setError(err.message || 'Failed to add comment. Please try again.');
       throw err;
     } finally {
@@ -528,22 +529,22 @@ export const TicketProvider: React.FC<{ children: ReactNode }> = ({ children }) 
   // Filter tickets based on criteria
   const filterTickets = useCallback((filters: any) => {
     let result = [...tickets];
-    
+
     // Filter by status
     if (filters.status) {
       result = result.filter(ticket => ticket.status.id === filters.status);
     }
-    
+
     // Filter by priority
     if (filters.priority) {
       result = result.filter(ticket => ticket.priority.id === filters.priority);
     }
-    
+
     // Filter by department
     if (filters.department) {
       result = result.filter(ticket => ticket.department && ticket.department.id === filters.department);
     }
-    
+
     // Filter by assignee
     if (filters.assignee) {
       if (filters.assignee === 'unassigned') {
@@ -552,7 +553,7 @@ export const TicketProvider: React.FC<{ children: ReactNode }> = ({ children }) 
         result = result.filter(ticket => ticket.assignee && ticket.assignee.id === filters.assignee);
       }
     }
-    
+
     // Filter by date range
     if (filters.dateFrom && filters.dateTo) {
       const dateFrom = new Date(filters.dateFrom).getTime();
@@ -562,7 +563,7 @@ export const TicketProvider: React.FC<{ children: ReactNode }> = ({ children }) 
         return createdDate >= dateFrom && createdDate <= dateTo;
       });
     }
-    
+
     setFilteredTickets(result);
   }, [tickets]);
 
@@ -572,9 +573,9 @@ export const TicketProvider: React.FC<{ children: ReactNode }> = ({ children }) 
       setFilteredTickets(tickets);
       return;
     }
-    
+
     const searchTerms = query.toLowerCase().split(' ');
-    
+
     const result = tickets.filter(ticket => {
       const searchString = `
         ${ticket.id.toLowerCase()}
@@ -585,10 +586,10 @@ export const TicketProvider: React.FC<{ children: ReactNode }> = ({ children }) 
         ${ticket.priority.name.toLowerCase()}
         ${ticket.tags ? ticket.tags.join(' ').toLowerCase() : ''}
       `;
-      
+
       return searchTerms.every(term => searchString.includes(term));
     });
-    
+
     setFilteredTickets(result);
   }, [tickets]);
 
@@ -600,11 +601,11 @@ export const TicketProvider: React.FC<{ children: ReactNode }> = ({ children }) 
   // Get agents list for assignment
   const getAgentsList = useCallback(async (): Promise<User[]> => {
     if (!isAuthenticated) return [];
-    
+
     try {
-      const response = await apiClient.get<{ users: any[] }>('/users/agents');
-      const agents = response.users || [];
-      
+      const response = await apiClient.get<{ agents: any[] }>('/users/roles/agent'); // Fixed: was /users/agents
+      const agents = response.agents || []; // Fixed: was response.users
+
       // Format agents to match User interface with string IDs
       const formattedAgents = agents.map((agent: any) => {
         return {
@@ -615,10 +616,10 @@ export const TicketProvider: React.FC<{ children: ReactNode }> = ({ children }) 
           avatar: agent.avatar || agent.avatarUrl || null
         };
       }) || [];
-      
+
       return formattedAgents;
     } catch (error) {
-      console.error('Failed to fetch agents list:', error);
+      logger.error('Failed to fetch agents list:', error);
       // Don't set error state to avoid UI disruption, just log it
       return [];
     }
@@ -627,10 +628,10 @@ export const TicketProvider: React.FC<{ children: ReactNode }> = ({ children }) 
   // Add addAttachment implementation after existing functions
   const addAttachment = useCallback(async (ticketId: string, formData: FormData) => {
     if (!isAuthenticated) return;
-    
+
     setIsLoading(true);
     setError(null);
-    
+
     try {
       // Use apiClient to upload attachments
       const response = await apiClient.post(`/tickets/${ticketId}/attachments`, formData, {
@@ -639,15 +640,15 @@ export const TicketProvider: React.FC<{ children: ReactNode }> = ({ children }) 
           'Content-Type': 'multipart/form-data',
         }
       });
-      
+
       // If we are viewing the current ticket being updated, refresh the data
       if (currentTicket && currentTicket.id === ticketId) {
         await fetchTicketById(ticketId);
       }
-      
+
       return response;
     } catch (err: any) {
-      console.error('Error uploading attachments:', err);
+      logger.error('Error uploading attachments:', err);
       setError(err.message || 'Failed to upload attachments. Please try again.');
       throw err;
     } finally {
@@ -658,15 +659,15 @@ export const TicketProvider: React.FC<{ children: ReactNode }> = ({ children }) 
   // Add getTicketHistory implementation
   const getTicketHistory = useCallback(async (ticketId: string) => {
     if (!isAuthenticated) return [];
-    
+
     try {
       // Call the API to get ticket history
       const response = await apiClient.get<{ history: any[] }>(`/tickets/${ticketId}/history`);
-      
+
       // Return the history array from the response
       return response.history || [];
     } catch (err: any) {
-      console.error('Error fetching ticket history:', err);
+      logger.error('Error fetching ticket history:', err);
       // Don't set error state here, let the component handle it
       return [];
     }

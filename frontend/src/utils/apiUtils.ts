@@ -1,6 +1,7 @@
 /**
  * Utility for API call retries with exponential backoff
  */
+import { logger } from './frontendLogger';
 
 /**
  * Executes a function with retry capability for API calls
@@ -15,35 +16,35 @@ export const withRetry = async <T>(
   delay = 1000
 ): Promise<T> => {
   let lastError: any;
-  
+
   for (let attempt = 0; attempt < maxRetries; attempt++) {
     try {
       return await fn();
     } catch (error: any) {
       lastError = error;
-      
+
       // Don't retry client errors (4xx) except for 429 (rate limit) and 408 (timeout)
       if (
-        error.response && 
-        error.response.status >= 400 && 
-        error.response.status < 500 && 
+        error.response &&
+        error.response.status >= 400 &&
+        error.response.status < 500 &&
         error.response.status !== 429 &&
         error.response.status !== 408
       ) {
         throw error;
       }
-      
-      console.warn(`API call attempt ${attempt + 1}/${maxRetries} failed, retrying in ${delay}ms...`, error);
-      
+
+      logger.warn(`API call attempt ${attempt + 1}/${maxRetries} failed, retrying in ${delay}ms...`, error);
+
       // Wait before the next retry
       await new Promise(resolve => setTimeout(resolve, delay));
-      
+
       // Exponential backoff with jitter
       delay = delay * 2 * (0.9 + Math.random() * 0.2);
     }
   }
-  
-  console.error(`API call failed after ${maxRetries} attempts`, lastError);
+
+  logger.error(`API call failed after ${maxRetries} attempts`, lastError);
   throw lastError;
 };
 

@@ -1,4 +1,4 @@
-import React from 'react';
+
 import {
   Box,
   Typography,
@@ -74,7 +74,7 @@ const TicketChart: React.FC<TicketChartProps> = ({
 }) => {
   const theme = useTheme();
   const isDarkMode = theme.palette.mode === 'dark';
-  
+
   // Default chart colors with theme integration
   const defaultColors = [
     theme.palette.primary.main,
@@ -84,9 +84,9 @@ const TicketChart: React.FC<TicketChartProps> = ({
     isDarkMode ? '#66bb6a' : '#4caf50', // green
     isDarkMode ? '#ec407a' : '#e91e63', // pink
   ];
-  
+
   const chartColors = colors || defaultColors;
-  
+
   // Helper function to create consistent chart styling
   const getChartColors = () => {
     return {
@@ -98,9 +98,9 @@ const TicketChart: React.FC<TicketChartProps> = ({
       }
     };
   };
-  
+
   const chartStyleColors = getChartColors();
-  
+
   // Custom tooltip component for recharts
   const CustomTooltip = ({ active, payload, label }: any) => {
     if (active && payload && payload.length) {
@@ -121,7 +121,7 @@ const TicketChart: React.FC<TicketChartProps> = ({
               left: 0,
               right: 0,
               height: '2px',
-              background: type === 'pie' 
+              background: type === 'pie'
                 ? `linear-gradient(90deg, ${chartColors[0]}, ${chartColors[1] || chartColors[0]})`
                 : chartColors[0],
               borderTopLeftRadius: 8,
@@ -129,10 +129,10 @@ const TicketChart: React.FC<TicketChartProps> = ({
             }
           }}
         >
-          <Typography 
-            variant="subtitle2" 
-            sx={{ 
-              color: theme.palette.text.primary, 
+          <Typography
+            variant="subtitle2"
+            sx={{
+              color: theme.palette.text.primary,
               borderBottom: `1px solid ${alpha(theme.palette.divider, 0.1)}`,
               pb: 1,
               mb: 1,
@@ -147,7 +147,7 @@ const TicketChart: React.FC<TicketChartProps> = ({
             const entryColor = entry.color || chartColors[index % chartColors.length];
             const entryName = entry.name || `Series ${index + 1}`;
             const entryValue = entry.value !== undefined ? entry.value : 'N/A';
-            
+
             return (
               <Box key={`item-${index}`} sx={{ display: 'flex', alignItems: 'center', mt: 1 }}>
                 <Box
@@ -217,15 +217,15 @@ const TicketChart: React.FC<TicketChartProps> = ({
                 ))}
               </Pie>
               <RechartsTooltip content={<CustomTooltip />} />
-              <Legend 
-                verticalAlign="bottom" 
-                layout="horizontal" 
-                wrapperStyle={{ 
+              <Legend
+                verticalAlign="bottom"
+                layout="horizontal"
+                wrapperStyle={{
                   paddingTop: 20,
                   fontSize: '0.85rem',
                   color: chartStyleColors.text,
                   fontWeight: 500
-                }} 
+                }}
                 iconType="circle"
                 iconSize={10}
               />
@@ -237,21 +237,21 @@ const TicketChart: React.FC<TicketChartProps> = ({
         return (
           <ResponsiveContainer width="100%" height={height}>
             <LineChart data={data} {...commonProps}>
-              <CartesianGrid 
-                strokeDasharray="3 3" 
-                stroke={chartStyleColors.grid} 
-                vertical={false} 
+              <CartesianGrid
+                strokeDasharray="3 3"
+                stroke={chartStyleColors.grid}
+                vertical={false}
                 opacity={0.6}
               />
-              <XAxis 
-                dataKey="name" 
-                tick={{ fontSize: 12, fill: chartStyleColors.text }} 
+              <XAxis
+                dataKey="name"
+                tick={{ fontSize: 12, fill: chartStyleColors.text }}
                 tickLine={{ stroke: chartStyleColors.grid }}
                 axisLine={{ stroke: chartStyleColors.grid }}
                 label={xAxisLabel ? { value: xAxisLabel, position: 'insideBottom', offset: -10, fill: chartStyleColors.text } : undefined}
                 dy={10}
               />
-              <YAxis 
+              <YAxis
                 tick={{ fontSize: 12, fill: chartStyleColors.text }}
                 tickLine={{ stroke: chartStyleColors.grid }}
                 axisLine={{ stroke: chartStyleColors.grid }}
@@ -283,21 +283,21 @@ const TicketChart: React.FC<TicketChartProps> = ({
                   <stop offset="95%" stopColor={chartColors[0]} stopOpacity={0.1} />
                 </linearGradient>
               </defs>
-              <CartesianGrid 
-                strokeDasharray="3 3" 
-                stroke={chartStyleColors.grid} 
-                vertical={false} 
+              <CartesianGrid
+                strokeDasharray="3 3"
+                stroke={chartStyleColors.grid}
+                vertical={false}
                 opacity={0.6}
               />
-              <XAxis 
-                dataKey="name" 
+              <XAxis
+                dataKey="name"
                 tick={{ fontSize: 12, fill: chartStyleColors.text }}
                 tickLine={{ stroke: chartStyleColors.grid }}
                 axisLine={{ stroke: chartStyleColors.grid }}
                 label={xAxisLabel ? { value: xAxisLabel, position: 'insideBottom', offset: -10, fill: chartStyleColors.text } : undefined}
                 dy={10}
               />
-              <YAxis 
+              <YAxis
                 tick={{ fontSize: 12, fill: chartStyleColors.text }}
                 tickLine={{ stroke: chartStyleColors.grid }}
                 axisLine={{ stroke: chartStyleColors.grid }}
@@ -327,21 +327,21 @@ const TicketChart: React.FC<TicketChartProps> = ({
         return (
           <ResponsiveContainer width="100%" height={height}>
             <BarChart data={data} {...commonProps}>
-              <CartesianGrid 
-                strokeDasharray="3 3" 
-                stroke={chartStyleColors.grid} 
-                vertical={false} 
+              <CartesianGrid
+                strokeDasharray="3 3"
+                stroke={chartStyleColors.grid}
+                vertical={false}
                 opacity={0.6}
               />
-              <XAxis 
-                dataKey="name" 
-                tick={{ fontSize: 12, fill: chartStyleColors.text }} 
+              <XAxis
+                dataKey="name"
+                tick={{ fontSize: 12, fill: chartStyleColors.text }}
                 tickLine={{ stroke: chartStyleColors.grid }}
                 axisLine={{ stroke: chartStyleColors.grid }}
                 label={xAxisLabel ? { value: xAxisLabel, position: 'insideBottom', offset: -10, fill: chartStyleColors.text } : undefined}
                 dy={10}
               />
-              <YAxis 
+              <YAxis
                 tick={{ fontSize: 12, fill: chartStyleColors.text }}
                 tickLine={{ stroke: chartStyleColors.grid }}
                 axisLine={{ stroke: chartStyleColors.grid }}
@@ -349,15 +349,15 @@ const TicketChart: React.FC<TicketChartProps> = ({
                 dx={-10}
               />
               <RechartsTooltip content={<CustomTooltip />} />
-              <Legend 
-                verticalAlign="top" 
-                wrapperStyle={{ 
-                  paddingTop: 10, 
+              <Legend
+                verticalAlign="top"
+                wrapperStyle={{
+                  paddingTop: 10,
                   paddingBottom: 10,
                   fontSize: '0.85rem',
                   color: chartStyleColors.text,
                   fontWeight: 500
-                }} 
+                }}
                 iconType="circle"
                 iconSize={8}
               />
@@ -381,21 +381,21 @@ const TicketChart: React.FC<TicketChartProps> = ({
         return (
           <ResponsiveContainer width="100%" height={height}>
             <BarChart data={data} {...commonProps}>
-              <CartesianGrid 
-                strokeDasharray="3 3" 
-                stroke={chartStyleColors.grid} 
-                vertical={false} 
+              <CartesianGrid
+                strokeDasharray="3 3"
+                stroke={chartStyleColors.grid}
+                vertical={false}
                 opacity={0.6}
               />
-              <XAxis 
-                dataKey="name" 
+              <XAxis
+                dataKey="name"
                 tick={{ fontSize: 12, fill: chartStyleColors.text }}
                 tickLine={{ stroke: chartStyleColors.grid }}
                 axisLine={{ stroke: chartStyleColors.grid }}
                 label={xAxisLabel ? { value: xAxisLabel, position: 'insideBottom', offset: -10, fill: chartStyleColors.text } : undefined}
                 dy={10}
               />
-              <YAxis 
+              <YAxis
                 tick={{ fontSize: 12, fill: chartStyleColors.text }}
                 tickLine={{ stroke: chartStyleColors.grid }}
                 axisLine={{ stroke: chartStyleColors.grid }}
@@ -411,9 +411,9 @@ const TicketChart: React.FC<TicketChartProps> = ({
                 {...animationProps}
               >
                 {data.map((entry, index) => (
-                  <Cell 
-                    key={`cell-${index}`} 
-                    fill={chartColors[index % chartColors.length]} 
+                  <Cell
+                    key={`cell-${index}`}
+                    fill={chartColors[index % chartColors.length]}
                     style={{ filter: `drop-shadow(0px 3px 6px ${alpha(chartColors[index % chartColors.length], 0.3)})` }}
                   />
                 ))}
@@ -425,9 +425,9 @@ const TicketChart: React.FC<TicketChartProps> = ({
   };
 
   return (
-    <Card 
-      elevation={0} 
-      sx={{ 
+    <Card
+      elevation={0}
+      sx={{
         height: '100%',
         borderRadius: 3,
         overflow: 'hidden',
@@ -435,8 +435,8 @@ const TicketChart: React.FC<TicketChartProps> = ({
         borderColor: theme.palette.divider,
         transition: 'transform 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275), box-shadow 0.4s',
         '&:hover': {
-          boxShadow: theme.palette.mode === 'dark' 
-            ? '0 10px 30px -12px rgba(0, 0, 0, 0.4)' 
+          boxShadow: theme.palette.mode === 'dark'
+            ? '0 10px 30px -12px rgba(0, 0, 0, 0.4)'
             : '0 10px 30px -12px rgba(0, 0, 0, 0.2)',
           transform: 'translateY(-8px)',
         },
@@ -448,7 +448,7 @@ const TicketChart: React.FC<TicketChartProps> = ({
           left: 0,
           right: 0,
           height: '4px',
-          background: type === 'pie' 
+          background: type === 'pie'
             ? `conic-gradient(${chartColors.join(', ')})`
             : `linear-gradient(90deg, ${chartColors[0]}, ${chartColors[1] || chartColors[0]})`
         }
@@ -459,15 +459,15 @@ const TicketChart: React.FC<TicketChartProps> = ({
           <CardHeader
             title={
               <Box sx={{ display: 'flex', alignItems: 'center' }}>
-                <Typography 
-                  variant="h6" 
-                  component="h2" 
-                  sx={{ 
+                <Typography
+                  variant="h6"
+                  component="h2"
+                  sx={{
                     fontWeight: 600,
                     fontSize: '1.1rem',
                     letterSpacing: '0.3px',
-                    color: theme.palette.mode === 'dark' 
-                      ? alpha(theme.palette.common.white, 0.95) 
+                    color: theme.palette.mode === 'dark'
+                      ? alpha(theme.palette.common.white, 0.95)
                       : theme.palette.text.primary
                   }}
                 >
@@ -484,9 +484,9 @@ const TicketChart: React.FC<TicketChartProps> = ({
             }
             action={
               onMoreClick && (
-                <IconButton 
-                  onClick={onMoreClick} 
-                  aria-label="more options" 
+                <IconButton
+                  onClick={onMoreClick}
+                  aria-label="more options"
                   sx={{
                     transition: 'transform 0.2s',
                     '&:hover': {
@@ -504,27 +504,27 @@ const TicketChart: React.FC<TicketChartProps> = ({
           <Divider />
         </>
       )}
-      <CardContent sx={{ 
-        p: { xs: 2.5, sm: 3 }, 
-        pt: title ? 2.5 : 3, 
+      <CardContent sx={{
+        p: { xs: 2.5, sm: 3 },
+        pt: title ? 2.5 : 3,
         height: title ? `calc(100% - 76px)` : '100%',
         display: 'flex',
         flexDirection: 'column',
         justifyContent: 'center'
       }}>
         {isLoading ? (
-          <Box 
-            sx={{ 
-              height: height, 
-              display: 'flex', 
-              flexDirection: 'column', 
-              justifyContent: 'center' 
+          <Box
+            sx={{
+              height: height,
+              display: 'flex',
+              flexDirection: 'column',
+              justifyContent: 'center'
             }}
           >
-            <Skeleton 
-              variant="rectangular" 
-              height={height - 20} 
-              sx={{ 
+            <Skeleton
+              variant="rectangular"
+              height={height - 20}
+              sx={{
                 borderRadius: 2,
                 animation: "pulse 1.5s ease-in-out 0.5s infinite",
                 '@keyframes pulse': {
@@ -532,21 +532,21 @@ const TicketChart: React.FC<TicketChartProps> = ({
                   '50%': { opacity: 0.9 },
                   '100%': { opacity: 0.6 },
                 }
-              }} 
+              }}
             />
           </Box>
         ) : data.length === 0 ? (
-          <Box 
-            sx={{ 
-              height: height, 
-              display: 'flex', 
-              flexDirection: 'column', 
-              justifyContent: 'center', 
-              alignItems: 'center' 
+          <Box
+            sx={{
+              height: height,
+              display: 'flex',
+              flexDirection: 'column',
+              justifyContent: 'center',
+              alignItems: 'center'
             }}
           >
-            <Typography 
-              variant="body1" 
+            <Typography
+              variant="body1"
               color="text.secondary"
               sx={{
                 fontWeight: 500,
@@ -560,9 +560,9 @@ const TicketChart: React.FC<TicketChartProps> = ({
             </Typography>
           </Box>
         ) : (
-          <Box sx={{ 
-            height: height, 
-            opacity: 0, 
+          <Box sx={{
+            height: height,
+            opacity: 0,
             animation: 'fadeIn 0.8s ease-out forwards 0.2s',
             '@keyframes fadeIn': {
               from: { opacity: 0, transform: 'translateY(10px)' },

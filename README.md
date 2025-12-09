@@ -1,11 +1,12 @@
 # ServiceFix - Service Desk & Support Ticket System
 
-*Last Updated: July 16, 2024*
+**Last Updated:** December 9, 2025*
 
 A comprehensive service desk and ticket management system built with React, Node.js, and PostgreSQL.
 
 ## Recent Improvements
 
+- 🔌 **Socket.IO Connection Fix**: Fixed critical WebSocket connection issues causing duplicate connections, premature disconnects during navigation, and 30-second timeout errors. Real-time notifications now work reliably with a single, stable socket connection throughout the user session
 - 🤖 **Enterprise-Ready Chatbot**: Enhanced chatbot implementation with numbered list options for selections, support for both numeric and name-based selection, improved tag input with skip option, and clearer UI prompts
 - 🔄 **Form Submission Fix**: Fixed continuous loading icon issue in CreateTicketPage by implementing proper local submitting state and reliable form validation
 - 🏢 **Organization ID Fix**: Replaced hardcoded organization ID (1001) in SettingsPage with authenticated user's organization ID, including proper null checks and TypeScript error fixes
@@ -46,6 +47,7 @@ A comprehensive service desk and ticket management system built with React, Node
 - 🔔 **Notification System Fixes**: Enhanced notification system with proper localStorage cleanup on logout, improved data synchronization between backend and frontend, and multi-stage retry logic for pagination discrepancies
 - 🧠 **Smart Notification Fetching**: Added intelligent retry logic when backend pagination data indicates more notifications exist than are initially returned
 - 🗄️ **Local Storage Management**: Improved localStorage synchronization with React state to prevent notification state mismatches
+- ⚙️ **Settings Refactor**: Migrated settings from JSON blob to individual database columns for improved data integrity and query performance
 
 ## Features
 
@@ -1491,91 +1493,4 @@ Ongoing optimization efforts:
 | HeroSection | 3.2.0 | May 22, 2024 |
 | TicketContext | 3.3.0 | May 22, 2024 |
 
-## Version History
-
-ServiceFix maintains detailed version history to enable rollback to previous versions if needed.
-
-### Git-Based Version Control
-
-All code is tracked in Git, allowing for easy restoration to any previous commit:
-
-```bash
-# View commit history with details
-git log --pretty=format:"%h %ad | %s%d [%an]" --graph --date=short
-
-# Restore a specific file to a previous version
-git checkout [commit-hash] -- path/to/file
-
-# Restore the entire codebase to a previous state
-git checkout [commit-hash]
-```
-
-### Component Version History
-
-Key frontend components and their latest significant changes:
-
-| Component | Latest Version | Last Updated | File Path |
-|-----------|---------------|-------------|-----------|
-| LandingPage | 2.5.0 | May 22, 2024 | frontend/src/pages/LandingPage.tsx |
-| HeroSection | 3.2.0 | May 22, 2024 | frontend/src/components/landing/HeroSection.tsx |
-| FeaturesSection | 2.9.0 | May 22, 2024 | frontend/src/components/landing/FeaturesSection.tsx |
-| TestimonialsSection | 2.6.0 | May 22, 2024 | frontend/src/components/landing/TestimonialsSection.tsx |
-| PricingSection | 2.5.0 | May 22, 2024 | frontend/src/components/landing/PricingSection.tsx |
-| ContactSection | 2.3.0 | May 22, 2024 | frontend/src/components/landing/ContactSection.tsx |
-| FooterSection | 2.0.0 | May 22, 2024 | frontend/src/components/landing/FooterSection.tsx |
-| ChatbotWidget | 2.7.0 | May 22, 2024 | frontend/src/components/ChatbotWidget.tsx |
-| ReportsPage | 3.1.0 | May 22, 2024 | frontend/src/pages/ReportsPage.tsx |
-| KnowledgeBasePage | 2.8.0 | May 22, 2024 | frontend/src/pages/KnowledgeBasePage.tsx |
-| AnalyticsDashboardPage | 3.0.0 | May 22, 2024 | frontend/src/pages/AnalyticsDashboardPage.tsx |
-| CookiesPage | 1.0.0 | May 22, 2024 | frontend/src/pages/CookiesPage.tsx |
-| ProfilePage | 2.2.0 | May 26, 2024 | frontend/src/pages/ProfilePage.tsx |
-| TicketContext | 3.3.0 | May 22, 2024 | frontend/src/context/TicketContext.tsx |
-| AuthContext | 2.7.0 | May 26, 2024 | frontend/src/context/AuthContext.tsx |
-| NotificationContext | 2.4.0 | June 27, 2024 | frontend/src/context/NotificationContext.tsx |
-| NotificationPreferencesContext | 1.3.0 | May 27, 2024 | frontend/src/context/NotificationPreferencesContext.tsx |
-| ThemeContext | 1.5.0 | May 22, 2024 | frontend/src/context/ThemeContext.tsx |
-| CookieConsentContext | 1.2.0 | May 22, 2024 | frontend/src/context/CookieConsentContext.tsx |
-
-For a complete and detailed version history of all components, including changelogs and optimization plans, please refer to the [VERSION_HISTORY.md](./VERSION_HISTORY.md) file in the project root. This file contains:
-
-- Detailed changelogs for all major components
-- Component size metrics
-- Optimization plans and strategies
-- Recent fixes and updates
-- Known stable versions for rollback purposes
-
-The VERSION_HISTORY.md file is regularly updated with each release and serves as the definitive record of changes to the application.
-
-### How to Restore Previous Versions
-
-#### Using Git
-
-```bash
-# For example, to restore HeroSection.tsx to its state on March 10, 2024:
-git log --before="2024-03-10" --after="2024-03-09" -- frontend/src/components/landing/HeroSection.tsx
-# Find the commit hash from the output
-git checkout [commit-hash] -- frontend/src/components/landing/HeroSection.tsx
-```
-
-#### Using Storybook (for UI Components)
-
-The Storybook instance contains versioned UI components that can be visually inspected:
-
-```bash
-# Start Storybook to view component versions
-cd frontend
-npm run storybook
-```
-
-## Code Optimization Status
-
-Recent code optimizations completed:
-- **NotificationContext Refactoring**: Successfully reduced from 1256 lines to 400 lines by splitting into modular components
-- **Landing Page Components**: Identified large components (HeroSection: 784 lines, TestimonialsSection: 547 lines) that require refactoring for maintainability
-- **Bundle Size Optimization**: Implemented code splitting and lazy loading for main routes
-- **Performance Monitoring**: Added Lighthouse performance tracking with baseline metrics
-
-Ongoing optimization efforts:
-- Component structure refactoring to reduce size and improve maintainability
-- Centralized styling system implementation to reduce duplication
-- Icon import optimization to reduce bundle size 
+ 

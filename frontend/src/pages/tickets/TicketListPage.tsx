@@ -102,6 +102,7 @@ import {
 import { Ticket, TicketDetail, TicketStatus, TicketPriority, Department, TicketType, User, PaginationState } from '../../context/TicketContext';
 import { formatDate, getRelativeTime } from '../../utils/dateUtils';
 import { formatInTimeZone } from 'date-fns-tz';
+import { logger } from '../../utils/frontendLogger';
 
 // We'll use these colors for our charts
 const chartColors = [
@@ -158,7 +159,7 @@ const mockTicketStats: TicketStats = {
   overdueCount: 12,
   highPriorityCount: 27,
   avgResolutionTime: 18.5, // in hours
-  
+
   ticketsByDepartment: [
     { name: 'IT Support', value: 115 },
     { name: 'Customer Service', value: 67 },
@@ -166,7 +167,7 @@ const mockTicketStats: TicketStats = {
     { name: 'Marketing', value: 24 },
     { name: 'Human Resources', value: 10 },
   ],
-  
+
   ticketsByType: [
     { name: 'Hardware', value: 68 },
     { name: 'Software', value: 92 },
@@ -174,7 +175,7 @@ const mockTicketStats: TicketStats = {
     { name: 'Security', value: 16 },
     { name: 'Other', value: 15 },
   ],
-  
+
   ticketsTrend: [
     { name: '2023-03-05', value: 8 },
     { name: '2023-03-06', value: 12 },
@@ -192,14 +193,14 @@ const mockTickets: Ticket[] = [
     id: 'TIK-MOCK-01',
     subject: 'Mock Ticket 1: Email Issue',
     description: 'This is a mock description for the email issue ticket.',
-    status: { id: 's1', name: 'New', color: '#f44336' }, 
+    status: { id: 's1', name: 'New', color: '#f44336' },
     priority: { id: 'p1', name: 'High', color: '#ff9800' },
     createdAt: '2023-03-10T08:30:00Z',
     updatedAt: '2023-03-10T08:30:00Z',
-    lastActivity: '2023-03-10T08:30:00Z', 
+    lastActivity: '2023-03-10T08:30:00Z',
     requester: { id: 'mock-user-1', firstName: 'Mock', lastName: 'UserA', email: 'mock.usera@example.com' },
     assignee: undefined,
-    department: { id: 'd1', name: 'IT Support' }, 
+    department: { id: 'd1', name: 'IT Support' },
     type: { id: 't1', name: 'Access Issue' },
     tags: ['email', 'access'],
     dueDate: undefined,
@@ -214,9 +215,9 @@ const mockTickets: Ticket[] = [
     updatedAt: '2023-03-10T09:45:00Z',
     lastActivity: '2023-03-10T09:45:00Z',
     requester: { id: 'mock-user-2', firstName: 'Mock', lastName: 'UserB', email: 'mock.userb@example.com' },
-    assignee: { id: 'mock-agent-1', firstName: 'Agent', lastName: 'Smith', email: 'agent.smith@example.com' }, 
+    assignee: { id: 'mock-agent-1', firstName: 'Agent', lastName: 'Smith', email: 'agent.smith@example.com' },
     department: { id: 'd1', name: 'IT Support' },
-    type: { id: 't2', name: 'Hardware Issue' }, 
+    type: { id: 't2', name: 'Hardware Issue' },
     tags: ['printer', 'hardware'],
     dueDate: '2023-03-15T17:00:00Z',
   }
@@ -233,15 +234,15 @@ const generateMockActivities = (count: number): TicketActivity[] => {
     { id: '4', firstName: 'Emily', lastName: 'Wilson', avatar: undefined },
     { id: '5', firstName: 'David', lastName: 'Garcia', avatar: undefined },
   ];
-  
+
   const now = new Date();
-  
+
   for (let i = 0; i < count; i++) {
     const ticketNumber = 1000 + Math.floor(Math.random() * 100);
     const ticketId = `TIK-${ticketNumber}`;
     const type = activityTypes[Math.floor(Math.random() * activityTypes.length)];
     const user = users[Math.floor(Math.random() * users.length)];
-    
+
     let message = '';
     switch (type) {
       case 'created':
@@ -263,10 +264,10 @@ const generateMockActivities = (count: number): TicketActivity[] => {
         message = 'marked the ticket as resolved';
         break;
     }
-    
+
     const timestamp = new Date(now);
     timestamp.setMinutes(now.getMinutes() - i * 30 - Math.floor(Math.random() * 30));
-    
+
     activities.push({
       id: `activity-${i}`,
       ticketId,
@@ -277,7 +278,7 @@ const generateMockActivities = (count: number): TicketActivity[] => {
       timestamp: timestamp.toISOString(),
     });
   }
-  
+
   return activities;
 };
 
@@ -443,14 +444,14 @@ const TicketListPage: React.FC = () => {
   const isTablet = useMediaQuery(theme.breakpoints.between('sm', 'md'));
   const navigate = useNavigate();
   const { user } = useAuth();
-  const { 
+  const {
     tickets: contextTickets,
     pagination: contextPagination,
     isLoading: contextLoading,
     error: contextError,
     fetchTickets,
-    statuses, 
-    priorities 
+    statuses,
+    priorities
   } = useTickets();
   const [timeRange, setTimeRange] = useState<'day' | 'week' | 'month'>('week');
   const [stats, setStats] = useState<TicketStats>(mockTicketStats);
@@ -458,7 +459,7 @@ const TicketListPage: React.FC = () => {
   const [isStatsLoading, setIsStatsLoading] = useState<boolean>(false);
   const [isActivitiesLoading, setIsActivitiesLoading] = useState<boolean>(false);
   const [selectedSection, setSelectedSection] = useState<string | null>(null);
-  
+
   // Filter state for ticket list
   const [filterStatus, setFilterStatus] = useState<string>('all');
   const [filterPriority, setFilterPriority] = useState<string>('all');
@@ -485,13 +486,13 @@ const TicketListPage: React.FC = () => {
     try {
       const result = await fetchTickets(page, limit, {});
       if (result) {
-        console.log('Dashboard API response:', result);
+        logger.debug('Dashboard API response:', result);
         setDashboardTickets(result.tickets);
-        
+
         // Extract pagination data separately to avoid type errors
         const apiPagination = result.pagination;
         const totalCount = (result.pagination as any).total || 0; // Extract total separately
-        
+
         setDashboardPagination({
           page: apiPagination.page,
           limit: apiPagination.limit,
@@ -518,8 +519,8 @@ const TicketListPage: React.FC = () => {
   // Initial fetch for dashboard when component mounts or user/role changes
   useEffect(() => {
     if (user && user.role === 'customer' && !initialDashboardFetchAttempted && !dashboardLoading) {
-       setInitialDashboardFetchAttempted(true);
-       fetchDashboardData(1, 5);
+      setInitialDashboardFetchAttempted(true);
+      fetchDashboardData(1, 5);
     }
   }, [user, initialDashboardFetchAttempted, dashboardLoading, fetchDashboardData]);
 
@@ -532,7 +533,7 @@ const TicketListPage: React.FC = () => {
           .then(result => {
             if (result) {
               // Log response to debug pagination
-              console.log('List view API response:', result);
+              logger.debug('List view API response:', result);
             }
           })
           .catch(err => {
@@ -544,7 +545,7 @@ const TicketListPage: React.FC = () => {
           .then(result => {
             if (result) {
               // Log response to debug pagination
-              console.log('List view API response:', result);
+              logger.debug('List view API response:', result);
             }
           })
           .catch(err => {
@@ -559,31 +560,31 @@ const TicketListPage: React.FC = () => {
   const getFilteredTickets = () => {
     // Use the correct source for tickets based on context
     const ticketsData = contextTickets || mockTickets;
-    
+
     return ticketsData.filter(ticket => {
       // Remove the redundant agent filter - the context already provides filtered tickets for agents
       // if (user?.role?.toLowerCase() === 'agent' && ticket.assignee?.id !== user.id) {
       //   return false;
       // }
-      
+
       // Apply local filters (status, priority, search)
       if (filterStatus !== 'all' && ticket.status.id !== filterStatus) {
         return false;
       }
-      
+
       if (filterPriority !== 'all' && ticket.priority.id !== filterPriority) {
         return false;
       }
-      
-      if (searchTerm && !ticket.subject.toLowerCase().includes(searchTerm.toLowerCase()) && 
-          !ticket.id.toLowerCase().includes(searchTerm.toLowerCase())) {
+
+      if (searchTerm && !ticket.subject.toLowerCase().includes(searchTerm.toLowerCase()) &&
+        !ticket.id.toLowerCase().includes(searchTerm.toLowerCase())) {
         return false;
       }
-      
+
       return true;
     });
   };
-  
+
   // Memoized activity columns
   const memoizedActivityColumns = React.useMemo(() => [
     {
@@ -592,7 +593,7 @@ const TicketListPage: React.FC = () => {
       width: 200,
       renderCell: (params: GridRenderCellParams) => (
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-          <UserAvatar 
+          <UserAvatar
             user={{
               id: params.row.user?.id || 'unknown',
               firstName: params.row.user?.firstName || '',
@@ -638,7 +639,7 @@ const TicketListPage: React.FC = () => {
       ),
     },
   ], [userTimeZone]);
-  
+
   // Define ticket columns with access to navigate and timezone
   const ticketColumns: GridColDef[] = React.useMemo(() => [
     {
@@ -646,7 +647,7 @@ const TicketListPage: React.FC = () => {
       headerName: 'Ticket ID',
       width: 120,
       renderCell: (params) => (
-        <Typography variant="body2" fontWeight={500} sx={{ 
+        <Typography variant="body2" fontWeight={500} sx={{
           color: theme.palette.primary.main,
           '&:hover': { textDecoration: 'underline' }
         }}>
@@ -662,8 +663,8 @@ const TicketListPage: React.FC = () => {
       renderCell: (params) => (
         <Box sx={{ py: 1 }}>
           <Typography variant="body2" fontWeight={500} sx={{ mb: 0.5 }}>
-          {params.row.subject}
-        </Typography>
+            {params.row.subject}
+          </Typography>
           <Typography variant="caption" color="text.secondary" noWrap>
             {params.row.description?.substring(0, 60)}
             {params.row.description?.length > 60 ? '...' : ''}
@@ -676,27 +677,27 @@ const TicketListPage: React.FC = () => {
       headerName: 'Requester',
       width: 180,
       renderCell: (params) => {
-        const requesterName = params.row.requester 
-          ? `${params.row.requester.firstName || ''} ${params.row.requester.lastName || ''}`.trim() 
+        const requesterName = params.row.requester
+          ? `${params.row.requester.firstName || ''} ${params.row.requester.lastName || ''}`.trim()
           : 'Anonymous';
-        
+
         const initials = params.row.requester
           ? `${params.row.requester.firstName?.charAt(0) || ''}${params.row.requester.lastName?.charAt(0) || ''}`
           : 'U';
-        
+
         return (
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
             <Avatar
-              sx={{ 
-                width: 30, 
-                height: 30, 
+              sx={{
+                width: 30,
+                height: 30,
                 bgcolor: stringToColor(requesterName || 'User')
               }}
             >
-              {initials || 'U'} 
+              {initials || 'U'}
             </Avatar>
             <Typography variant="body2">
-              {requesterName || 'Anonymous'} 
+              {requesterName || 'Anonymous'}
             </Typography>
           </Box>
         );
@@ -710,10 +711,10 @@ const TicketListPage: React.FC = () => {
         params.row.assignee ? (
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
             <Avatar
-              sx={{ 
-                width: 30, 
+              sx={{
+                width: 30,
                 height: 30,
-                bgcolor: stringToColor(`${params.row.assignee.firstName || ''} ${params.row.assignee.lastName || ''}`.trim() || 'Agent') 
+                bgcolor: stringToColor(`${params.row.assignee.firstName || ''} ${params.row.assignee.lastName || ''}`.trim() || 'Agent')
               }}
             >
               {`${params.row.assignee.firstName?.charAt(0) || ''}${params.row.assignee.lastName?.charAt(0) || ''}` || 'A'}
@@ -723,10 +724,10 @@ const TicketListPage: React.FC = () => {
             </Typography>
           </Box>
         ) : (
-          <Chip 
-            label="Unassigned" 
-            size="small" 
-            sx={{ 
+          <Chip
+            label="Unassigned"
+            size="small"
+            sx={{
               backgroundColor: alpha(theme.palette.warning.main, 0.1),
               color: theme.palette.warning.main,
               fontWeight: 500
@@ -741,8 +742,8 @@ const TicketListPage: React.FC = () => {
       width: 150,
       renderCell: (params) => {
         // Safely handle status by verifying it has the required properties
-        if (params.row.status && typeof params.row.status === 'object' && 
-            'name' in params.row.status && 'color' in params.row.status) {
+        if (params.row.status && typeof params.row.status === 'object' &&
+          'name' in params.row.status && 'color' in params.row.status) {
           return <StatusBadge status={params.row.status} size="small" />;
         }
         return <Typography variant="body2">Unknown</Typography>;
@@ -755,8 +756,8 @@ const TicketListPage: React.FC = () => {
       width: 130,
       renderCell: (params) => {
         // Safely handle priority by verifying it has the required properties
-        if (params.row.priority && typeof params.row.priority === 'object' && 
-            'name' in params.row.priority && 'color' in params.row.priority) {
+        if (params.row.priority && typeof params.row.priority === 'object' &&
+          'name' in params.row.priority && 'color' in params.row.priority) {
           return <PriorityBadge priority={params.row.priority} size="small" />;
         }
         return <Typography variant="body2">Unknown</Typography>;
@@ -785,12 +786,12 @@ const TicketListPage: React.FC = () => {
       renderCell: (params) => {
         // Safely handle the ticket ID for SLABadge
         const ticketId = params.row.id;
-            
+
         // Pass the ID directly to SLABadge - the component will handle parsing
         if (ticketId) {
           return <SLABadge ticketId={ticketId} />;
-          }
-        
+        }
+
         return <Chip label="N/A" size="small" color="default" />;
       },
       disableClickEventBubbling: true
@@ -808,7 +809,7 @@ const TicketListPage: React.FC = () => {
                 e.stopPropagation();
                 navigate(`/tickets/${params.row.id}`);
               }}
-              sx={{ 
+              sx={{
                 color: theme.palette.primary.main,
                 '&:hover': { backgroundColor: alpha(theme.palette.primary.main, 0.1) }
               }}
@@ -828,7 +829,7 @@ const TicketListPage: React.FC = () => {
       headerName: 'ID',
       width: 110,
       renderCell: (params) => (
-        <Typography variant="body2" fontWeight={500} sx={{ 
+        <Typography variant="body2" fontWeight={500} sx={{
           color: theme.palette.primary.main,
           '&:hover': { textDecoration: 'underline' }
         }}>
@@ -859,8 +860,8 @@ const TicketListPage: React.FC = () => {
       width: 120,
       renderCell: (params) => {
         // Safely handle status by verifying it has the required properties
-        if (params.row.status && typeof params.row.status === 'object' && 
-            'id' in params.row.status && 'name' in params.row.status && 'color' in params.row.status) {
+        if (params.row.status && typeof params.row.status === 'object' &&
+          'id' in params.row.status && 'name' in params.row.status && 'color' in params.row.status) {
           return <StatusBadge status={params.row.status} size="small" />;
         }
         return <Typography variant="body2">Unknown</Typography>;
@@ -875,8 +876,8 @@ const TicketListPage: React.FC = () => {
       width: 120,
       renderCell: (params) => {
         // Safely handle priority by verifying it has the required properties
-        if (params.row.priority && typeof params.row.priority === 'object' && 
-            'id' in params.row.priority && 'name' in params.row.priority && 'color' in params.row.priority) {
+        if (params.row.priority && typeof params.row.priority === 'object' &&
+          'id' in params.row.priority && 'name' in params.row.priority && 'color' in params.row.priority) {
           return <PriorityBadge priority={params.row.priority} size="small" />;
         }
         return <Typography variant="body2">Unknown</Typography>;
@@ -913,7 +914,7 @@ const TicketListPage: React.FC = () => {
               e.stopPropagation();
               navigate(`/tickets/${params.row.id}`);
             }}
-            sx={{ 
+            sx={{
               color: theme.palette.primary.main,
               '&:hover': { backgroundColor: alpha(theme.palette.primary.main, 0.1) }
             }}
@@ -939,23 +940,23 @@ const TicketListPage: React.FC = () => {
     }
     return color;
   };
-  
+
   // Fetch data on component mount
   useEffect(() => {
     setIsStatsLoading(true);
     setIsActivitiesLoading(true);
-    
+
     setTimeout(() => {
       setIsStatsLoading(false);
       setStats(mockTicketStats);
     }, 1000);
-    
+
     setTimeout(() => {
       setIsActivitiesLoading(false);
       setRecentActivities(mockActivities);
     }, 1500);
   }, [timeRange]);
-  
+
   // Create the stats data for the overview cards
   const getStatCards = () => {
     return [
@@ -1017,11 +1018,11 @@ const TicketListPage: React.FC = () => {
   const handleRefreshData = async () => {
     setIsStatsLoading(true);
     setIsActivitiesLoading(true);
-    
+
     setTimeout(() => {
       setIsStatsLoading(false);
     }, 1000);
-    
+
     setTimeout(() => {
       setIsActivitiesLoading(false);
     }, 1500);
@@ -1037,10 +1038,10 @@ const TicketListPage: React.FC = () => {
     const handleDashboardPaginationChange = (model: { page: number; pageSize: number }) => {
       fetchDashboardData(model.page + 1, model.pageSize);
     };
-    
+
     return (
-      <EnhancedGrid 
-        container 
+      <EnhancedGrid
+        container
         spacing={1}
       >
         <Grid item xs={12}>
@@ -1080,23 +1081,23 @@ const TicketListPage: React.FC = () => {
             }}
           >
             <Box sx={{ p: { xs: 3, md: 2 }, position: 'relative', zIndex: 1 }}>
-            <Grid container alignItems="center" justifyContent="space-between" spacing={3}>
-              <Grid item xs={12} md={7}>
-                <Typography variant="h5" component="h1" gutterBottom>
-                My Tickets
-                </Typography>
-                <Typography variant="subtitle1">
-                View and manage all tickets in one place. Monitor status, edit tickets, and track issue resolution.
-                </Typography>
-              </Grid>
-              <Grid item xs={12} md={5} sx={{ display: 'flex', justifyContent: { xs: 'flex-start', md: 'flex-end' }, alignItems: 'center', gap: 2 }}>
-                <Button
-                  variant="contained"
-                  startIcon={<AddIcon />}
-                  onClick={handleCreateTicket}
-                >
-                  New Ticket
-                </Button>
+              <Grid container alignItems="center" justifyContent="space-between" spacing={3}>
+                <Grid item xs={12} md={7}>
+                  <Typography variant="h5" component="h1" gutterBottom>
+                    My Tickets
+                  </Typography>
+                  <Typography variant="subtitle1">
+                    View and manage all tickets in one place. Monitor status, edit tickets, and track issue resolution.
+                  </Typography>
+                </Grid>
+                <Grid item xs={12} md={5} sx={{ display: 'flex', justifyContent: { xs: 'flex-start', md: 'flex-end' }, alignItems: 'center', gap: 2 }}>
+                  <Button
+                    variant="contained"
+                    startIcon={<AddIcon />}
+                    onClick={handleCreateTicket}
+                  >
+                    New Ticket
+                  </Button>
                 </Grid>
               </Grid>
             </Box>
@@ -1209,7 +1210,7 @@ const TicketListPage: React.FC = () => {
                   ))}
                 </Box>
               ) : dashboardError ? (
-                  <Alert severity="error" sx={{ m: 2 }}>{dashboardError}</Alert>
+                <Alert severity="error" sx={{ m: 2 }}>{dashboardError}</Alert>
               ) : (
                 <Box sx={{ width: '100%' }}>
                   <DataGrid
@@ -1243,7 +1244,7 @@ const TicketListPage: React.FC = () => {
                         cursor: 'pointer',
                         transition: 'all 0.2s ease',
                         py: 1,
-                         '&:hover': {
+                        '&:hover': {
                           backgroundColor: alpha(theme.palette.primary.main, 0.04),
                         },
                       },
@@ -1253,23 +1254,23 @@ const TicketListPage: React.FC = () => {
               )}
             </CardContent>
             {dashboardPagination.totalCount > dashboardPagination.limit && (
-               <Box sx={{ p: 0.5, textAlign: 'center' }}>
-                 <Button
-                   onClick={() => navigate('/tickets')}
-                   endIcon={<ArrowForwardIcon />}
-                   size="small"
-                   sx={{
-                     borderRadius: 8,
-                     transition: 'all 0.2s ease',
-                     '&:hover': {
-                       transform: 'translateX(4px)',
-                     }
-                   }}
-                 >
-                   View All Tickets
-                 </Button>
-               </Box>
-             )}
+              <Box sx={{ p: 0.5, textAlign: 'center' }}>
+                <Button
+                  onClick={() => navigate('/tickets')}
+                  endIcon={<ArrowForwardIcon />}
+                  size="small"
+                  sx={{
+                    borderRadius: 8,
+                    transition: 'all 0.2s ease',
+                    '&:hover': {
+                      transform: 'translateX(4px)',
+                    }
+                  }}
+                >
+                  View All Tickets
+                </Button>
+              </Box>
+            )}
           </Paper>
         </Grid>
       </EnhancedGrid>
@@ -1279,7 +1280,7 @@ const TicketListPage: React.FC = () => {
   // Render dashboard based on user role
   const renderRoleDashboard = () => {
     if (!user || !user.role) {
-      return renderCustomerDashboard(); 
+      return renderCustomerDashboard();
     }
 
     switch (user.role.toLowerCase()) {
@@ -1297,464 +1298,464 @@ const TicketListPage: React.FC = () => {
     const filteredTickets = getFilteredTickets();
 
     return (
-    <Grid container spacing={1}>
-      <Grid item xs={12}>
-        <Card 
-          elevation={0}
-          sx={{ 
-            p: 0, 
-            overflow: 'hidden',
-            border: '1px solid',
-            borderColor: alpha(theme.palette.primary.main, 0.2),
-            borderRadius: 3,
-            background: theme.palette.mode === 'dark'
-              ? `linear-gradient(120deg, ${alpha(theme.palette.primary.dark, 0.7)}, ${alpha(theme.palette.secondary.dark, 0.5)})`
-              : `linear-gradient(120deg, ${alpha('#fff', 0.95)}, ${alpha(theme.palette.secondary.light, 0.15)})`,
-            position: 'relative',
-          }}
-        >
-          <Box sx={{ p: { xs: 3, md: 2 }, position: 'relative', zIndex: 1 }}>
-            <Grid container alignItems="center" justifyContent="space-between" spacing={3}>
-              <Grid item xs={12} md={7}>
-                <Typography variant="h5" component="h1" gutterBottom>
-                  My Assigned Tickets
-                </Typography>
-                <Typography variant="subtitle1">
-                  View and manage tickets assigned to you. Filter and search to find specific issues.
-                </Typography>
+      <Grid container spacing={1}>
+        <Grid item xs={12}>
+          <Card
+            elevation={0}
+            sx={{
+              p: 0,
+              overflow: 'hidden',
+              border: '1px solid',
+              borderColor: alpha(theme.palette.primary.main, 0.2),
+              borderRadius: 3,
+              background: theme.palette.mode === 'dark'
+                ? `linear-gradient(120deg, ${alpha(theme.palette.primary.dark, 0.7)}, ${alpha(theme.palette.secondary.dark, 0.5)})`
+                : `linear-gradient(120deg, ${alpha('#fff', 0.95)}, ${alpha(theme.palette.secondary.light, 0.15)})`,
+              position: 'relative',
+            }}
+          >
+            <Box sx={{ p: { xs: 3, md: 2 }, position: 'relative', zIndex: 1 }}>
+              <Grid container alignItems="center" justifyContent="space-between" spacing={3}>
+                <Grid item xs={12} md={7}>
+                  <Typography variant="h5" component="h1" gutterBottom>
+                    My Assigned Tickets
+                  </Typography>
+                  <Typography variant="subtitle1">
+                    View and manage tickets assigned to you. Filter and search to find specific issues.
+                  </Typography>
+                </Grid>
+                <Grid item xs={12} md={5} sx={{ display: 'flex', justifyContent: { xs: 'flex-start', md: 'flex-end' }, alignItems: 'center', gap: 2 }}>
+
+                  <Button
+                    variant="outlined"
+                    startIcon={<RefreshIcon />}
+                    onClick={handleRefreshData}
+                  >
+                    Refresh
+                  </Button>
+                </Grid>
               </Grid>
-              <Grid item xs={12} md={5} sx={{ display: 'flex', justifyContent: { xs: 'flex-start', md: 'flex-end' }, alignItems: 'center', gap: 2 }}>
-                 
+            </Box>
+          </Card>
+        </Grid>
+
+        <Grid item xs={12}>
+          <StatsWidget
+            stats={[
+              {
+                title: 'Assigned Tickets',
+                value: stats.total - stats.unassigned,
+                icon: <AssignmentIcon />,
+                color: theme.palette.primary.main,
+                change: { value: 8, isPositive: true },
+                progress: Math.round(((stats.total - stats.unassigned) / stats.total) * 100),
+              },
+              {
+                title: 'Open',
+                value: stats.open,
+                icon: <AccessTimeIcon />,
+                color: theme.palette.info.main,
+                change: { value: 5, isPositive: false },
+                progress: Math.round((stats.open / stats.total) * 100),
+              },
+              {
+                title: 'Resolved',
+                value: stats.resolved,
+                icon: <CheckIcon />,
+                color: theme.palette.success.main,
+                change: { value: 15, isPositive: true },
+                progress: 75,
+              },
+              {
+                title: 'High Priority',
+                value: stats.highPriorityCount,
+                icon: <PriorityHighIcon />,
+                color: theme.palette.error.main,
+                change: { value: 12, isPositive: false },
+                progress: Math.round((stats.highPriorityCount / stats.total) * 100),
+              },
+            ]}
+            loading={isStatsLoading}
+            columns={4}
+            animated={true}
+          />
+        </Grid>
+
+        <Grid item xs={12}>
+          <Paper sx={{ p: 2, mb: 1, borderRadius: 2 }}>
+            <Grid container spacing={2} alignItems="center">
+              <Grid item xs={12} sm={3}>
+                <TextField
+                  fullWidth
+                  variant="outlined"
+                  size="small"
+                  label="Search Tickets"
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                  InputProps={{
+                    startAdornment: (
+                      <InputAdornment position="start">
+                        <SearchIcon />
+                      </InputAdornment>
+                    ),
+                  }}
+                />
+              </Grid>
+              <Grid item xs={12} sm={3}>
+                <FormControl fullWidth size="small">
+                  <InputLabel>Status</InputLabel>
+                  <Select
+                    value={filterStatus}
+                    onChange={(e) => setFilterStatus(e.target.value)}
+                    label="Status"
+                  >
+                    <MenuItem value="all">All Statuses</MenuItem>
+                    {statuses.map(s => <MenuItem key={s.id} value={s.id}>{s.name}</MenuItem>)}
+                  </Select>
+                </FormControl>
+              </Grid>
+              <Grid item xs={12} sm={3}>
+                <FormControl fullWidth size="small">
+                  <InputLabel>Priority</InputLabel>
+                  <Select
+                    value={filterPriority}
+                    onChange={(e) => setFilterPriority(e.target.value)}
+                    label="Priority"
+                  >
+                    <MenuItem value="all">All Priorities</MenuItem>
+                    {priorities.map(p => <MenuItem key={p.id} value={p.id}>{p.name}</MenuItem>)}
+                  </Select>
+                </FormControl>
+              </Grid>
+              <Grid item xs={12} sm={3} sx={{ display: 'flex', justifyContent: 'flex-end' }}>
                 <Button
                   variant="outlined"
-                  startIcon={<RefreshIcon />}
-                  onClick={handleRefreshData}
+                  startIcon={<FilterListIcon />}
+                  onClick={() => {
+                    setFilterStatus('all');
+                    setFilterPriority('all');
+                    setSearchTerm('');
+                  }}
                 >
-                  Refresh
+                  Reset Filters
                 </Button>
               </Grid>
             </Grid>
-          </Box>
-        </Card>
-      </Grid>
+          </Paper>
+        </Grid>
 
-      <Grid item xs={12}>
-        <StatsWidget
-          stats={[
-            {
-              title: 'Assigned Tickets',
-              value: stats.total - stats.unassigned, 
-              icon: <AssignmentIcon />,
-              color: theme.palette.primary.main,
-              change: { value: 8, isPositive: true },
-              progress: Math.round(((stats.total - stats.unassigned) / stats.total) * 100),
-            },
-            {
-              title: 'Open',
-              value: stats.open, 
-              icon: <AccessTimeIcon />,
-              color: theme.palette.info.main,
-              change: { value: 5, isPositive: false },
-              progress: Math.round((stats.open / stats.total) * 100),
-            },
-            {
-              title: 'Resolved',
-              value: stats.resolved, 
-              icon: <CheckIcon />,
-              color: theme.palette.success.main,
-              change: { value: 15, isPositive: true },
-              progress: 75, 
-            },
-            {
-              title: 'High Priority',
-              value: stats.highPriorityCount, 
-              icon: <PriorityHighIcon />,
-              color: theme.palette.error.main,
-              change: { value: 12, isPositive: false },
-              progress: Math.round((stats.highPriorityCount / stats.total) * 100),
-            },
-          ]}
-          loading={isStatsLoading}
-          columns={4}
-          animated={true}
-        />
-      </Grid>
-
-      <Grid item xs={12}>
-        <Paper sx={{ p: 2, mb: 1, borderRadius: 2 }}> 
-          <Grid container spacing={2} alignItems="center">
-            <Grid item xs={12} sm={3}>
-              <TextField
-                fullWidth
-                variant="outlined" 
-                size="small"
-                label="Search Tickets"
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-                InputProps={{
-                  startAdornment: (
-                    <InputAdornment position="start">
-                      <SearchIcon />
-                    </InputAdornment>
-                  ),
-                }}
-              />
-            </Grid>
-            <Grid item xs={12} sm={3}>
-              <FormControl fullWidth size="small">
-                <InputLabel>Status</InputLabel>
-                <Select
-                  value={filterStatus}
-                  onChange={(e) => setFilterStatus(e.target.value)}
-                  label="Status"
-                >
-                  <MenuItem value="all">All Statuses</MenuItem>
-                  {statuses.map(s => <MenuItem key={s.id} value={s.id}>{s.name}</MenuItem>)}
-                </Select>
-              </FormControl>
-            </Grid>
-            <Grid item xs={12} sm={3}>
-              <FormControl fullWidth size="small">
-                <InputLabel>Priority</InputLabel>
-                <Select
-                  value={filterPriority}
-                  onChange={(e) => setFilterPriority(e.target.value)}
-                  label="Priority"
-                >
-                  <MenuItem value="all">All Priorities</MenuItem>
-                  {priorities.map(p => <MenuItem key={p.id} value={p.id}>{p.name}</MenuItem>)}
-                </Select>
-              </FormControl>
-            </Grid>
-            <Grid item xs={12} sm={3} sx={{ display: 'flex', justifyContent: 'flex-end' }}>
-              <Button 
-                variant="outlined" 
-                startIcon={<FilterListIcon />}
-                onClick={() => {
-                  setFilterStatus('all');
-                  setFilterPriority('all');
-                  setSearchTerm('');
-                }}
-              >
-                Reset Filters
-              </Button>
-            </Grid>
-          </Grid>
-        </Paper>
-      </Grid>
-
-      <Grid item xs={12}>
-        <Paper
-          sx={{
-            p: 2,
-            borderRadius: 2,
-            ...gradientAccent(theme),
-            overflow: 'hidden',
-            border: '1px solid',
-            borderColor: theme.palette.divider,
-          }}
-        >
-          <DataGrid
-            rows={filteredTickets}
-            columns={ticketColumns}
-            autoHeight={true}
-            rowCount={(contextPagination as any)?.total || contextPagination?.totalCount || filteredTickets.length}
-            pageSizeOptions={[5, 10, 25]}
-            paginationModel={listPaginationModel}
-            paginationMode="server" 
-            onPaginationModelChange={setListPaginationModel} 
-            loading={contextLoading}
-            disableRowSelectionOnClick
-            onRowClick={(params) => navigate(`/tickets/${params.row.id}`)} 
-            sx={{ 
-              border: 'none',
-              '& .MuiDataGrid-columnHeaders': {
-                backgroundColor: theme.palette.mode === 'dark'
-                  ? alpha(theme.palette.primary.dark, 0.1) 
-                  : alpha(theme.palette.primary.light, 0.1),
-              },
-              '& .MuiDataGrid-cell': {
-                borderBottom: `1px solid ${theme.palette.divider}`,
-                cursor: 'pointer',
-                transition: 'all 0.2s ease',
-                py: 1, 
-                 '&:hover': {
-                  backgroundColor: alpha(theme.palette.primary.main, 0.04),
-                },
-              },
+        <Grid item xs={12}>
+          <Paper
+            sx={{
+              p: 2,
+              borderRadius: 2,
+              ...gradientAccent(theme),
+              overflow: 'hidden',
+              border: '1px solid',
+              borderColor: theme.palette.divider,
             }}
-          />
-          {filteredTickets.length === 0 && !contextLoading && (
-             <Box sx={{ p: 4, textAlign: 'center' }}>
-               <SearchOffIcon sx={{ fontSize: 48, color: 'text.secondary', mb: 1 }} />
-               <Typography variant="h6" color="textSecondary">No tickets found</Typography>
-               <Typography variant="body2" color="textSecondary">Try adjusting your search or filters.</Typography>
-             </Box>
-           )}
-        </Paper>
-      </Grid>
-    </Grid>
-  );
-};
-
-// Admin dashboard view
-const renderAdminDashboard = () => {
-  const cardStyles = {
-    height: '100%',
-    border: '1px solid',
-    borderColor: theme.palette.divider,
-    borderRadius: 2
-  };
-  
-  const filteredTickets = getFilteredTickets();
-  
-  return (
-  <Grid container spacing={1}>
-      <Grid item xs={12}>
-        <Card 
-          elevation={0}
-          sx={{ 
-            p: 0, 
-            overflow: 'hidden',
-            border: '1px solid',
-            borderColor: alpha(theme.palette.primary.main, 0.2),
-            borderRadius: 3,
-            background: theme.palette.mode === 'dark'
-              ? `linear-gradient(120deg, ${alpha(theme.palette.primary.dark, 0.7)}, ${alpha(theme.palette.secondary.dark, 0.5)})`
-              : `linear-gradient(120deg, ${alpha('#fff', 0.95)}, ${alpha(theme.palette.secondary.light, 0.15)})`,
-            position: 'relative',
-          }}
-        >
-          <Box sx={{ p: { xs: 3, md: 2 }, position: 'relative', zIndex: 1 }}>
-            <Grid container alignItems="center" justifyContent="space-between" spacing={3}>
-              <Grid item xs={12} md={7}>
-                <Typography variant="h5" component="h1" gutterBottom>
-                  Admin Ticket View 
-                </Typography>
-                <Typography variant="subtitle1">
-                  Oversee all support tickets, manage assignments, and analyze system performance.
-              </Typography>
-            </Grid>
-              <Grid item xs={12} md={5} sx={{ display: 'flex', justifyContent: { xs: 'flex-start', md: 'flex-end' }, alignItems: 'center', gap: 2 }}>
-              
-              <Button
-                variant="outlined"
-                startIcon={<RefreshIcon />}
-                onClick={handleRefreshData}
-              >
-                Refresh
-              </Button>
-              
-            </Grid>
-          </Grid>
-        </Box>
-      </Card>
-    </Grid>
-
-      <Grid item xs={12}>
-      <StatsWidget
-        stats={[
-          {
-            title: 'Total Tickets',
-            value: stats.total,
-            icon: <AssignmentIcon />,
-            color: theme.palette.primary.main,
-            change: { value: 12, isPositive: true },
-            progress: 78,
-          },
-          {
-            title: 'Open Tickets',
-            value: stats.open + stats.inProgress,
-            icon: <AccessTimeIcon />,
-            color: theme.palette.info.main,
-            change: { value: 8, isPositive: false },
-            progress: Math.round(((stats.open + stats.inProgress) / stats.total) * 100),
-          },
-          {
-            title: 'Resolved Today',
-            value: stats.resolved,
-            icon: <CheckIcon />,
-            color: theme.palette.success.main,
-            change: { value: 23, isPositive: true },
-            progress: Math.round((stats.resolved / stats.total) * 100),
-          },
-          {
-            title: 'Needs Attention',
-            value: stats.highPriorityCount,
-            icon: <PriorityHighIcon />,
-            color: theme.palette.error.main,
-            change: { value: 12, isPositive: false },
-            progress: Math.round((stats.highPriorityCount / stats.total) * 100),
-          },
-        ]}
-        loading={isStatsLoading}
-        columns={4}
-        animated={true}
-      />
-    </Grid>
-
-    <Grid item xs={12}>
-      <Paper sx={{ p: 2, borderRadius: 2 }}>
-        <Grid container spacing={2} alignItems="center">
-          <Grid item xs={12} sm={3}>
-            <TextField
-              fullWidth
-              variant="outlined" 
-              size="small"
-              label="Search Tickets"
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              InputProps={{
-                startAdornment: (
-                  <InputAdornment position="start">
-                    <SearchIcon />
-                  </InputAdornment>
-                ),
+          >
+            <DataGrid
+              rows={filteredTickets}
+              columns={ticketColumns}
+              autoHeight={true}
+              rowCount={(contextPagination as any)?.total || contextPagination?.totalCount || filteredTickets.length}
+              pageSizeOptions={[5, 10, 25]}
+              paginationModel={listPaginationModel}
+              paginationMode="server"
+              onPaginationModelChange={setListPaginationModel}
+              loading={contextLoading}
+              disableRowSelectionOnClick
+              onRowClick={(params) => navigate(`/tickets/${params.row.id}`)}
+              sx={{
+                border: 'none',
+                '& .MuiDataGrid-columnHeaders': {
+                  backgroundColor: theme.palette.mode === 'dark'
+                    ? alpha(theme.palette.primary.dark, 0.1)
+                    : alpha(theme.palette.primary.light, 0.1),
+                },
+                '& .MuiDataGrid-cell': {
+                  borderBottom: `1px solid ${theme.palette.divider}`,
+                  cursor: 'pointer',
+                  transition: 'all 0.2s ease',
+                  py: 1,
+                  '&:hover': {
+                    backgroundColor: alpha(theme.palette.primary.main, 0.04),
+                  },
+                },
               }}
             />
-          </Grid>
-          <Grid item xs={12} sm={3}>
-            <FormControl fullWidth size="small">
-              <InputLabel>Status</InputLabel>
-              <Select
-                value={filterStatus}
-                onChange={(e) => setFilterStatus(e.target.value)}
-                label="Status"
-              >
-                <MenuItem value="all">All Statuses</MenuItem>
-                <MenuItem value="open">Open</MenuItem>
-                <MenuItem value="in_progress">In Progress</MenuItem>
-                <MenuItem value="resolved">Resolved</MenuItem>
-                <MenuItem value="closed">Closed</MenuItem>
-              </Select>
-            </FormControl>
-          </Grid>
-          <Grid item xs={12} sm={3}>
-            <FormControl fullWidth size="small">
-              <InputLabel>Priority</InputLabel>
-              <Select
-                value={filterPriority}
-                onChange={(e) => setFilterPriority(e.target.value)}
-                label="Priority"
-              >
-                <MenuItem value="all">All Priorities</MenuItem>
-                <MenuItem value="low">Low</MenuItem>
-                <MenuItem value="medium">Medium</MenuItem>
-                <MenuItem value="high">High</MenuItem>
-                <MenuItem value="urgent">Urgent</MenuItem>
-              </Select>
-            </FormControl>
-          </Grid>
-          <Grid item xs={12} sm={3} sx={{ display: 'flex', justifyContent: 'flex-end' }}>
-            <Button 
-              variant="outlined" 
-              startIcon={<FilterListIcon />}
-              onClick={() => {
-                setFilterStatus('all');
-                setFilterPriority('all');
-                setSearchTerm('');
-              }}
-            >
-              Reset Filters
-            </Button>
-          </Grid>
+            {filteredTickets.length === 0 && !contextLoading && (
+              <Box sx={{ p: 4, textAlign: 'center' }}>
+                <SearchOffIcon sx={{ fontSize: 48, color: 'text.secondary', mb: 1 }} />
+                <Typography variant="h6" color="textSecondary">No tickets found</Typography>
+                <Typography variant="body2" color="textSecondary">Try adjusting your search or filters.</Typography>
+              </Box>
+            )}
+          </Paper>
         </Grid>
-      </Paper>
-    </Grid>
+      </Grid>
+    );
+  };
 
-    <Grid item xs={12}>
-      <Paper
-        sx={{ 
-          p: 2,
-          borderRadius: 2,
-        }}
-      >
-        <DataGrid
-          rows={filteredTickets}
-          columns={ticketColumns}
-          autoHeight={true}
-          rowCount={(contextPagination as any)?.total || contextPagination?.totalCount || filteredTickets.length}
-          pageSizeOptions={[5, 10, 25]}
-          paginationModel={listPaginationModel}
-          paginationMode="server" 
-          onPaginationModelChange={setListPaginationModel} 
-          loading={contextLoading}
-          disableRowSelectionOnClick
-          onRowClick={(params) => navigate(`/tickets/${params.row.id}`)} 
-          sx={{ 
-            border: 'none',
-            '& .MuiDataGrid-columnHeaders': {
-              backgroundColor: theme.palette.mode === 'dark'
-                ? alpha(theme.palette.primary.dark, 0.1) 
-                : alpha(theme.palette.primary.light, 0.1),
-            },
-            '& .MuiDataGrid-cell': {
-              borderBottom: `1px solid ${theme.palette.divider}`,
-              cursor: 'pointer',
-              transition: 'all 0.2s ease',
-              py: 1, 
-               '&:hover': {
-                backgroundColor: alpha(theme.palette.primary.main, 0.04),
+  // Admin dashboard view
+  const renderAdminDashboard = () => {
+    const cardStyles = {
+      height: '100%',
+      border: '1px solid',
+      borderColor: theme.palette.divider,
+      borderRadius: 2
+    };
+
+    const filteredTickets = getFilteredTickets();
+
+    return (
+      <Grid container spacing={1}>
+        <Grid item xs={12}>
+          <Card
+            elevation={0}
+            sx={{
+              p: 0,
+              overflow: 'hidden',
+              border: '1px solid',
+              borderColor: alpha(theme.palette.primary.main, 0.2),
+              borderRadius: 3,
+              background: theme.palette.mode === 'dark'
+                ? `linear-gradient(120deg, ${alpha(theme.palette.primary.dark, 0.7)}, ${alpha(theme.palette.secondary.dark, 0.5)})`
+                : `linear-gradient(120deg, ${alpha('#fff', 0.95)}, ${alpha(theme.palette.secondary.light, 0.15)})`,
+              position: 'relative',
+            }}
+          >
+            <Box sx={{ p: { xs: 3, md: 2 }, position: 'relative', zIndex: 1 }}>
+              <Grid container alignItems="center" justifyContent="space-between" spacing={3}>
+                <Grid item xs={12} md={7}>
+                  <Typography variant="h5" component="h1" gutterBottom>
+                    Admin Ticket View
+                  </Typography>
+                  <Typography variant="subtitle1">
+                    Oversee all support tickets, manage assignments, and analyze system performance.
+                  </Typography>
+                </Grid>
+                <Grid item xs={12} md={5} sx={{ display: 'flex', justifyContent: { xs: 'flex-start', md: 'flex-end' }, alignItems: 'center', gap: 2 }}>
+
+                  <Button
+                    variant="outlined"
+                    startIcon={<RefreshIcon />}
+                    onClick={handleRefreshData}
+                  >
+                    Refresh
+                  </Button>
+
+                </Grid>
+              </Grid>
+            </Box>
+          </Card>
+        </Grid>
+
+        <Grid item xs={12}>
+          <StatsWidget
+            stats={[
+              {
+                title: 'Total Tickets',
+                value: stats.total,
+                icon: <AssignmentIcon />,
+                color: theme.palette.primary.main,
+                change: { value: 12, isPositive: true },
+                progress: 78,
               },
-            },
-          }}
-        />
-      </Paper>
-    </Grid>
-  </Grid>
-);
-};
+              {
+                title: 'Open Tickets',
+                value: stats.open + stats.inProgress,
+                icon: <AccessTimeIcon />,
+                color: theme.palette.info.main,
+                change: { value: 8, isPositive: false },
+                progress: Math.round(((stats.open + stats.inProgress) / stats.total) * 100),
+              },
+              {
+                title: 'Resolved Today',
+                value: stats.resolved,
+                icon: <CheckIcon />,
+                color: theme.palette.success.main,
+                change: { value: 23, isPositive: true },
+                progress: Math.round((stats.resolved / stats.total) * 100),
+              },
+              {
+                title: 'Needs Attention',
+                value: stats.highPriorityCount,
+                icon: <PriorityHighIcon />,
+                color: theme.palette.error.main,
+                change: { value: 12, isPositive: false },
+                progress: Math.round((stats.highPriorityCount / stats.total) * 100),
+              },
+            ]}
+            loading={isStatsLoading}
+            columns={4}
+            animated={true}
+          />
+        </Grid>
 
-return (
-  <Container 
-    maxWidth={false}
-    sx={{ 
-      py: { xs: 2, md: 3 },
-      position: 'relative',
-      width: '100%',
-      px: { xs: 2, sm: 3, md: 4 },
-      '&::before': {
-        content: '""',
-        position: 'fixed',
-        top: 0,
-        right: 0,
-        width: { xs: '100%', lg: '25%' },
-        height: { xs: '40%', lg: '100%' },
-        background: theme.palette.mode === 'dark' 
-          ? `radial-gradient(circle at 100% 0%, ${alpha(theme.palette.primary.dark, 0.15)} 0%, transparent 70%)`
-          : `radial-gradient(circle at 100% 0%, ${alpha(theme.palette.primary.light, 0.15)} 0%, transparent 70%)`,
-        zIndex: -1,
-        opacity: 0.8,
-        pointerEvents: 'none'
-      },
-      '&::after': {
-        content: '""',
-        position: 'fixed',
-        bottom: 0,
-        left: 0,
-        width: { xs: '100%', lg: '25%' },
-        height: { xs: '30%', lg: '60%' },
-        background: theme.palette.mode === 'dark' 
-          ? `radial-gradient(circle at 0% 100%, ${alpha(theme.palette.secondary.dark, 0.15)} 0%, transparent 70%)`
-          : `radial-gradient(circle at 0% 100%, ${alpha(theme.palette.secondary.light, 0.15)} 0%, transparent 70%)`,
-        zIndex: -1,
-        opacity: 0.6,
-        pointerEvents: 'none'
-      }
-    }}
-  >
-    <Box sx={{ 
-      animation: 'fadeIn 1s ease forwards',
-      opacity: 0,
-      '@keyframes fadeIn': {
-        from: { opacity: 0 },
-        to: { opacity: 1 }
-      }
-    }}>
-      {renderRoleDashboard()}
-    </Box>
-  </Container>
-);
+        <Grid item xs={12}>
+          <Paper sx={{ p: 2, borderRadius: 2 }}>
+            <Grid container spacing={2} alignItems="center">
+              <Grid item xs={12} sm={3}>
+                <TextField
+                  fullWidth
+                  variant="outlined"
+                  size="small"
+                  label="Search Tickets"
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                  InputProps={{
+                    startAdornment: (
+                      <InputAdornment position="start">
+                        <SearchIcon />
+                      </InputAdornment>
+                    ),
+                  }}
+                />
+              </Grid>
+              <Grid item xs={12} sm={3}>
+                <FormControl fullWidth size="small">
+                  <InputLabel>Status</InputLabel>
+                  <Select
+                    value={filterStatus}
+                    onChange={(e) => setFilterStatus(e.target.value)}
+                    label="Status"
+                  >
+                    <MenuItem value="all">All Statuses</MenuItem>
+                    <MenuItem value="open">Open</MenuItem>
+                    <MenuItem value="in_progress">In Progress</MenuItem>
+                    <MenuItem value="resolved">Resolved</MenuItem>
+                    <MenuItem value="closed">Closed</MenuItem>
+                  </Select>
+                </FormControl>
+              </Grid>
+              <Grid item xs={12} sm={3}>
+                <FormControl fullWidth size="small">
+                  <InputLabel>Priority</InputLabel>
+                  <Select
+                    value={filterPriority}
+                    onChange={(e) => setFilterPriority(e.target.value)}
+                    label="Priority"
+                  >
+                    <MenuItem value="all">All Priorities</MenuItem>
+                    <MenuItem value="low">Low</MenuItem>
+                    <MenuItem value="medium">Medium</MenuItem>
+                    <MenuItem value="high">High</MenuItem>
+                    <MenuItem value="urgent">Urgent</MenuItem>
+                  </Select>
+                </FormControl>
+              </Grid>
+              <Grid item xs={12} sm={3} sx={{ display: 'flex', justifyContent: 'flex-end' }}>
+                <Button
+                  variant="outlined"
+                  startIcon={<FilterListIcon />}
+                  onClick={() => {
+                    setFilterStatus('all');
+                    setFilterPriority('all');
+                    setSearchTerm('');
+                  }}
+                >
+                  Reset Filters
+                </Button>
+              </Grid>
+            </Grid>
+          </Paper>
+        </Grid>
+
+        <Grid item xs={12}>
+          <Paper
+            sx={{
+              p: 2,
+              borderRadius: 2,
+            }}
+          >
+            <DataGrid
+              rows={filteredTickets}
+              columns={ticketColumns}
+              autoHeight={true}
+              rowCount={(contextPagination as any)?.total || contextPagination?.totalCount || filteredTickets.length}
+              pageSizeOptions={[5, 10, 25]}
+              paginationModel={listPaginationModel}
+              paginationMode="server"
+              onPaginationModelChange={setListPaginationModel}
+              loading={contextLoading}
+              disableRowSelectionOnClick
+              onRowClick={(params) => navigate(`/tickets/${params.row.id}`)}
+              sx={{
+                border: 'none',
+                '& .MuiDataGrid-columnHeaders': {
+                  backgroundColor: theme.palette.mode === 'dark'
+                    ? alpha(theme.palette.primary.dark, 0.1)
+                    : alpha(theme.palette.primary.light, 0.1),
+                },
+                '& .MuiDataGrid-cell': {
+                  borderBottom: `1px solid ${theme.palette.divider}`,
+                  cursor: 'pointer',
+                  transition: 'all 0.2s ease',
+                  py: 1,
+                  '&:hover': {
+                    backgroundColor: alpha(theme.palette.primary.main, 0.04),
+                  },
+                },
+              }}
+            />
+          </Paper>
+        </Grid>
+      </Grid>
+    );
+  };
+
+  return (
+    <Container
+      maxWidth={false}
+      sx={{
+        py: { xs: 2, md: 3 },
+        position: 'relative',
+        width: '100%',
+        px: { xs: 2, sm: 3, md: 4 },
+        '&::before': {
+          content: '""',
+          position: 'fixed',
+          top: 0,
+          right: 0,
+          width: { xs: '100%', lg: '25%' },
+          height: { xs: '40%', lg: '100%' },
+          background: theme.palette.mode === 'dark'
+            ? `radial-gradient(circle at 100% 0%, ${alpha(theme.palette.primary.dark, 0.15)} 0%, transparent 70%)`
+            : `radial-gradient(circle at 100% 0%, ${alpha(theme.palette.primary.light, 0.15)} 0%, transparent 70%)`,
+          zIndex: -1,
+          opacity: 0.8,
+          pointerEvents: 'none'
+        },
+        '&::after': {
+          content: '""',
+          position: 'fixed',
+          bottom: 0,
+          left: 0,
+          width: { xs: '100%', lg: '25%' },
+          height: { xs: '30%', lg: '60%' },
+          background: theme.palette.mode === 'dark'
+            ? `radial-gradient(circle at 0% 100%, ${alpha(theme.palette.secondary.dark, 0.15)} 0%, transparent 70%)`
+            : `radial-gradient(circle at 0% 100%, ${alpha(theme.palette.secondary.light, 0.15)} 0%, transparent 70%)`,
+          zIndex: -1,
+          opacity: 0.6,
+          pointerEvents: 'none'
+        }
+      }}
+    >
+      <Box sx={{
+        animation: 'fadeIn 1s ease forwards',
+        opacity: 0,
+        '@keyframes fadeIn': {
+          from: { opacity: 0 },
+          to: { opacity: 1 }
+        }
+      }}>
+        {renderRoleDashboard()}
+      </Box>
+    </Container>
+  );
 };
 
 export default TicketListPage; 

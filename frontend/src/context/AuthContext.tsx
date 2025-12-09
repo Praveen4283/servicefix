@@ -3,6 +3,8 @@ import apiClient from '../services/apiClient';
 import { useNavigate, useLocation } from 'react-router-dom';
 import notificationService from '../services/notificationService';
 import { notificationManager } from '../services/notificationManager';
+import { TIME } from '../constants/app.constants';
+import { logger } from '../utils/frontendLogger';
 
 // Define user interface
 export interface User {
@@ -131,9 +133,9 @@ const dispatchNotificationEvent = (type: NotificationEventType, detail: Notifica
   if (!detail) return;
 
   const { message, type: notificationType, title, duration } = detail;
-  
-  console.log(`[AuthContext] Showing notification: ${message}`);
-  
+
+  logger.debug(`[AuthContext] Showing notification: ${message}`);
+
   switch (notificationType) {
     case 'success':
       notificationManager.showSuccess(message, { title, duration });
@@ -147,7 +149,7 @@ const dispatchNotificationEvent = (type: NotificationEventType, detail: Notifica
     default:
       notificationManager.showInfo(message, { title, duration });
   }
-  
+
   // For login success notifications, also create a persistent notification
   // that will be stored in the database and shown in the notification panel
   if (type === NotificationEventType.AUTH_SUCCESS && message.includes('Welcome back')) {
@@ -155,10 +157,10 @@ const dispatchNotificationEvent = (type: NotificationEventType, detail: Notifica
     const now = new Date();
     const formattedDate = now.toLocaleDateString();
     const formattedTime = now.toLocaleTimeString();
-    
+
     // Create a more detailed message with timestamp
     const detailedMessage = `${message} You logged in at ${formattedDate}, ${formattedTime}`;
-    
+
     // Store the notification in a variable for clarity
     const notificationData = {
       title: title || 'Login Notification',
@@ -167,28 +169,28 @@ const dispatchNotificationEvent = (type: NotificationEventType, detail: Notifica
       link: '/dashboard',
       event_type: 'login_success'
     };
-    
+
     // Add a flag to localStorage to track that we've created this notification
     // This prevents duplicates from multiple events or re-renders
     const loginNotificationKey = `login_notification_${Date.now().toString().substring(0, 8)}`;
-    
+
     // Only create if we haven't already created one recently
     if (!localStorage.getItem(loginNotificationKey)) {
       // Set the flag (expires in 10 seconds)
       localStorage.setItem(loginNotificationKey, 'true');
       setTimeout(() => localStorage.removeItem(loginNotificationKey), 10000);
-      
+
       // Use notification service to create a persistent notification
       notificationService.createBackendNotification(
-        notificationData.title, 
+        notificationData.title,
         notificationData.message,
         'success',
         notificationData.link,
         { event_type: notificationData.event_type }
-      ).catch(err => console.error('Failed to create persistent login notification:', err));
+      ).catch(err => logger.error('Failed to create persistent login notification:', err));
     }
   }
-  
+
   // For backward compatibility, still dispatch the event
   // This will be picked up by any legacy code still listening for these events
   const event = new CustomEvent(type, { detail });
@@ -203,10 +205,10 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   const socketInitializedRef = useRef<boolean>(false);
   const validatingSessionRef = useRef<boolean>(false);
   const sessionValidationPromiseRef = useRef<Promise<void> | null>(null);
-  
+
   // Memoize user object to prevent unnecessary re-renders
   const user = useMemo(() => state.user, [state.user]);
-  
+
   // Initialize socket connection after successful auth
   const initializeSocketIfNeeded = useCallback(() => {
     if (socketInitializedRef.current) {
@@ -215,23 +217,23 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
 
     const authToken = localStorage.getItem('authToken');
     if (!authToken) {
-      console.warn('[AuthContext] Cannot initialize socket: No auth token in localStorage');
+      logger.warn('[AuthContext] Cannot initialize socket: No auth token in localStorage');
       return;
     }
-    
-    console.log('[AuthContext] Initializing socket connection after successful auth');
+
+    logger.debug('[AuthContext] Initializing socket connection after successful auth');
     import('../services/socketService').then(({ default: socketService }) => {
       socketService.initializeSocket(authToken)
         .then(() => {
-          console.log('[AuthContext] Socket initialized successfully');
+          logger.debug('[AuthContext] Socket initialized successfully');
           socketInitializedRef.current = true;
         })
         .catch(err => {
-          console.error('[AuthContext] Error initializing socket:', err);
+          logger.error('[AuthContext] Error initializing socket:', err);
           // Reset flag to allow future reconnection attempts
           setTimeout(() => {
             socketInitializedRef.current = false;
-          }, 30000); // Wait 30 seconds before allowing another attempt
+          }, TIME.SOCKET_RECONNECT_DELAY_MS);
         });
     });
   }, []);
@@ -246,20 +248,20 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       error: null,
       registrationSuccess: false
     });
-    
+
     // Clear stored authentication data
     localStorage.removeItem('authToken');
     localStorage.removeItem('refreshToken');
     localStorage.removeItem('user');
-    
+
     // Reset socket connection status
     socketInitializedRef.current = false;
-    
+
     // Disconnect from socket if connected
     import('../services/socketService').then(({ default: socketService }) => {
       socketService.disconnect();
     });
-    
+
     // Redirect to login page if not already there
     if (!location.pathname.includes('/login')) {
       // Add session expired parameter to show appropriate message
@@ -278,28 +280,28 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         return false;
       }
     }
-    
+
     // Set validating flag and create a new promise
     validatingSessionRef.current = true;
-    
+
     const validationPromise = new Promise<boolean>(async (resolve, reject) => {
       try {
         // Ensure CSRF token is available or fetched
         try {
           await apiClient.fetchCsrfToken();
         } catch (csrfError) {
-          console.warn('[AuthContext] Failed to fetch/ensure CSRF token before validation:', csrfError);
+          logger.warn('[AuthContext] Failed to fetch/ensure CSRF token before validation:', csrfError);
           // Continue anyway, the API call will handle CSRF errors
         }
-        
+
         // Validate the session
         const response = await apiClient.get('/auth/validate');
-        
+
         if (response && response.user) {
           // Update user data and authentication state
           const user = formatUserResponse(response.user);
           localStorage.setItem('user', JSON.stringify(user));
-          
+
           setState(prevState => ({
             ...prevState,
             isAuthenticated: true,
@@ -307,20 +309,20 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
             isLoading: false,
             error: null,
           }));
-          
-          // Initialize socket connection
-          initializeSocketIfNeeded();
-          
+
+          // Socket initialization is now handled by App.tsx
+          // initializeSocketIfNeeded();
+
           resolve(true);
           return;
         } else {
-          console.warn('[AuthContext] /auth/validate did not return a user or unexpected response');
+          logger.warn('[AuthContext] /auth/validate did not return a user or unexpected response');
           handleSessionExpired();
           reject(new Error('Invalid session validation response'));
           return;
         }
       } catch (error) {
-        console.error('[AuthContext] Error validating session:', error);
+        logger.error('[AuthContext] Error validating session:', error);
         handleSessionExpired();
         reject(error);
         return;
@@ -329,15 +331,15 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         setTimeout(() => {
           validatingSessionRef.current = false;
           sessionValidationPromiseRef.current = null;
-        }, 1000);
+        }, TIME.SESSION_VALIDATION_DELAY_MS);
       }
     });
-    
+
     // Store the promise for potential concurrent calls
-    sessionValidationPromiseRef.current = validationPromise.then(() => {}).catch(() => {});
-    
+    sessionValidationPromiseRef.current = validationPromise.then(() => { }).catch(() => { });
+
     return validationPromise;
-  }, [handleSessionExpired, initializeSocketIfNeeded]);
+  }, [handleSessionExpired]);
 
   // Initialize the auth state
   useEffect(() => {
@@ -349,16 +351,16 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       if (cachedUserJson) {
         try {
           const cachedUser = JSON.parse(cachedUserJson) as User;
-          
+
           if (process.env.NODE_ENV !== 'production') {
-            console.log('[AuthContext] Found cached user data:', cachedUser.id);
+            logger.debug('[AuthContext] Found cached user data:', cachedUser.id);
           }
 
           const hasCriticalData = cachedUser.designation && cachedUser.phoneNumber && cachedUser.organization;
 
           if (hasCriticalData) {
             if (process.env.NODE_ENV !== 'production') {
-              console.log('[AuthContext] Cached user has critical data, using it.');
+              logger.debug('[AuthContext] Cached user has critical data, using it.');
             }
             setState(prevState => ({
               ...prevState,
@@ -370,7 +372,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
             loadedFromCacheAndComplete = true;
           } else {
             if (process.env.NODE_ENV !== 'production') {
-              console.log('[AuthContext] Cached user is missing critical data, will proceed to validate session.');
+              logger.debug('[AuthContext] Cached user is missing critical data, will proceed to validate session.');
             }
             setState(prevState => ({
               ...prevState,
@@ -380,14 +382,14 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
             }));
           }
         } catch (e) {
-          console.error('[AuthContext] Error parsing cached user data:', e);
+          logger.error('[AuthContext] Error parsing cached user data:', e);
           localStorage.removeItem('user');
           setState(prevState => ({ ...prevState, isLoading: true }));
         }
       } else {
         setState(prevState => ({ ...prevState, isLoading: true }));
       }
-      
+
       // Determine if the current route is public
       const currentPath = location.pathname;
       const publicRoutes = ['/', '/login', '/register', '/forgot-password', '/reset-password', '/cookies'];
@@ -397,8 +399,8 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
 
       // Handle public routes: skip validation and ensure isLoading is false.
       if (isCurrentRoutePublic) {
-        console.log(`[AuthContext] Current route ${currentPath} is public. Skipping auth validation.`);
-        
+        logger.debug(`[AuthContext] Current route ${currentPath} is public. Skipping auth validation.`);
+
         if (state.isLoading || !loadedFromCacheAndComplete) {
           setState(prevState => ({ ...prevState, isLoading: false }));
         }
@@ -408,54 +410,55 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       // For NON-PUBLIC routes: validate session if needed
       if (proceedToValidate) {
         try {
-          console.log(`[AuthContext] Validating auth session for protected route: ${currentPath}`);
-          
+          logger.debug(`[AuthContext] Validating auth session for protected route: ${currentPath}`);
+
           // Use the validateSession helper with debouncing
           const isValid = await validateSession();
-          
+
           if (!isValid) {
             // Session validation failed, handleSessionExpired was already called
-            console.warn('[AuthContext] Session validation failed for protected route.');
+            logger.warn('[AuthContext] Session validation failed for protected route.');
           } else {
-            console.log('[AuthContext] Session validated successfully for protected route.');
+            logger.debug('[AuthContext] Session validated successfully for protected route.');
           }
         } catch (error) {
-          console.error('[AuthContext] Error during auth initialization:', error);
+          logger.error('[AuthContext] Error during auth initialization:', error);
           // handleSessionExpired was already called in validateSession
         }
       } else if (loadedFromCacheAndComplete) {
-        console.log(`[AuthContext] Using complete cached user for protected route: ${currentPath}`);
-        initializeSocketIfNeeded();
+        logger.debug(`[AuthContext] Using complete cached user for protected route: ${currentPath}`);
+        // Socket initialization is now handled by App.tsx
+        // initializeSocketIfNeeded();
       } else {
-        console.warn('[AuthContext] Reached unexpected state in initializeAuth for protected route.');
+        logger.warn('[AuthContext] Reached unexpected state in initializeAuth for protected route.');
         setState(prevState => ({ ...prevState, isLoading: false }));
       }
     };
-    
+
     initializeAuth();
-  }, [location.pathname, location.state?.isRedirecting, handleSessionExpired, initializeSocketIfNeeded, validateSession]);
+  }, [location.pathname, location.state?.isRedirecting, handleSessionExpired, validateSession]);
 
   // Listen for auth events
   useEffect(() => {
     // Listen for forced logout events (triggered by API client or socketService)
     const handleForceLogout = () => {
-      console.log('[AuthContext] Forced logout detected');
+      logger.debug('[AuthContext] Forced logout detected');
       handleSessionExpired();
     };
-    
+
     // Listen for session refresh events (when API client successfully refreshes tokens)
     const handleSessionRefreshed = () => {
-      console.log('[AuthContext] Session refreshed event detected');
+      logger.debug('[AuthContext] Session refreshed event detected');
       // Refresh user data if needed after token refresh
       validateSession().catch(error => {
-        console.error('[AuthContext] Error validating session after refresh:', error);
+        logger.error('[AuthContext] Error validating session after refresh:', error);
       });
     };
-    
+
     // Register event listeners
     window.addEventListener('user:force-logout', handleForceLogout);
     window.addEventListener('auth:session-refreshed', handleSessionRefreshed);
-    
+
     // Clean up
     return () => {
       window.removeEventListener('user:force-logout', handleForceLogout);
@@ -466,60 +469,58 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   const login = async (email: string, password: string): Promise<boolean> => {
     try {
       setState(prevState => ({ ...prevState, isLoading: true, error: null }));
-      
+
       // Make login request
       const response = await apiClient.post('/auth/login', { email, password });
-      console.log('[AuthContext] Login response:', response);
-      
+      logger.debug('[AuthContext] Login response:', response);
+
       if (response.status === 'success' && response.user && response.token) {
         // Format user response 
         const user = formatUserResponse(response.user);
-        
+
         // Store the access token and refresh token in localStorage for now
         // This allows socket.io to use the token for authentication
         // But we primarily rely on HttpOnly cookies for API authentication
-        console.log('[AuthContext] Storing auth token in localStorage');
+        logger.debug('[AuthContext] Storing auth token in localStorage');
         localStorage.setItem('authToken', response.token);
-        
+
         if (response.refreshToken) {
-          console.log('[AuthContext] Storing refresh token in localStorage');
+          logger.debug('[AuthContext] Storing refresh token in localStorage');
           localStorage.setItem('refreshToken', response.refreshToken);
         }
-        
+
         // Store the login timestamp to detect fresh logins
         localStorage.setItem('lastLoginTimestamp', Date.now().toString());
-        
+
         // Set a flag for fresh login that other services can check
-        // @ts-ignore - Adding custom property to window
         window.__freshLogin = true;
-        
+
         // Auto-clear the fresh login flag after some time
         setTimeout(() => {
-          // @ts-ignore - Clearing custom property from window
           window.__freshLogin = false;
-        }, 10000); // Clear after 10 seconds
-        
+        }, TIME.FRESH_LOGIN_FLAG_DURATION_MS);
+
         // Cache user data to avoid flicker during page loads
         localStorage.setItem('user', JSON.stringify(user));
-        
+
         // Before setting auth state, ensure we have a CSRF token ready for subsequent API calls
-        console.log('[AuthContext] CSRF token fetch attempt 1');
+        logger.debug('[AuthContext] CSRF token fetch attempt 1');
         try {
           await apiClient.fetchCsrfToken();
-          console.log('[AuthContext] CSRF token refreshed after login (attempt 1)');
+          logger.debug('[AuthContext] CSRF token refreshed after login (attempt 1)');
         } catch (e) {
-          console.warn('[AuthContext] Failed to fetch CSRF token on login (attempt 1), retrying...');
+          logger.warn('[AuthContext] Failed to fetch CSRF token on login (attempt 1), retrying...');
           try {
             // Wait a bit and try again
             await new Promise(resolve => setTimeout(resolve, 500));
             await apiClient.fetchCsrfToken();
-            console.log('[AuthContext] CSRF token refreshed after login (attempt 2)');
+            logger.debug('[AuthContext] CSRF token refreshed after login (attempt 2)');
           } catch (e2) {
-            console.error('[AuthContext] Failed to fetch CSRF token on login (attempt 2):', e2);
+            logger.error('[AuthContext] Failed to fetch CSRF token on login (attempt 2):', e2);
             // Continue anyway, the apiClient will retry when needed
           }
         }
-        
+
         // Update auth state with user data
         setState({
           isAuthenticated: true,
@@ -528,46 +529,47 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
           error: null,
           registrationSuccess: false
         });
-        
+
         // Show welcome notification
         dispatchNotificationEvent(NotificationEventType.AUTH_SUCCESS, {
           title: 'Login Successful',
           message: `Welcome back, ${user.firstName}!`,
           type: 'success',
         });
-        
-        // Initialize socket only after successful authentication
-        initializeSocketIfNeeded();
-        
+
+        // Socket initialization is now handled by App.tsx to prevent duplicate connections
+        // during navigation. Commenting out the call here.
+        // initializeSocketIfNeeded();
+
         // Set up session timeout check if enabled
         setupSessionTimeoutHandler();
-        
+
         return true;
       } else {
         // Login failed with unexpected response format
-        setState(prevState => ({ 
-          ...prevState, 
-          isLoading: false, 
-          error: 'Login failed. Please try again.' 
+        setState(prevState => ({
+          ...prevState,
+          isLoading: false,
+          error: 'Login failed. Please try again.'
         }));
         return false;
       }
     } catch (error: any) {
       // Handle API error
       const errorMessage = error.message || 'Login failed. Please check your credentials.';
-      
-      setState(prevState => ({ 
-        ...prevState, 
+
+      setState(prevState => ({
+        ...prevState,
         isLoading: false,
         error: errorMessage
       }));
-      
+
       dispatchNotificationEvent(NotificationEventType.AUTH_ERROR, {
         title: 'Login Failed',
         message: errorMessage,
         type: 'error'
       });
-      
+
       return false;
     }
   };
@@ -576,37 +578,37 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   const logout = useCallback(async (): Promise<void> => {
     try {
       // First, clear local notifications to prevent stale data on next login
-      console.log('[AuthContext] Clearing notification storage on logout');
-      
+      logger.debug('[AuthContext] Clearing notification storage on logout');
+
       // Import and use notification service to clear storage
       import('../services/notificationService').then(({ default: notificationService }) => {
         notificationService.clearLocalStorage();
       });
-      
+
       // Disconnect socket
       import('../services/socketService').then(({ default: socketService }) => {
         socketService.disconnect();
       });
-      
+
       // Call logout endpoint
       await apiClient.post('/auth/logout');
     } catch (error) {
-      console.error('[AuthContext] Error during logout:', error);
+      logger.error('[AuthContext] Error during logout:', error);
     } finally {
       // Clean up resources
       if (notificationIntervalRef.current) {
         clearInterval(notificationIntervalRef.current);
         notificationIntervalRef.current = null;
       }
-      
+
       socketInitializedRef.current = false;
-      
+
       // Clear local storage
       localStorage.removeItem('authToken');
       localStorage.removeItem('refreshToken');
       localStorage.removeItem('user');
       localStorage.removeItem('lastLoginTimestamp');
-      
+
       // Update state
       setState({
         isAuthenticated: false,
@@ -615,10 +617,10 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         error: null,
         registrationSuccess: false
       });
-      
+
       // Redirect to login
       navigate('/login');
-      
+
       // Fire logout event
       window.dispatchEvent(new CustomEvent('user:logout'));
     }
@@ -628,17 +630,17 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   const setupSessionTimeoutHandler = () => {
     // Listen for visibility changes to detect when user returns to the tab
     document.addEventListener('visibilitychange', checkSessionStatus);
-    
+
     // Check session status periodically (every 5 minutes)
     const intervalId = setInterval(checkSessionStatus, 5 * 60 * 1000);
-    
+
     // Store the interval ID to clear it later
     return () => {
       document.removeEventListener('visibilitychange', checkSessionStatus);
       clearInterval(intervalId);
     };
   };
-  
+
   // Check if the session is still valid
   const checkSessionStatus = async () => {
     // Only check if the document is visible and user is authenticated
@@ -648,7 +650,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         await apiClient.get('/auth/validate');
       } catch (error) {
         // If validation fails, logout the user
-        console.warn('[AuthContext] Session validation failed, logging out');
+        logger.warn('[AuthContext] Session validation failed, logging out');
         logout();
       }
     }
@@ -657,24 +659,24 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   // Register function
   const register = async (userData: RegisterData): Promise<boolean> => {
     // Clear any existing errors and show loading state
-    setState({ 
-      ...state, 
-      isLoading: true, 
+    setState({
+      ...state,
+      isLoading: true,
       error: null,
       registrationSuccess: false
     });
-    
+
     try {
       // Actual API call with correct API path without duplicate /api prefix
       const response = await apiClient.post('/auth/register', userData);
-      console.log('[AuthContext] Register response:', response);
-      
+      logger.debug('[AuthContext] Register response:', response);
+
       // Check for successful registration
-      const isSuccess = 
-        (response?.status === 'success') || 
+      const isSuccess =
+        (response?.status === 'success') ||
         (response?.data?.status === 'success') ||
         (response && !response.error);
-      
+
       if (isSuccess) {
         // If registration is successful, set success state
         setState({
@@ -683,14 +685,14 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
           error: null,
           registrationSuccess: true
         });
-        
+
         // Dispatch success notification event
-        dispatchNotificationEvent(NotificationEventType.AUTH_SUCCESS, { 
-          message: 'Registration successful! Please log in.', 
-          type: 'success', 
-          duration: 5000 
+        dispatchNotificationEvent(NotificationEventType.AUTH_SUCCESS, {
+          message: 'Registration successful! Please log in.',
+          type: 'success',
+          duration: 5000
         });
-        
+
         return true; // Indicate success
       } else {
         throw new Error(response?.message || response?.data?.message || 'Registration failed');
@@ -698,7 +700,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     } catch (error: any) {
       // Get the error message 
       const errorMessage = error.response?.data?.message || error.message || 'An error occurred during registration';
-      
+
       // Set the error in the state
       setState({
         ...state,
@@ -706,14 +708,14 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         error: errorMessage,
         registrationSuccess: false
       });
-      
+
       // Dispatch error notification event
-      dispatchNotificationEvent(NotificationEventType.AUTH_ERROR, { 
-        message: errorMessage, 
-        type: 'error', 
-        duration: 5000 
+      dispatchNotificationEvent(NotificationEventType.AUTH_ERROR, {
+        message: errorMessage,
+        type: 'error',
+        duration: 5000
       });
-      
+
       return false; // Indicate failure
     }
   };
@@ -723,7 +725,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     setState({ ...state, isLoading: true, error: null });
     try {
       // Actual API call without duplicate /api prefix
-      await apiClient.post('/auth/forgot-password', { email }); 
+      await apiClient.post('/auth/forgot-password', { email });
       // Dispatch success notification event
       dispatchNotificationEvent(NotificationEventType.AUTH_SUCCESS, { message: 'Password reset email sent. Please check your inbox.', type: 'success', duration: 5000 });
     } catch (error: any) {
@@ -741,26 +743,26 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   const updateProfile = async (userData: ProfileUpdateData): Promise<void> => {
     if (!state.user) throw new Error('User not authenticated');
     setState({ ...state, isLoading: true, error: null });
-    
+
     try {
       // Debug what's being sent to the API
-      console.log('[AuthContext updateProfile] Sending update data to API:', JSON.stringify(userData));
-      
+      logger.debug('[AuthContext updateProfile] Sending update data to API:', JSON.stringify(userData));
+
       // Actual API call
       const updatedUserFromApi = await apiClient.updateUserProfile(state.user.id, userData);
-      
+
       // Debug the response from the API
-      console.log('[AuthContext updateProfile] Raw API response:', JSON.stringify(updatedUserFromApi));
-      
+      logger.debug('[AuthContext updateProfile] Raw API response:', JSON.stringify(updatedUserFromApi));
+
       // --- MODIFIED: Merge API response with existing state ---
       // Create merged user data, but specifically preserve the timezone if it exists
-      const mergedUser = { 
-        ...state.user, 
+      const mergedUser = {
+        ...state.user,
         ...updatedUserFromApi,
         // Keep the existing timezone if it's set and not explicitly changed by the current update
         timezone: userData.timezone || state.user?.timezone || updatedUserFromApi.timezone || 'UTC'
       };
-      
+
       // Store the updated user in state and localStorage
       const oldUser = { ...state.user }; // Capture old user state before updating
       setState({
@@ -769,17 +771,17 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         isLoading: false
       });
       localStorage.setItem('user', JSON.stringify(mergedUser)); // Save the merged user object
-      console.log('Profile updated successfully, merged user data:', mergedUser);
-      
+      logger.debug('Profile updated successfully, merged user data:', mergedUser);
+
       // --- Refactored Change Detection Logic ---
       const actualChangedFieldNames: string[] = [];
-      const changedFieldsMetadata: Array<{field: string, oldValue: any, newValue: any}> = [];
+      const changedFieldsMetadata: Array<{ field: string, oldValue: any, newValue: any }> = [];
 
       // Define default channel structure for notification settings comparison
       // Used for reference when comparing notification settings formats
       // const defaultChannels = { email: true, inApp: true, push: false };
       const allPossibleNotificationKeys = Object.keys(userData.notificationSettings || {});
-      
+
       // Helper for consistent object comparison - kept for future use
       /* const normalizeAndSortObject = (obj: any): any => {
         if (typeof obj !== 'object' || obj === null) return obj;
@@ -794,28 +796,28 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
           };
           return sortObjectKeys(normalized);
         } catch (e) { 
-          console.error("Error normalizing object:", e);
+          logger.error("Error normalizing object:", e);
           return obj; // Return original on error
         }
       }; */
 
       const buildConsistentNotificationStructure = (settingsSource: any): any => {
         const consistentStructure: any = {};
-        
+
         // Debug logging for notification settings format
-        console.log('Building consistent structure from source:', JSON.stringify(settingsSource));
-        
+        logger.debug('Building consistent structure from source:', JSON.stringify(settingsSource));
+
         // If source is undefined, return empty structure
         if (!settingsSource) return {};
-        
+
         // Identify if we're dealing with flat (old) or nested (new) structure
         // We consider it flat if at least one key has a boolean value
         const isFlat = Object.values(settingsSource).some(value => typeof value === 'boolean');
-        console.log('Source structure appears to be:', isFlat ? 'FLAT (old)' : 'NESTED (new)');
-        
+        logger.debug('Source structure appears to be:', isFlat ? 'FLAT (old)' : 'NESTED (new)');
+
         allPossibleNotificationKeys.forEach(key => {
           const value = settingsSource ? settingsSource[key] : undefined;
-          
+
           // For flat structure (old format with direct booleans)
           if (typeof value === 'boolean') {
             consistentStructure[key] = value;
@@ -836,8 +838,8 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
             consistentStructure[key] = false; // Default to disabled if missing
           }
         });
-        
-        console.log('Normalized to consistent structure:', JSON.stringify(consistentStructure));
+
+        logger.debug('Normalized to consistent structure:', JSON.stringify(consistentStructure));
         return consistentStructure;
       };
 
@@ -854,31 +856,31 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         if (key === 'notificationSettings') {
           try {
             // Check if notification settings were actually included in form submission
-            const notificationSettingsProvided = userData.hasOwnProperty('notificationSettings') && 
-                                                Object.keys(userData.notificationSettings || {}).length > 0;
-            
+            const notificationSettingsProvided = userData.hasOwnProperty('notificationSettings') &&
+              Object.keys(userData.notificationSettings || {}).length > 0;
+
             // Only do comparison if notification settings were explicitly provided
             if (notificationSettingsProvided) {
-              console.log('Notification settings were explicitly provided in form data');
+              logger.debug('Notification settings were explicitly provided in form data');
               const consistentOld = buildConsistentNotificationStructure(oldValue || {});
               const consistentNew = buildConsistentNotificationStructure(newValue || {});
-              
-              console.log('Comparing notification settings:');
-              console.log('Old (normalized):', JSON.stringify(consistentOld));
-              console.log('New (normalized):', JSON.stringify(consistentNew));
-              
+
+              logger.debug('Comparing notification settings:');
+              logger.debug('Old (normalized):', JSON.stringify(consistentOld));
+              logger.debug('New (normalized):', JSON.stringify(consistentNew));
+
               if (JSON.stringify(consistentOld) !== JSON.stringify(consistentNew)) {
-                console.log('Notification settings changed - displaying notification');
+                logger.debug('Notification settings changed - displaying notification');
                 hasChanged = true;
               } else {
-                console.log('Notification settings unchanged - NOT displaying notification');
+                logger.debug('Notification settings unchanged - NOT displaying notification');
               }
             } else {
-              console.log('Notification settings were not included in form submission - ignoring');
+              logger.debug('Notification settings were not included in form submission - ignoring');
               hasChanged = false;
             }
           } catch (error) {
-            console.error('Error comparing notification settings:', error);
+            logger.error('Error comparing notification settings:', error);
             hasChanged = false; // Don't assume changed on error - safer to assume unchanged
           }
         } else {
@@ -896,23 +898,23 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         }
       });
       // --- End Refactored Change Detection Logic ---
-      
+
       // Create notification messages based on actual changes
       let uiMessage = 'Profile information updated successfully.';
       let backendMessage = 'Profile information updated successfully.'; // Default backend message
       let metadataChanges = {};
-      
+
       if (actualChangedFieldNames.length === 1) {
         const change = changedFieldsMetadata[0];
         const fieldName = actualChangedFieldNames[0];
-        
+
         // Special formatting for simple values
         if (typeof change.oldValue !== 'object' && typeof change.newValue !== 'object') {
-             uiMessage = `${fieldName} updated.`; // Simplified message
-             backendMessage = `${fieldName} updated from "${change.oldValue || '(not set)'}" to "${change.newValue || '(not set)'}"`;
+          uiMessage = `${fieldName} updated.`; // Simplified message
+          backendMessage = `${fieldName} updated from "${change.oldValue || '(not set)'}" to "${change.newValue || '(not set)'}"`;
         } else {
-             uiMessage = `${fieldName} updated.`;
-             backendMessage = `${fieldName} updated.`; // Keep backend message generic for complex types
+          uiMessage = `${fieldName} updated.`;
+          backendMessage = `${fieldName} updated.`; // Keep backend message generic for complex types
         }
 
         metadataChanges = { field: change.field, oldValue: change.oldValue, newValue: change.newValue };
@@ -922,12 +924,12 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         backendMessage = uiMessage; // Use the same summary for backend
         metadataChanges = { fields: changedFieldsMetadata };
       }
-      
+
       // Display toast notification 
       dispatchNotificationEvent(NotificationEventType.AUTH_SUCCESS, {
         message: uiMessage,
         type: 'success',
-        title: 'Success', 
+        title: 'Success',
         duration: 5000,
         isPersistent: true // Keep persistent flag
       });
@@ -939,13 +941,13 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
           try {
             // Create a backend notification that persists for profile updates
             const profileUpdateKey = `profile_update_${Date.now()}`;
-            
+
             if (!localStorage.getItem(profileUpdateKey)) {
               // Store a flag to prevent duplicate notifications
               localStorage.setItem(profileUpdateKey, 'true');
               // Auto-expire after 1 minute
               setTimeout(() => localStorage.removeItem(profileUpdateKey), 60000);
-              
+
               await notificationService.createBackendNotification(
                 'Profile Updated',
                 backendMessage,
@@ -967,7 +969,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         isLoading: false,
         error: error.message || 'Failed to update profile'
       });
-      
+
       dispatchNotificationEvent(NotificationEventType.AUTH_ERROR, {
         message: error.message || 'Failed to update profile',
         type: 'error'
@@ -977,54 +979,54 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
 
   // Change password function
   const changePassword = async (currentPassword: string, newPassword: string): Promise<void> => {
-     if (!state.user) throw new Error('User not authenticated');
-     setState({ ...state, isLoading: true, error: null });
-     try {
-       // Actual API call without duplicate /api prefix
-       await apiClient.post('/auth/change-password', { oldPassword: currentPassword, newPassword });
-       
-       // Send success notification
-       dispatchNotificationEvent(NotificationEventType.AUTH_SUCCESS, { 
-         message: 'Password changed successfully', 
-         type: 'success', 
-         title: 'Password Updated',
-         duration: 5000 
-       });
-       
-       // Create a persistent backend notification for the password change
-       const passwordChangeKey = `password_change_notification_${Date.now().toString().substring(0, 8)}`;
-       
-       // Only create if we haven't already created one recently
-       if (!localStorage.getItem(passwordChangeKey)) {
-         // Set the flag (expires in 10 seconds)
-         localStorage.setItem(passwordChangeKey, 'true');
-         setTimeout(() => localStorage.removeItem(passwordChangeKey), 10000);
-         
-         // Record timestamp for the security notification
-         const now = new Date();
-         const formattedDate = now.toLocaleDateString();
-         const formattedTime = now.toLocaleTimeString();
-         
-         // Store a security notification in the database
-         notificationService.createBackendNotification(
-           'Password Changed',
-           `Your password was changed successfully on ${formattedDate} at ${formattedTime}.`,
-           'success',
-           '/profile',
-           { event_type: 'security_update', action: 'password_change', timestamp: now.toISOString() }
-         ).catch(err => console.error('Failed to create password change notification:', err));
-       }
-     } catch (error: any) {
-       const errorMessage = error.message || 'Failed to change password.';
-       setState({ ...state, isLoading: false, error: errorMessage });
-       
-       // Dispatch error notification event
-       dispatchNotificationEvent(NotificationEventType.AUTH_ERROR, { message: errorMessage, type: 'error', duration: 5000 });
-       throw new Error(errorMessage); // Rethrow for form handling
-     } finally {
-       setState({ ...state, isLoading: false });
-     }
-   };
+    if (!state.user) throw new Error('User not authenticated');
+    setState({ ...state, isLoading: true, error: null });
+    try {
+      // Actual API call without duplicate /api prefix
+      await apiClient.post('/auth/change-password', { oldPassword: currentPassword, newPassword });
+
+      // Send success notification
+      dispatchNotificationEvent(NotificationEventType.AUTH_SUCCESS, {
+        message: 'Password changed successfully',
+        type: 'success',
+        title: 'Password Updated',
+        duration: 5000
+      });
+
+      // Create a persistent backend notification for the password change
+      const passwordChangeKey = `password_change_notification_${Date.now().toString().substring(0, 8)}`;
+
+      // Only create if we haven't already created one recently
+      if (!localStorage.getItem(passwordChangeKey)) {
+        // Set the flag (expires in 10 seconds)
+        localStorage.setItem(passwordChangeKey, 'true');
+        setTimeout(() => localStorage.removeItem(passwordChangeKey), 10000);
+
+        // Record timestamp for the security notification
+        const now = new Date();
+        const formattedDate = now.toLocaleDateString();
+        const formattedTime = now.toLocaleTimeString();
+
+        // Store a security notification in the database
+        notificationService.createBackendNotification(
+          'Password Changed',
+          `Your password was changed successfully on ${formattedDate} at ${formattedTime}.`,
+          'success',
+          '/profile',
+          { event_type: 'security_update', action: 'password_change', timestamp: now.toISOString() }
+        ).catch(err => console.error('Failed to create password change notification:', err));
+      }
+    } catch (error: any) {
+      const errorMessage = error.message || 'Failed to change password.';
+      setState({ ...state, isLoading: false, error: errorMessage });
+
+      // Dispatch error notification event
+      dispatchNotificationEvent(NotificationEventType.AUTH_ERROR, { message: errorMessage, type: 'error', duration: 5000 });
+      throw new Error(errorMessage); // Rethrow for form handling
+    } finally {
+      setState({ ...state, isLoading: false });
+    }
+  };
 
   // Clear error function
   const clearError = useCallback(() => {
@@ -1033,7 +1035,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       error: null
     }));
   }, []);
-  
+
   // Reset registration success flag
   const resetRegistrationSuccess = useCallback(() => {
     setState((prevState) => ({
@@ -1046,15 +1048,15 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   const refreshUserData = useCallback(async (): Promise<void> => {
     try {
       setState(prevState => ({ ...prevState, isLoading: true }));
-      
+
       const response = await apiClient.get('/auth/validate');
-      
+
       if (response && response.user) {
         const user = formatUserResponse(response.user);
-        
+
         // Update cache
         localStorage.setItem('user', JSON.stringify(user));
-        
+
         setState(prevState => ({
           ...prevState,
           isAuthenticated: true,
@@ -1066,7 +1068,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         setState(prevState => ({ ...prevState, isLoading: false }));
       }
     } catch (error) {
-      console.error('[AuthContext] Error refreshing user data:', error);
+      logger.error('[AuthContext] Error refreshing user data:', error);
       setState(prevState => ({ ...prevState, isLoading: false }));
     }
   }, []);
@@ -1088,18 +1090,18 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     resetRegistrationSuccess,
     state
   }), [
-    state.isAuthenticated, 
-    state.user, 
-    state.isLoading, 
-    state.error, 
-    login, 
-    register, 
-    logout, 
-    resetPassword, 
-    updateProfile, 
-    changePassword, 
-    refreshUserData, 
-    clearError, 
+    state.isAuthenticated,
+    state.user,
+    state.isLoading,
+    state.error,
+    login,
+    register,
+    logout,
+    resetPassword,
+    updateProfile,
+    changePassword,
+    refreshUserData,
+    clearError,
     resetRegistrationSuccess
   ]);
 

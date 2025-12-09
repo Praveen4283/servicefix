@@ -38,6 +38,7 @@ import {
 } from '@mui/material';
 import { Edit as EditIcon, Save as SaveIcon, Cancel as CancelIcon, Upload as UploadIcon, LockReset as LockResetIcon, Close as CloseIcon, ExpandMore as ExpandMoreIcon, Notifications as NotificationsIcon, Email as EmailIcon, NotificationsActive as NotificationsActiveIcon, PhoneAndroid as PhoneAndroidIcon } from '@mui/icons-material';
 import { useAuth, User } from '../context/AuthContext';
+import { logger } from '../utils/frontendLogger';
 import { FormTextField } from '../components/common/FormField';
 import useFormValidation from '../utils/useFormValidation';
 import { profileSchema, changePasswordSchema } from '../utils/validationSchemas';
@@ -245,7 +246,7 @@ const ProfilePage: React.FC = () => {
   const [notificationSettingsChanged, setNotificationSettingsChanged] = useState(false);
   // State to store notification settings
   const [notificationSettings, setNotificationSettings] = useState<Record<string, NotificationSetting>>({});
-  
+
   const theme = useTheme();
 
   // Effect to populate form once user data is loaded
@@ -259,16 +260,16 @@ const ProfilePage: React.FC = () => {
       if (user) {
         // Log user data but avoid excessive logging
         if (process.env.NODE_ENV !== 'production') {
-          console.log('[ProfilePage useEffect] User data loaded:', user.id);
+          logger.debug('[ProfilePage useEffect] User data loaded:', user.id);
         }
-        
+
         // Only check for critical data once
         if (!profileRefreshAttempted) {
           const isCriticalDataMissing = !user.designation || !user.phoneNumber || !user.organization;
-          
+
           if (isCriticalDataMissing) {
             setProfileRefreshAttempted(true);
-            
+
             try {
               await refreshUserData();
             } catch (error) {
@@ -278,11 +279,11 @@ const ProfilePage: React.FC = () => {
             setProfileRefreshAttempted(true);
           }
         }
-        
+
         // Only proceed if we have user data
         if (user.designation && user.phoneNumber) {
           const convertedNotificationSettings = getDefaultNotificationSettings();
-          
+
           if (user.notificationSettings) {
             // Handle notification settings conversion
             try {
@@ -293,7 +294,7 @@ const ProfilePage: React.FC = () => {
                   }
                 } else if (typeof value === 'object' && value !== null) {
                   const isNewFormat = 'enabled' in value && 'channels' in value;
-                  
+
                   if (isNewFormat) {
                     const typedValue = value as any;
                     convertedNotificationSettings[key] = typedValue;
@@ -310,7 +311,7 @@ const ProfilePage: React.FC = () => {
                   }
                 }
               });
-              
+
               // Set notification settings only if they've changed
               if (JSON.stringify(notificationSettings) !== JSON.stringify(convertedNotificationSettings)) {
                 setNotificationSettings(convertedNotificationSettings);
@@ -323,7 +324,7 @@ const ProfilePage: React.FC = () => {
             // API call to fetch notification preferences would go here
             // Removing for simplicity to focus on fixing the re-render issue
           }
-          
+
           // Only reset form values when user data changes or when form is not being edited
           if (!editing) {
             const formValues = {
@@ -336,26 +337,26 @@ const ProfilePage: React.FC = () => {
               language: user.language || 'en',
               notificationSettings: notificationSettings // Include the notification settings
             };
-            
+
             // Only reset if values have changed to avoid unnecessary re-renders
             const currentValues = profileFormik.values;
             const hasChanged = Object.keys(formValues).some(
               key => formValues[key as keyof typeof formValues] !== currentValues[key as keyof typeof currentValues]
             );
-            
+
             if (hasChanged) {
               profileFormik.resetForm({
                 values: formValues
               });
             }
-            
+
             // Reset avatar removal flag
             setRemoveCurrentAvatar(false);
           }
         }
       }
     };
-    
+
     loadProfileData();
     // Explicitly list all dependencies and ensure they're stable
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -373,7 +374,7 @@ const ProfilePage: React.FC = () => {
   const getDefaultNotificationSettings = () => {
     return Object.fromEntries(
       Object.entries(NOTIFICATION_TYPES).map(([key, value]) => [
-        key, 
+        key,
         {
           enabled: true,
           channels: {
@@ -389,16 +390,16 @@ const ProfilePage: React.FC = () => {
   // Effect to refresh user data after successful profile update
   const refreshProfileData = useCallback(async () => {
     if (user) {
-      console.log('[ProfilePage] Explicitly refreshing user data from API');
-      
+      logger.debug('[ProfilePage] Explicitly refreshing user data from API');
+
       // Reset the refresh flag to ensure we can refresh again if needed
       setProfileRefreshAttempted(false);
-      
+
       try {
         // Clear any cached data to ensure fresh fetch
         await refreshUserData();
-        
-        console.log('[ProfilePage] User data refresh successful');
+
+        logger.debug('[ProfilePage] User data refresh successful');
       } catch (error) {
         console.error('[ProfilePage] Error refreshing user data:', error);
       }
@@ -406,13 +407,13 @@ const ProfilePage: React.FC = () => {
   }, [user, refreshUserData]);
 
   // Profile form validation hook
-  const { 
-    formik: profileFormik, 
-    isSubmitting: isProfileSubmitting, 
+  const {
+    formik: profileFormik,
+    isSubmitting: isProfileSubmitting,
     submitError: profileSubmitError,
     submitSuccess: profileSubmitSuccess
   } = useFormValidation({
-    initialValues: { 
+    initialValues: {
       firstName: user?.firstName || '',
       lastName: user?.lastName || '',
       email: user?.email || '',
@@ -422,7 +423,7 @@ const ProfilePage: React.FC = () => {
       language: user?.language || 'en',
       notificationSettings: Object.fromEntries(
         Object.entries(NOTIFICATION_TYPES).map(([key, value]) => [
-          key, 
+          key,
           {
             enabled: true,
             channels: {
@@ -438,10 +439,10 @@ const ProfilePage: React.FC = () => {
     showSuccessNotification: false,
     onSubmit: async (values) => {
       if (!user) return;
-      
+
       setIsProcessing(true);
-      console.log('[ProfilePage] Submit form values:', JSON.stringify(values));
-      
+      logger.debug('[ProfilePage] Submit form values:', JSON.stringify(values));
+
       try {
         // Prepare update data
         const updateData: Partial<User> & { avatar?: File | null } = {
@@ -453,7 +454,7 @@ const ProfilePage: React.FC = () => {
           timezone: values.timezone || 'UTC',
           language: values.language || 'en'
         };
-        
+
         // Handle avatar changes
         if (avatarFile) {
           updateData.avatar = avatarFile;
@@ -467,15 +468,15 @@ const ProfilePage: React.FC = () => {
           // This ensures all changes (including deletions or structure changes) are captured
           (updateData as any).notificationSettings = values.notificationSettings;
         }
-        
-        console.log('[ProfilePage] Update data being sent:', { 
-          ...updateData, 
-          avatar: updateData.avatar ? 'File object exists' : updateData.avatar === null ? 'null (remove)' : 'undefined (no change)' 
+
+        logger.debug('[ProfilePage] Update data being sent:', {
+          ...updateData,
+          avatar: updateData.avatar ? 'File object exists' : updateData.avatar === null ? 'null (remove)' : 'undefined (no change)'
         });
-        
+
         const updatedUser = await updateProfile(updateData);
-        console.log('[ProfilePage] Profile updated successfully:', updatedUser);
-        
+        logger.debug('[ProfilePage] Profile updated successfully:', updatedUser);
+
         // Reset state after successful update
         setAvatarFile(null);
         setAvatarPreview('');
@@ -485,10 +486,10 @@ const ProfilePage: React.FC = () => {
 
         // Allow the form to be edited again
         setIsProcessing(false);
-        
+
         // Show success toast
         toast.success('Profile updated successfully');
-        
+
         // Force refresh of user data to ensure UI shows updated information
         await refreshProfileData();
       } catch (error) {
@@ -507,10 +508,10 @@ const ProfilePage: React.FC = () => {
   }, [profileSubmitSuccess, refreshProfileData]);
 
   // Change Password form validation hook
-  const { 
-    formik: passwordFormik, 
-    isSubmitting: isPasswordSubmitting, 
-    submitError: passwordSubmitError 
+  const {
+    formik: passwordFormik,
+    isSubmitting: isPasswordSubmitting,
+    submitError: passwordSubmitError
   } = useFormValidation<ChangePasswordValues>({
     initialValues: {
       currentPassword: '',
@@ -520,24 +521,24 @@ const ProfilePage: React.FC = () => {
     validationSchema: changePasswordSchema,
     showSuccessNotification: false, // Disable generic success notification as AuthContext handles it
     onSubmit: async (values) => {
-       try {
-         // Placeholder: Implement actual API call in AuthContext
-         await changePassword(values.currentPassword, values.newPassword); 
-         setChangePasswordOpen(false);
-       } catch (error: any) {
-       }
+      try {
+        // Placeholder: Implement actual API call in AuthContext
+        await changePassword(values.currentPassword, values.newPassword);
+        setChangePasswordOpen(false);
+      } catch (error: any) {
+      }
     },
   });
 
   const handleAvatarChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files[0]) {
       const file = e.target.files[0];
-      
+
       // Validate file size and type
       const fileType = file.type;
       const validTypes = ['image/jpeg', 'image/png', 'image/jpg', 'image/gif'];
       const maxSize = 5 * 1024 * 1024; // 5MB
-      
+
       if (!validTypes.includes(fileType)) {
         setNotification({
           open: true,
@@ -546,7 +547,7 @@ const ProfilePage: React.FC = () => {
         });
         return;
       }
-      
+
       if (file.size > maxSize) {
         setNotification({
           open: true,
@@ -555,11 +556,11 @@ const ProfilePage: React.FC = () => {
         });
         return;
       }
-      
+
       // If validation passes, set the file for upload
       setAvatarFile(file);
       setRemoveCurrentAvatar(false); // If uploading a new one, don't remove the old one yet
-      
+
       // Create a preview URL
       const reader = new FileReader();
       reader.onloadend = () => {
@@ -599,10 +600,10 @@ const ProfilePage: React.FC = () => {
   // Add new function to save only notification settings
   const handleSaveNotifications = async () => {
     if (!user) return;
-    
+
     setIsProcessing(true);
-    console.log('[ProfilePage] Submitting notification settings:', JSON.stringify(profileFormik.values.notificationSettings));
-    
+    logger.debug('[ProfilePage] Submitting notification settings:', JSON.stringify(profileFormik.values.notificationSettings));
+
     try {
       // Send only the notification settings
       await fetch(`${process.env.REACT_APP_API_URL}/notifications/preferences`, {
@@ -613,14 +614,14 @@ const ProfilePage: React.FC = () => {
         },
         body: JSON.stringify({ notificationSettings: profileFormik.values.notificationSettings })
       });
-      
+
       setEditingNotifications(false);
       setNotificationSettingsChanged(false);
       setIsProcessing(false);
-      
+
       // Show success toast
       toast.success('Notification settings updated successfully');
-      
+
       // Force refresh of user data to ensure UI shows updated information
       await refreshProfileData();
     } catch (error) {
@@ -655,8 +656,8 @@ const ProfilePage: React.FC = () => {
     checked: boolean
   ) => {
     setNotificationSettingsChanged(true); // Mark notification settings as changed
-    if (profileFormik.values.notificationSettings && 
-        profileFormik.values.notificationSettings[notificationType]) {
+    if (profileFormik.values.notificationSettings &&
+      profileFormik.values.notificationSettings[notificationType]) {
       profileFormik.setFieldValue(
         `notificationSettings.${notificationType}.channels.${channel}`,
         checked
@@ -677,7 +678,7 @@ const ProfilePage: React.FC = () => {
   const renderNotificationChannels = (notificationType: string) => {
     const notificationSetting = profileFormik.values.notificationSettings?.[notificationType];
     if (!notificationSetting) return null;
-    
+
     return (
       <Box sx={{ display: 'flex', gap: 1, ml: 4, mt: 1 }}>
         <FormControlLabel
@@ -737,7 +738,7 @@ const ProfilePage: React.FC = () => {
     // Dispatch a custom event that the layout component can listen for
     const closeProfileMenuEvent = new CustomEvent('closeProfileMenu');
     window.dispatchEvent(closeProfileMenuEvent);
-    
+
     return () => {
       // Clean up any listeners if needed
     };
@@ -746,19 +747,19 @@ const ProfilePage: React.FC = () => {
   // Function to debug sensitive user fields without excessive logging
   const debugUserFields = () => {
     if (process.env.NODE_ENV === 'production') return;
-    
+
     if (user) {
-      console.log('[ProfilePage] User designation:', user.designation);
-      console.log('[ProfilePage] Organization data:', user.organization);
-      
+      logger.debug('[ProfilePage] User designation:', user.designation);
+      logger.debug('[ProfilePage] Organization data:', user.organization);
+
       if (user.lastLoginAt || user.lastLogin || user.last_login_at) {
         const loginDateString = user.lastLoginAt || user.lastLogin || user.last_login_at;
-        console.log('[ProfilePage] Last login date string:', loginDateString);
-        console.log('[ProfilePage] Last login date type:', typeof loginDateString);
+        logger.debug('[ProfilePage] Last login date string:', loginDateString);
+        logger.debug('[ProfilePage] Last login date type:', typeof loginDateString);
       }
     }
   };
-  
+
   if (!user) {
     return (
       <Box sx={{ width: '100%', display: 'flex', justifyContent: 'center', alignItems: 'center', height: '50vh' }}>
@@ -768,9 +769,9 @@ const ProfilePage: React.FC = () => {
   }
 
   return (
-    <Container 
+    <Container
       maxWidth={false}
-      sx={{ 
+      sx={{
         py: { xs: 2, md: 3 },
         position: 'relative',
         width: '100%',
@@ -782,7 +783,7 @@ const ProfilePage: React.FC = () => {
           right: 0,
           width: { xs: '100%', lg: '25%' },
           height: { xs: '40%', lg: '100%' },
-          background: theme.palette.mode === 'dark' 
+          background: theme.palette.mode === 'dark'
             ? `radial-gradient(circle at 100% 0%, ${alpha(theme.palette.primary.dark, 0.15)} 0%, transparent 70%)`
             : `radial-gradient(circle at 100% 0%, ${alpha(theme.palette.primary.light, 0.15)} 0%, transparent 70%)`,
           zIndex: -1,
@@ -796,7 +797,7 @@ const ProfilePage: React.FC = () => {
           left: 0,
           width: { xs: '100%', lg: '25%' },
           height: { xs: '30%', lg: '60%' },
-          background: theme.palette.mode === 'dark' 
+          background: theme.palette.mode === 'dark'
             ? `radial-gradient(circle at 0% 100%, ${alpha(theme.palette.secondary.dark, 0.15)} 0%, transparent 70%)`
             : `radial-gradient(circle at 0% 100%, ${alpha(theme.palette.secondary.light, 0.15)} 0%, transparent 70%)`,
           zIndex: -1,
@@ -805,7 +806,7 @@ const ProfilePage: React.FC = () => {
         }
       }}
     >
-      <Box sx={{ 
+      <Box sx={{
         animation: 'fadeIn 1s ease forwards',
         opacity: 0,
         '@keyframes fadeIn': {
@@ -816,10 +817,10 @@ const ProfilePage: React.FC = () => {
         <Grid container spacing={3}>
           {/* Header section */}
           <Grid item xs={12}>
-            <Card 
+            <Card
               elevation={0}
-              sx={{ 
-                p: 0, 
+              sx={{
+                p: 0,
                 overflow: 'hidden',
                 border: '1px solid',
                 borderColor: alpha(theme.palette.primary.main, 0.2),
@@ -847,7 +848,7 @@ const ProfilePage: React.FC = () => {
         </Grid>
 
         {profileSubmitError && (
-          <SystemAlert 
+          <SystemAlert
             message={profileSubmitError}
             type="error"
             sx={{ my: 3 }}
@@ -905,7 +906,7 @@ const ProfilePage: React.FC = () => {
                         },
                       }}
                     >
-                      <CloseIcon fontSize="small" /> 
+                      <CloseIcon fontSize="small" />
                     </IconButton>
                   </Tooltip>
                 )}
@@ -932,9 +933,9 @@ const ProfilePage: React.FC = () => {
                     </Button>
                   </label>
                   {(avatarPreview || removeCurrentAvatar) && (
-                     <Typography variant="caption" color="textSecondary" sx={{ textAlign: 'center' }}>
-                       {removeCurrentAvatar ? 'Avatar will be removed on save.' : 'New photo selected. Click Save.'}
-                     </Typography>
+                    <Typography variant="caption" color="textSecondary" sx={{ textAlign: 'center' }}>
+                      {removeCurrentAvatar ? 'Avatar will be removed on save.' : 'New photo selected. Click Save.'}
+                    </Typography>
                   )}
                 </Box>
               ) : (
@@ -942,12 +943,12 @@ const ProfilePage: React.FC = () => {
                   {(() => {
                     // Handle designation display with fallback and debugging
                     const designation = user?.designation || '';
-                    console.log('[ProfilePage] User designation:', designation);
+                    logger.debug('[ProfilePage] User designation:', designation);
                     return designation ? designation : 'No Designation set';
                   })()}
                 </Typography>
               )}
-              
+
               {user?.lastLoginAt || user?.lastLogin || user?.last_login_at ? (
                 <Box mt={2} textAlign="center">
                   <Typography variant="caption" color="textSecondary">
@@ -957,25 +958,25 @@ const ProfilePage: React.FC = () => {
                     {(() => {
                       try {
                         // Determine timezone, fallback to UTC if not set on user
-                        const userTimeZone = user?.timezone || 'UTC'; 
+                        const userTimeZone = user?.timezone || 'UTC';
                         // Normalize the login date field (handle snake_case and camelCase variations)
                         const loginDateString = user.lastLoginAt || user.lastLogin || user.last_login_at;
-                        
+
                         // Debugging to help identify format issues
-                        console.log('[ProfilePage] Last login date string:', loginDateString);
-                        console.log('[ProfilePage] Last login date type:', typeof loginDateString);
-                        
+                        logger.debug('[ProfilePage] Last login date string:', loginDateString);
+                        logger.debug('[ProfilePage] Last login date type:', typeof loginDateString);
+
                         // Only create Date if we have a valid login date
                         if (loginDateString) {
                           // Handle both string and Date object formats
-                          const loginDate = typeof loginDateString === 'string' 
-                            ? new Date(loginDateString) 
+                          const loginDate = typeof loginDateString === 'string'
+                            ? new Date(loginDateString)
                             : loginDateString;
-                            
+
                           // Check if date is valid before formatting
                           if (!isNaN(loginDate.getTime())) {
-                          // Use formatInTimeZone for correct display
-                          return formatInTimeZone(loginDate, userTimeZone, 'MMM dd, yyyy p');
+                            // Use formatInTimeZone for correct display
+                            return formatInTimeZone(loginDate, userTimeZone, 'MMM dd, yyyy p');
                           } else {
                             console.error('[ProfilePage] Invalid date format:', loginDateString);
                             return "Invalid Date";
@@ -1001,7 +1002,7 @@ const ProfilePage: React.FC = () => {
                 </Box>
               )}
             </EnhancedCard>
-            
+
             {/* Account Security Card */}
             <EnhancedCard
               sx={{
@@ -1026,7 +1027,7 @@ const ProfilePage: React.FC = () => {
                   color="secondary"
                   onClick={handleOpenChangePassword}
                   startIcon={<LockResetIcon />}
-                  sx={{ 
+                  sx={{
                     transition: 'all 0.2s ease',
                     '&:hover': {
                       transform: 'translateY(-2px)',
@@ -1051,8 +1052,8 @@ const ProfilePage: React.FC = () => {
               }}
             >
               <CardContent>
-                <Box 
-                  component="form" 
+                <Box
+                  component="form"
                   onSubmit={profileFormik.handleSubmit}
                   noValidate
                 >
@@ -1133,8 +1134,8 @@ const ProfilePage: React.FC = () => {
                         fullWidth
                         value={(() => {
                           // Debug organization data structure
-                          console.log('[ProfilePage] Organization data:', user?.organization);
-                          
+                          logger.debug('[ProfilePage] Organization data:', user?.organization);
+
                           // Handle different possible organization data structures
                           if (user?.organization?.name) {
                             return user.organization.name;
@@ -1152,7 +1153,7 @@ const ProfilePage: React.FC = () => {
                         variant="outlined"
                       />
                     </Grid>
-                    
+
                     {/* Role field - read only */}
                     <Grid item xs={12} sm={6}>
                       <TextField
@@ -1163,14 +1164,14 @@ const ProfilePage: React.FC = () => {
                         variant="outlined"
                       />
                     </Grid>
-                    
+
                     <Grid item xs={12}>
                       <Divider sx={{ my: 1 }} />
                       <Typography variant="subtitle2" gutterBottom sx={{ mt: 1 }}>
                         Preferences
                       </Typography>
                     </Grid>
-                    
+
                     {/* Timezone dropdown */}
                     <Grid item xs={12} sm={6}>
                       <TextField
@@ -1193,7 +1194,7 @@ const ProfilePage: React.FC = () => {
                         ))}
                       </TextField>
                     </Grid>
-                    
+
                     {/* Language dropdown */}
                     <Grid item xs={12} sm={6}>
                       <TextField
@@ -1271,7 +1272,7 @@ const ProfilePage: React.FC = () => {
                 </Box>
               </CardContent>
             </EnhancedCard>
-            
+
             {/* Notification Settings Card */}
             <EnhancedCard
               sx={{
@@ -1284,7 +1285,7 @@ const ProfilePage: React.FC = () => {
                 <Box>
                   <Box sx={{ mb: 2, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                     <Typography variant="h6" sx={{ display: 'flex', alignItems: 'center' }}>
-                      <NotificationsIcon sx={{ mr: 1 }} /> 
+                      <NotificationsIcon sx={{ mr: 1 }} />
                       Notification Settings
                     </Typography>
                     {!editingNotifications ? (
@@ -1323,21 +1324,21 @@ const ProfilePage: React.FC = () => {
                   <Typography variant="body2" color="textSecondary" sx={{ mt: 1, mb: 2 }}>
                     Configure how and when you receive notifications about system activities.
                   </Typography>
-                  
-                  <Accordion 
+
+                  <Accordion
                     elevation={0}
-                    sx={{ 
-                      '&.MuiAccordion-root:before': { 
-                        display: 'none' 
+                    sx={{
+                      '&.MuiAccordion-root:before': {
+                        display: 'none'
                       },
                       mb: 1,
                       borderRadius: 1,
                       border: `1px solid ${alpha(theme.palette.divider, 0.5)}`
                     }}
                   >
-                    <AccordionSummary 
+                    <AccordionSummary
                       expandIcon={<ExpandMoreIcon />}
-                      sx={{ 
+                      sx={{
                         backgroundColor: alpha(theme.palette.primary.main, 0.04),
                         '&:hover': {
                           backgroundColor: alpha(theme.palette.primary.main, 0.08)
@@ -1349,7 +1350,7 @@ const ProfilePage: React.FC = () => {
                     <AccordionDetails>
                       <FormGroup>
                         {Object.entries(NOTIFICATION_TYPES)
-                          .filter(([key, value]) => 
+                          .filter(([key, value]) =>
                             ['newTicketAssigned', 'ticketUpdated', 'ticketDueReminder', 'ticketEscalation'].includes(key)
                           )
                           .map(([key, value]) => (
@@ -1372,7 +1373,7 @@ const ProfilePage: React.FC = () => {
                                   </Box>
                                 }
                               />
-                              {profileFormik.values.notificationSettings?.[key]?.enabled && 
+                              {profileFormik.values.notificationSettings?.[key]?.enabled &&
                                 renderNotificationChannels(key)
                               }
                             </Box>
@@ -1380,21 +1381,21 @@ const ProfilePage: React.FC = () => {
                       </FormGroup>
                     </AccordionDetails>
                   </Accordion>
-                  
-                  <Accordion 
+
+                  <Accordion
                     elevation={0}
-                    sx={{ 
-                      '&.MuiAccordion-root:before': { 
-                        display: 'none' 
+                    sx={{
+                      '&.MuiAccordion-root:before': {
+                        display: 'none'
                       },
                       mb: 1,
                       borderRadius: 1,
                       border: `1px solid ${alpha(theme.palette.divider, 0.5)}`
                     }}
                   >
-                    <AccordionSummary 
+                    <AccordionSummary
                       expandIcon={<ExpandMoreIcon />}
-                      sx={{ 
+                      sx={{
                         backgroundColor: alpha(theme.palette.primary.main, 0.04),
                         '&:hover': {
                           backgroundColor: alpha(theme.palette.primary.main, 0.08)
@@ -1406,7 +1407,7 @@ const ProfilePage: React.FC = () => {
                     <AccordionDetails>
                       <FormGroup>
                         {Object.entries(NOTIFICATION_TYPES)
-                          .filter(([key, value]) => 
+                          .filter(([key, value]) =>
                             ['mentionInComment', 'newKbArticle', 'systemUpdates'].includes(key)
                           )
                           .map(([key, value]) => (
@@ -1429,7 +1430,7 @@ const ProfilePage: React.FC = () => {
                                   </Box>
                                 }
                               />
-                              {profileFormik.values.notificationSettings?.[key]?.enabled && 
+                              {profileFormik.values.notificationSettings?.[key]?.enabled &&
                                 renderNotificationChannels(key)
                               }
                             </Box>
@@ -1437,15 +1438,15 @@ const ProfilePage: React.FC = () => {
                       </FormGroup>
                     </AccordionDetails>
                   </Accordion>
-                  
+
                   {/* Help text at the bottom */}
                   <Box sx={{ mt: 2, p: 1, borderRadius: 1, backgroundColor: alpha(theme.palette.info.main, 0.08) }}>
                     <Typography variant="caption" color="textSecondary">
-                      <strong>Note:</strong> Push notifications require browser permissions and are only available on supported devices. 
+                      <strong>Note:</strong> Push notifications require browser permissions and are only available on supported devices.
                       Email notifications will be sent to your registered email address.
                     </Typography>
                   </Box>
-                  
+
                   {editing && notificationSettingsChanged && (
                     <Box sx={{ mt: 2, p: 1, borderRadius: 1, backgroundColor: alpha(theme.palette.warning.main, 0.08), display: 'flex', alignItems: 'center' }}>
                       <NotificationsActiveIcon fontSize="small" color="warning" sx={{ mr: 1 }} />
@@ -1465,13 +1466,13 @@ const ProfilePage: React.FC = () => {
         <DialogTitle>Change Password</DialogTitle>
         <Box component="form" onSubmit={passwordFormik.handleSubmit} noValidate>
           <DialogContent>
-             {passwordSubmitError && (
-               <SystemAlert 
-                 message={passwordSubmitError}
-                 type="error"
-                 sx={{ mb: 2 }}
-               />
-             )}
+            {passwordSubmitError && (
+              <SystemAlert
+                message={passwordSubmitError}
+                type="error"
+                sx={{ mb: 2 }}
+              />
+            )}
             <TextField
               margin="dense"
               required
@@ -1523,9 +1524,9 @@ const ProfilePage: React.FC = () => {
           </DialogContent>
           <DialogActions sx={{ p: 2 }}>
             <Button onClick={handleCloseChangePassword} disabled={isPasswordSubmitting}>Cancel</Button>
-            <Button 
-              type="submit" 
-              variant="contained" 
+            <Button
+              type="submit"
+              variant="contained"
               disabled={isPasswordSubmitting}
               startIcon={isPasswordSubmitting ? <CircularProgress size={20} color="inherit" /> : null}
               sx={{
@@ -1544,9 +1545,9 @@ const ProfilePage: React.FC = () => {
         onClose={closeNotification}
         anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
       >
-        <Alert 
-          onClose={closeNotification} 
-          severity={notification.type} 
+        <Alert
+          onClose={closeNotification}
+          severity={notification.type}
           variant="filled"
           elevation={6}
         >

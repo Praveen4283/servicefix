@@ -1,4 +1,4 @@
-import React from 'react';
+
 import {
   Box,
   Card,
@@ -51,13 +51,13 @@ const StatsWidget: React.FC<StatsWidgetProps> = ({
       <Grid container spacing={3}>
         {Array.from(new Array(columns)).map((_, index) => (
           <Grid key={index} item xs={12} sm={6} md={12 / columns} lg={12 / columns}>
-            <Skeleton 
-              variant="rectangular" 
-              height={140} 
-              sx={{ 
+            <Skeleton
+              variant="rectangular"
+              height={140}
+              sx={{
                 borderRadius: 2,
-                animation: "pulse 1.5s ease-in-out 0.5s infinite" 
-              }} 
+                animation: "pulse 1.5s ease-in-out 0.5s infinite"
+              }}
             />
           </Grid>
         ))}
@@ -72,12 +72,12 @@ const StatsWidget: React.FC<StatsWidgetProps> = ({
   return (
     <Grid container spacing={3}>
       {stats.map((stat, index) => (
-        <Grid 
-          key={index} 
-          item 
-          xs={12} 
-          sm={6} 
-          md={12 / columns} 
+        <Grid
+          key={index}
+          item
+          xs={12}
+          sm={6}
+          md={12 / columns}
           lg={12 / columns}
           sx={{
             opacity: 0,
@@ -94,11 +94,11 @@ const StatsWidget: React.FC<StatsWidgetProps> = ({
             }
           }}
         >
-          <Card 
-            elevation={0} 
-            sx={{ 
+          <Card
+            elevation={0}
+            sx={{
               height: '100%',
-              background: theme.palette.mode === 'dark' 
+              background: theme.palette.mode === 'dark'
                 ? `linear-gradient(145deg, ${alpha(stat.color, 0.2)}, ${alpha(stat.color, 0.08)})`
                 : `linear-gradient(145deg, ${alpha(stat.color, 0.15)}, ${alpha(stat.color, 0.03)})`,
               border: '1px solid',
@@ -126,7 +126,7 @@ const StatsWidget: React.FC<StatsWidgetProps> = ({
                 left: 0,
                 width: '100%',
                 height: '100%',
-                background: theme.palette.mode === 'dark' 
+                background: theme.palette.mode === 'dark'
                   ? `radial-gradient(circle at 20% 20%, ${alpha(stat.color, 0.2)} 0%, transparent 50%)`
                   : `radial-gradient(circle at 20% 20%, ${alpha(stat.color, 0.15)} 0%, transparent 50%)`,
                 opacity: 0.8,
@@ -147,10 +147,10 @@ const StatsWidget: React.FC<StatsWidgetProps> = ({
             <CardContent sx={{ position: 'relative', zIndex: 1, p: { xs: 2.5, md: 3 } }}>
               <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', mb: 2 }}>
                 <Box>
-                  <Typography 
-                    variant="h6" 
-                    component="div" 
-                    sx={{ 
+                  <Typography
+                    variant="h6"
+                    component="div"
+                    sx={{
                       fontWeight: 600,
                       fontSize: '0.85rem',
                       color: theme.palette.text.secondary,
@@ -161,10 +161,10 @@ const StatsWidget: React.FC<StatsWidgetProps> = ({
                     {stat.title}
                   </Typography>
                   <Box sx={{ display: 'flex', alignItems: 'baseline', mt: 0.7 }}>
-                    <Typography 
-                      variant="h4" 
-                      component="div" 
-                      sx={{ 
+                    <Typography
+                      variant="h4"
+                      component="div"
+                      sx={{
                         fontWeight: 700,
                         fontSize: { xs: '1.5rem', sm: '1.75rem', md: '2.25rem' },
                         background: theme.palette.mode === 'dark'
@@ -180,18 +180,18 @@ const StatsWidget: React.FC<StatsWidgetProps> = ({
                       {typeof stat.value === 'number' ? stat.value.toLocaleString() : stat.value}
                     </Typography>
                     {stat.change && (
-                      <Tooltip 
+                      <Tooltip
                         title={`${stat.change.isPositive ? 'Increased' : 'Decreased'} by ${stat.change.value}%`}
                         arrow
                         placement="top"
                       >
                         <span>
-                          <Typography 
-                            variant="body2" 
-                            sx={{ 
-                              fontWeight: 600, 
-                              color: stat.change.isPositive 
-                                ? theme.palette.success.main 
+                          <Typography
+                            variant="body2"
+                            sx={{
+                              fontWeight: 600,
+                              color: stat.change.isPositive
+                                ? theme.palette.success.main
                                 : theme.palette.error.main,
                               display: 'flex',
                               alignItems: 'center',
@@ -211,10 +211,10 @@ const StatsWidget: React.FC<StatsWidgetProps> = ({
                     )}
                   </Box>
                   {stat.subtitle && (
-                    <Typography 
-                      variant="caption" 
+                    <Typography
+                      variant="caption"
                       color="text.secondary"
-                      sx={{ 
+                      sx={{
                         display: 'block',
                         mt: 0.8,
                         fontSize: '0.75rem',
@@ -225,11 +225,11 @@ const StatsWidget: React.FC<StatsWidgetProps> = ({
                     </Typography>
                   )}
                 </Box>
-                <Avatar 
-                  sx={{ 
-                    bgcolor: alpha(stat.color, theme.palette.mode === 'dark' ? 0.3 : 0.2), 
+                <Avatar
+                  sx={{
+                    bgcolor: alpha(stat.color, theme.palette.mode === 'dark' ? 0.3 : 0.2),
                     color: stat.color,
-                    width: { xs: 50, md: 60 }, 
+                    width: { xs: 50, md: 60 },
                     height: { xs: 50, md: 60 },
                     boxShadow: `0 4px 12px ${alpha(stat.color, 0.3)}`,
                     transition: 'all 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275)',
@@ -241,16 +241,16 @@ const StatsWidget: React.FC<StatsWidgetProps> = ({
                   {stat.icon}
                 </Avatar>
               </Box>
-              
+
               {stat.progress !== undefined && (
                 <Box sx={{ mt: 2 }}>
                   <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 0.5 }}>
                     <Typography variant="caption" color="text.secondary">Progress</Typography>
                     <Typography variant="caption" fontWeight="medium">{stat.progress}%</Typography>
                   </Box>
-                  <LinearProgress 
-                    variant="determinate" 
-                    value={stat.progress} 
+                  <LinearProgress
+                    variant="determinate"
+                    value={stat.progress}
                     sx={{
                       height: 8,
                       borderRadius: 4,

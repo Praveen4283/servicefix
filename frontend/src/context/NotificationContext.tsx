@@ -37,6 +37,7 @@ import { NotificationEventType, NotificationEventDetail } from './AuthContext';
 import notificationService from '../services/notificationService';
 import socketService, { useSocket, setupNotificationListeners } from '../services/socketService';
 import { notificationManager } from '../services/notificationManager';
+import { logger } from '../utils/frontendLogger';
 // Use direct imports from date-fns-tz for better debugging
 import { formatInTimeZone, zonedTimeToUtc, format } from 'date-fns-tz';
 
@@ -107,19 +108,19 @@ export const NotificationProvider: React.FC<NotificationProviderProps> = ({ chil
   const [loading, setLoading] = useState<boolean>(false);
   const [networkStatus, setNetworkStatus] = useState<NetworkStatusType>('online');
   const isNotificationMenuOpen = Boolean(notificationMenuAnchorEl);
-  
+
   const { isAuthenticated } = useAuth();
-  
+
   // We don't need this anymore since NotificationManager handles this
   // const socket = useSocket();
-  
+
   // Log temporaryToasts when it changes for debugging
   useEffect(() => {
     if (process.env.NODE_ENV === 'development') {
-      console.log('[NotificationContext] temporaryToasts updated:', temporaryToasts);
+      logger.debug('[NotificationContext] temporaryToasts updated:', temporaryToasts);
     }
   }, [temporaryToasts]);
-  
+
   // Generate unique ID
   const generateId = (): string => {
     return Math.random().toString(36).substring(2, 9);
@@ -161,35 +162,35 @@ export const NotificationProvider: React.FC<NotificationProviderProps> = ({ chil
   ): Promise<void> => {
     try {
       // Use the notification's ID if provided, otherwise generate one
-      const notificationWithId = notificationToAdd.id 
+      const notificationWithId = notificationToAdd.id
         ? notificationToAdd
         : { ...notificationToAdd, id: generateId() };
-      
+
       // Add or update the notification via the service
       const addedOrExistingNotification = await notificationService.addNotification(notificationWithId);
 
       // Update state based on the service result (handles deduplication/throttling)
       setNotifications(currentNotifications => {
-         const existingInState = currentNotifications.find(n => n.id === addedOrExistingNotification.id);
-         if (existingInState && JSON.stringify(existingInState) === JSON.stringify(addedOrExistingNotification)) {
-             return currentNotifications; // No change
-         }
-         const existingIndex = currentNotifications.findIndex(n => n.id === addedOrExistingNotification.id);
-         let newState;
-         if (existingIndex === -1) {
-           newState = [...currentNotifications, addedOrExistingNotification];
-         } else {
-           newState = [...currentNotifications];
-           newState[existingIndex] = addedOrExistingNotification;
-         }
-         return newState.sort((a, b) => b.timestamp - a.timestamp);
-       });
+        const existingInState = currentNotifications.find(n => n.id === addedOrExistingNotification.id);
+        if (existingInState && JSON.stringify(existingInState) === JSON.stringify(addedOrExistingNotification)) {
+          return currentNotifications; // No change
+        }
+        const existingIndex = currentNotifications.findIndex(n => n.id === addedOrExistingNotification.id);
+        let newState;
+        if (existingIndex === -1) {
+          newState = [...currentNotifications, addedOrExistingNotification];
+        } else {
+          newState = [...currentNotifications];
+          newState[existingIndex] = addedOrExistingNotification;
+        }
+        return newState.sort((a, b) => b.timestamp - a.timestamp);
+      });
 
-       // Note: Auto-removal for system notifications handled by _addTemporaryToast
-       // Service-added notifications are typically category 'app' and don't auto-remove
+      // Note: Auto-removal for system notifications handled by _addTemporaryToast
+      // Service-added notifications are typically category 'app' and don't auto-remove
 
     } catch (error) {
-       console.error("Error processing notification via service:", error);
+      logger.error("Error processing notification via service:", error);
     }
   }, []); // No dependencies needed
 
@@ -228,7 +229,7 @@ export const NotificationProvider: React.FC<NotificationProviderProps> = ({ chil
       });
       return remaining;
     });
-    
+
     // Only attempt backend deletion if it was an 'app' notification
     if (notificationCategory === 'app') {
       await notificationService.removeNotification(id);
@@ -239,7 +240,7 @@ export const NotificationProvider: React.FC<NotificationProviderProps> = ({ chil
   const clearNotifications = useCallback(async (): Promise<void> => {
     // Update state immediately for responsiveness
     setNotifications((prev) => prev.filter(n => n.category === 'system'));
-    
+
     // Then update persistence layer
     await notificationService.clearNotifications();
   }, []); // No external dependencies
@@ -247,10 +248,10 @@ export const NotificationProvider: React.FC<NotificationProviderProps> = ({ chil
   // Mark all notifications as read (stable reference needed)
   const markAllAsRead = useCallback(async (): Promise<void> => {
     // Update state immediately for responsiveness
-    setNotifications((prev) => 
+    setNotifications((prev) =>
       prev.map(notification => ({ ...notification, isRead: true }))
     );
-    
+
     // Then update persistence layer
     await notificationService.markAllAsRead();
   }, []); // No dependencies after removing isAuthenticated dependency
@@ -258,30 +259,34 @@ export const NotificationProvider: React.FC<NotificationProviderProps> = ({ chil
   // Mark a specific notification as read
   const markAsRead = useCallback(async (id: string): Promise<void> => {
     // Update state immediately for responsiveness
-    setNotifications((prev) => 
-      prev.map(notification => 
+    setNotifications((prev) =>
+      prev.map(notification =>
         notification.id === id ? { ...notification, isRead: true } : notification
       )
     );
-    
+
     // Then update persistence layer
     await notificationService.markAsRead(id);
   }, []); // No dependencies after removing isAuthenticated dependency
 
+  // Track previous unread count to only log when it changes
+  const previousUnreadCountRef = useRef<number>(0);
+
   // Calculate unread count - only for app notifications
   const unreadCount = useMemo(() => {
     const count = notifications.filter(notification => !notification.isRead && notification.category === 'app').length;
-    
-    // Add debugging output for notification state
-    if (process.env.NODE_ENV === 'development') {
-      console.log('[NotificationContext] Calculating unread count:', {
+
+    // Only log when the count actually changes to reduce console noise
+    if (process.env.NODE_ENV === 'development' && count !== previousUnreadCountRef.current) {
+      logger.debug('[NotificationContext] Calculating unread count:', {
         total: notifications.length,
         unread: count,
         appNotifications: notifications.filter(n => n.category === 'app'),
         unreadAppNotifications: notifications.filter(n => !n.isRead && n.category === 'app')
       });
+      previousUnreadCountRef.current = count;
     }
-    
+
     return count;
   }, [notifications]);
 
@@ -289,7 +294,7 @@ export const NotificationProvider: React.FC<NotificationProviderProps> = ({ chil
   const toggleNotificationMenu = useCallback((event: React.MouseEvent<HTMLElement>): void => {
     // Store the current target explicitly, as the event might not be valid later
     const currentTarget = event.currentTarget;
-    
+
     // Verify the element is valid before setting it as the anchor
     if (currentTarget && document.body.contains(currentTarget)) {
       setNotificationMenuAnchorEl((prevAnchor) => (prevAnchor ? null : currentTarget));
@@ -303,7 +308,7 @@ export const NotificationProvider: React.FC<NotificationProviderProps> = ({ chil
   const closeNotificationMenu = useCallback((): void => {
     setNotificationMenuAnchorEl(null);
   }, []); // No external dependencies
-  
+
   // Fetch notifications from server
   const fetchNotifications = useCallback(async (options: {
     limit?: number;
@@ -316,75 +321,79 @@ export const NotificationProvider: React.FC<NotificationProviderProps> = ({ chil
 
     setLoading(true);
     try {
-      console.log('[NotificationContext] Fetching notifications from server');
+      logger.debug('[NotificationContext] Fetching notifications from server');
       const serverNotifications = await notificationService.fetchNotifications({
         ...options,
         forceRefresh: true // Always force refresh to avoid caching issues
       });
 
       // Always log the result for debugging
-      console.log(`[NotificationContext] Server returned ${serverNotifications.length} notifications`);
+      logger.debug(`[NotificationContext] Server returned ${serverNotifications.length} notifications`);
 
       // Check local storage for notifications if server returns none but says there are notifications
       if (serverNotifications.length === 0 && notificationService.getUnreadCountFromLocalStorage() > 0) {
-        console.log('[NotificationContext] Server returned 0 notifications but local storage has unread notifications');
-        
+        logger.debug('[NotificationContext] Server returned 0 notifications but local storage has unread notifications');
+
         // Get notifications from local storage
         const localNotifications = notificationService.getNotificationsFromLocalStorage();
-        
+
         if (localNotifications.length > 0) {
-          console.log(`[NotificationContext] Using ${localNotifications.length} notifications from local storage`);
-          
+          logger.debug(`[NotificationContext] Using ${localNotifications.length} notifications from local storage`);
+
           // Merge with any server notifications (though there are likely none)
           const mergedNotifications = [...serverNotifications, ...localNotifications]
             // Filter out duplicates by ID
-            .filter((notification, index, self) => 
+            .filter((notification, index, self) =>
               index === self.findIndex(n => n.id === notification.id)
             )
             // Sort by timestamp, newest first
             .sort((a, b) => b.timestamp - a.timestamp);
-          
+
           // Sync merged notifications to local storage
-          console.log(`[NotificationContext] Syncing ${mergedNotifications.length} merged notifications to local storage`);
+          logger.debug(`[NotificationContext] Syncing ${mergedNotifications.length} merged notifications to local storage`);
           notificationService.syncNotificationsToLocalStorage(mergedNotifications);
-          
+
           // Update state with merged notifications
           setNotifications(mergedNotifications);
-          console.log(`[NotificationContext] Updated notification state with merged data: ${mergedNotifications.length} total notifications`);
-          
+          logger.debug(`[NotificationContext] Updated notification state with merged data: ${mergedNotifications.length} total notifications`);
+
           // Try to fetch from server one more time with a forced refresh
           if (!options.forceRefresh) {
             setTimeout(() => {
               fetchNotifications({ ...options, forceRefresh: true });
             }, 2000);
           }
-          
+
           setLoading(false);
           return;
         }
       }
 
       // Handle normal case - server has notifications
-      console.log(`[NotificationContext] Syncing ${serverNotifications.length} server notifications to local storage, replacing stale data`);
+      logger.debug(`[NotificationContext] Syncing ${serverNotifications.length} server notifications to local storage, replacing stale data`);
       notificationService.syncNotificationsToLocalStorage(serverNotifications);
-      
+
       setNotifications(serverNotifications);
-      console.log(`[NotificationContext] Updated notification state with server data: ${serverNotifications.length} total notifications`);
+      logger.debug(`[NotificationContext] Updated notification state with server data: ${serverNotifications.length} total notifications`);
     } catch (error) {
-      console.error('[NotificationContext] Error fetching notifications:', error);
-      
+      logger.error('[NotificationContext] Error fetching notifications:', error);
+
       // On error, try to use cached notifications from local storage
       const cachedNotifications = notificationService.getNotificationsFromLocalStorage();
-      console.log(`[NotificationContext] Using ${cachedNotifications.length} cached notifications from local storage due to fetch error`);
-      
+      logger.debug(`[NotificationContext] Using ${cachedNotifications.length} cached notifications from local storage due to fetch error`);
+
       // Only update state if we have cached notifications and the state is empty
-      if (cachedNotifications.length > 0 && notifications.length === 0) {
-        setNotifications(cachedNotifications);
-      }
+      // Use functional update to access current state without adding dependency
+      setNotifications(currentNotifications => {
+        if (cachedNotifications.length > 0 && currentNotifications.length === 0) {
+          return cachedNotifications;
+        }
+        return currentNotifications;
+      });
     } finally {
       setLoading(false);
     }
-  }, [isAuthenticated, notifications.length]);
+  }, [isAuthenticated]); // Removed notifications.length dependency
 
   // Connect our context methods to the notification manager
   useEffect(() => {
@@ -401,41 +410,41 @@ export const NotificationProvider: React.FC<NotificationProviderProps> = ({ chil
   useEffect(() => {
     // Get stored notifications first for immediate display
     const storedNotifications = notificationService.getLocalNotifications();
-    
+
     // Include all app notifications for the panel, including login notifications
     const appNotifications = storedNotifications.filter(n => n.category === 'app');
-    
+
     // Set initial state with stored notifications
     setNotifications(prev => {
       const systemNotifications = prev.filter(n => n.category === 'system');
       return [...systemNotifications, ...appNotifications];
     });
-    
+
     // Then fetch from server if authenticated
     if (isAuthenticated) {
       fetchNotifications();
     }
-    
+
     // Set up login event listener to refresh notifications when user logs in
     const handleLoginSuccess = () => {
-      console.log('User logged in, fetching notifications immediately.');
+      logger.debug('User logged in, fetching notifications immediately.');
       // Add a short delay to ensure the notification is fully processed on the backend
       setTimeout(() => {
-        console.log('Fetching notifications after login delay');
+        logger.debug('Fetching notifications after login delay');
         fetchNotifications();
       }, 1000); // 1 second delay
     };
-    
+
     window.addEventListener('user:login-success', handleLoginSuccess);
-    
+
     // ---> Add listener for profile update <---
     const handleProfileUpdate = () => {
-      console.log('User profile updated, fetching notifications.');
+      logger.debug('User profile updated, fetching notifications.');
       fetchNotifications();
     };
     window.addEventListener('user:profile-updated', handleProfileUpdate);
     // ---> End listener <---
-    
+
     // Clean up event listener on unmount
     return () => {
       window.removeEventListener('user:login-success', handleLoginSuccess);
@@ -447,13 +456,13 @@ export const NotificationProvider: React.FC<NotificationProviderProps> = ({ chil
 
   // Setup socket listeners once on mount, properly cleaning up on unmount
   useEffect(() => {
-    let cleanup = () => {};
-    
+    let cleanup = () => { };
+
     if (isAuthenticated) {
       // Set up notification handlers for socket events
       const handleNotification = (notification: any) => {
         if (!notification) return;
-        
+
         _addPersistentNotification({
           id: notification.id?.toString() || generateId(),
           message: notification.message || 'New notification received',
@@ -464,7 +473,7 @@ export const NotificationProvider: React.FC<NotificationProviderProps> = ({ chil
           isRead: false,
           category: 'app'
         });
-        
+
         // Also show temporary toast for real-time feedback
         _addTemporaryToast(
           notification.message || 'New notification received',
@@ -476,11 +485,11 @@ export const NotificationProvider: React.FC<NotificationProviderProps> = ({ chil
           }
         );
       };
-      
+
       // Register and get cleanup function
       cleanup = socketService.onNotification(handleNotification);
     }
-    
+
     // Clean up listeners when component unmounts or auth state changes
     return cleanup;
   }, [isAuthenticated, _addPersistentNotification, _addTemporaryToast]);
@@ -490,20 +499,20 @@ export const NotificationProvider: React.FC<NotificationProviderProps> = ({ chil
     const handleOnline = () => {
       setNetworkStatus('online');
       _addTemporaryToast('Network connection restored', 'success');
-      
+
       // Refresh notifications after reconnection
       fetchNotifications({ forceRefresh: true });
     };
-    
+
     const handleOffline = () => {
       setNetworkStatus('offline');
       _addTemporaryToast('Network connection lost', 'error', { duration: 0 });
     };
-    
+
     // Setup event listeners
     window.addEventListener('online', handleOnline);
     window.addEventListener('offline', handleOffline);
-    
+
     // Clean up
     return () => {
       window.removeEventListener('online', handleOnline);
@@ -517,12 +526,12 @@ export const NotificationProvider: React.FC<NotificationProviderProps> = ({ chil
       // This is a special effect to force re-check local storage for notifications
       // after the login process completes
       const checkLocalStorageForNotifications = () => {
-        console.log('[NotificationContext] Checking local storage for notifications after login');
+        logger.debug('[NotificationContext] Checking local storage for notifications after login');
         const localNotifications = notificationService.getLocalNotifications();
         const appNotifications = localNotifications.filter(n => n.category === 'app');
-        
+
         if (appNotifications.length > 0) {
-          console.log(`[NotificationContext] Found ${appNotifications.length} app notifications in storage after login`);
+          logger.debug(`[NotificationContext] Found ${appNotifications.length} app notifications in storage after login`);
           setNotifications(prev => {
             // Keep existing system notifications
             const systemNotifications = prev.filter(n => n.category === 'system');
@@ -531,7 +540,7 @@ export const NotificationProvider: React.FC<NotificationProviderProps> = ({ chil
           });
         }
       };
-      
+
       // Check after a short delay to allow login notification to be saved
       setTimeout(checkLocalStorageForNotifications, 2000);
     }
@@ -540,13 +549,13 @@ export const NotificationProvider: React.FC<NotificationProviderProps> = ({ chil
   // Clear notifications on logout
   useEffect(() => {
     const handleLogout = () => {
-      console.log('[NotificationContext] User logged out, clearing notification state');
+      logger.debug('[NotificationContext] User logged out, clearing notification state');
       setNotifications([]);
       setTemporaryToasts([]);
     };
-    
+
     window.addEventListener('user:logout', handleLogout);
-    
+
     return () => {
       window.removeEventListener('user:logout', handleLogout);
     };
@@ -622,10 +631,10 @@ const getNotificationIcon = (type: NotificationType) => {
 // Notification menu component (for display in AppBar) - only for app notifications
 export const NotificationMenu: React.FC = () => {
   const theme = useTheme();
-  const { 
-    notifications, 
-    unreadCount, 
-    toggleNotificationMenu, 
+  const {
+    notifications,
+    unreadCount,
+    toggleNotificationMenu,
     closeNotificationMenu,
     isNotificationMenuOpen,
     notificationMenuAnchorEl,
@@ -636,28 +645,28 @@ export const NotificationMenu: React.FC = () => {
     loading,
     fetchNotifications
   } = useNotification();
-  
+
   // Get user's timezone preference
   const { user } = useAuth();
   const userTimezone = user?.timezone || 'UTC';
-  
+
   // Add state for expanded notification (to show full content)
   const [expandedNotificationId, setExpandedNotificationId] = useState<string | null>(null);
-  
+
   // Add pagination state
   const [page, setPage] = useState(0);
   const [hasMore, setHasMore] = useState(true);
   const ITEMS_PER_PAGE = 10;
   const [displayedNotifications, setDisplayedNotifications] = useState<Notification[]>([]);
   const [loadingMore, setLoadingMore] = useState(false);
-  
+
   // Handle scroll to implement infinite scroll
   const menuRef = useRef<HTMLDivElement>(null);
-  
+
   // Format date based on user's timezone preference
   const formatDateToUserTimezone = useCallback((timestamp: number | null): string => {
     if (!timestamp) return 'Unknown date';
-    
+
     try {
       // Use browser's native Intl API for timezone formatting
       const options: Intl.DateTimeFormatOptions = {
@@ -669,34 +678,34 @@ export const NotificationMenu: React.FC = () => {
         minute: '2-digit',
         hour12: true
       };
-      
+
       // Format the date using browser Intl API
       return new Intl.DateTimeFormat('en-US', options).format(new Date(timestamp));
     } catch (error) {
-      console.error('Error in formatDateToUserTimezone:', error);
+      logger.error('Error in formatDateToUserTimezone:', error);
       return new Date(timestamp).toLocaleString();
     }
   }, [userTimezone]);
-  
+
   // Filter to show only app notifications in the menu
-  const appNotifications = useMemo(() => 
+  const appNotifications = useMemo(() =>
     notifications.filter(notification => notification.category === 'app')
-  , [notifications]);
-  
+    , [notifications]);
+
   // Update displayed notifications when app notifications change
   useEffect(() => {
     // Calculate the number of items to display based on current page
     const endIndex = (page + 1) * ITEMS_PER_PAGE;
     setDisplayedNotifications(appNotifications.slice(0, endIndex));
-    
+
     // Check if we have more to load
     setHasMore(appNotifications.length > endIndex);
   }, [appNotifications, page]);
-  
+
   // Function to load more notifications
   const handleLoadMore = useCallback(async () => {
     if (!hasMore || loadingMore) return;
-    
+
     setLoadingMore(true);
     try {
       // If we already have enough loaded locally, just increment page
@@ -711,45 +720,45 @@ export const NotificationMenu: React.FC = () => {
         setPage(p => p + 1);
       }
     } catch (error) {
-      console.error('Error loading more notifications:', error);
+      logger.error('Error loading more notifications:', error);
     } finally {
       setLoadingMore(false);
     }
   }, [appNotifications.length, fetchNotifications, hasMore, loadingMore, page]);
-  
+
   useEffect(() => {
     const handleScroll = () => {
       if (!menuRef.current) return;
-      
+
       const { scrollTop, scrollHeight, clientHeight } = menuRef.current;
-      
+
       // If scrolled to bottom (with a 20px threshold), load more
       if (scrollHeight - scrollTop - clientHeight < 20 && hasMore && !loadingMore) {
         handleLoadMore();
       }
     };
-    
+
     const currentMenuRef = menuRef.current;
     if (currentMenuRef) {
       currentMenuRef.addEventListener('scroll', handleScroll);
     }
-    
+
     return () => {
       if (currentMenuRef) {
         currentMenuRef.removeEventListener('scroll', handleScroll);
       }
     };
   }, [hasMore, handleLoadMore, loadingMore]);
-  
+
   // Handle notification click to toggle expansion
   const handleNotificationClick = (notification: Notification) => {
     // Mark as read
     if (!notification.isRead) {
       markAsRead(notification.id);
     }
-    
+
     // Toggle expanded state
-    setExpandedNotificationId(prevId => 
+    setExpandedNotificationId(prevId =>
       prevId === notification.id ? null : notification.id
     );
   };
@@ -768,12 +777,12 @@ export const NotificationMenu: React.FC = () => {
           </Badge>
         </IconButton>
       </Tooltip>
-      
+
       {/* Only render the Menu when we have a valid anchor element */}
-      {notificationMenuAnchorEl && document.body.contains(notificationMenuAnchorEl) && (
+      {notificationMenuAnchorEl && isNotificationMenuOpen && document.body.contains(notificationMenuAnchorEl) && (
         <Menu
           anchorEl={notificationMenuAnchorEl}
-          open={isNotificationMenuOpen}
+          open={true}
           onClose={closeNotificationMenu}
           PaperProps={{
             sx: {
@@ -808,7 +817,7 @@ export const NotificationMenu: React.FC = () => {
                   </IconButton>
                 </Tooltip>
               )}
-              
+
               {appNotifications.length === 0 ? (
                 <Tooltip title="Clear all notifications">
                   <span>
@@ -826,13 +835,13 @@ export const NotificationMenu: React.FC = () => {
               )}
             </Box>
           </Box>
-          
+
           <Divider />
-          
-          <Box 
+
+          <Box
             ref={menuRef}
-            sx={{ 
-              overflowY: 'auto', 
+            sx={{
+              overflowY: 'auto',
               maxHeight: { xs: 320, sm: 400 },
               pb: 1
             }}
@@ -853,8 +862,8 @@ export const NotificationMenu: React.FC = () => {
                     pl: notification.isRead ? 2 : 1.5,
                     py: 1.5,
                     borderBottom: `1px solid ${alpha(theme.palette.divider, 0.05)}`,
-                    backgroundColor: notification.isRead 
-                      ? 'transparent' 
+                    backgroundColor: notification.isRead
+                      ? 'transparent'
                       : alpha(theme.palette.primary.main, 0.05),
                     '&:hover': {
                       backgroundColor: alpha(theme.palette.primary.main, 0.1),
@@ -877,7 +886,7 @@ export const NotificationMenu: React.FC = () => {
                           variant="body2"
                           component="div"
                           color="textPrimary"
-                          sx={{ 
+                          sx={{
                             mb: 0.5,
                             fontWeight: notification.isRead ? 400 : 500,
                             display: 'block',
@@ -921,15 +930,15 @@ export const NotificationMenu: React.FC = () => {
                 </MenuItem>
               ))
             )}
-            
+
             {/* Loading indicator at bottom */}
             {(hasMore || loadingMore) && (
               <Box sx={{ display: 'flex', justifyContent: 'center', p: 1 }}>
                 {loadingMore ? (
                   <CircularProgress size={24} />
                 ) : (
-                  <Button 
-                    size="small" 
+                  <Button
+                    size="small"
                     onClick={handleLoadMore}
                     sx={{ fontSize: '0.75rem' }}
                   >
@@ -980,24 +989,24 @@ export const useAppNotification = () => {
 
   return {
     showTicketUpdate: (message: string, options?: { title?: string, duration?: number }) => {
-      addNotification(message, 'info', { 
-        title: options?.title || 'Ticket Update', 
+      addNotification(message, 'info', {
+        title: options?.title || 'Ticket Update',
         duration: options?.duration || 0, // App notifications default to not auto-dismiss
-        category: 'app' 
+        category: 'app'
       });
     },
     showComment: (message: string, options?: { title?: string, duration?: number }) => {
-      addNotification(message, 'info', { 
-        title: options?.title || 'New Comment', 
+      addNotification(message, 'info', {
+        title: options?.title || 'New Comment',
         duration: options?.duration || 0,
-        category: 'app' 
+        category: 'app'
       });
     },
     showSLA: (message: string, options?: { title?: string, duration?: number }) => {
-      addNotification(message, 'warning', { 
-        title: options?.title || 'SLA Alert', 
+      addNotification(message, 'warning', {
+        title: options?.title || 'SLA Alert',
         duration: options?.duration || 0,
-        category: 'app' 
+        category: 'app'
       });
     }
   };
@@ -1013,18 +1022,18 @@ const NotificationContainerInternal: React.FC = () => {
   // Sort by newest first and limit to 5 at a time to prevent overload
   // Also deduplicate by content + type to avoid showing identical notifications
   const uniqueToasts = new Map<string, Notification>();
-  
+
   // Process notifications to get unique ones (keeping only the newest of each message+type)
   temporaryToasts.forEach(toast => {
     const key = `${toast.type}:${toast.message}`;
     const existing = uniqueToasts.get(key);
-    
+
     // Keep the newest notification for each unique message+type
     if (!existing || toast.timestamp > existing.timestamp) {
       uniqueToasts.set(key, toast);
     }
   });
-  
+
   // Convert to array, sort, and limit
   const toastsToShow = Array.from(uniqueToasts.values())
     .sort((a, b) => b.timestamp - a.timestamp)
@@ -1035,7 +1044,7 @@ const NotificationContainerInternal: React.FC = () => {
   }
 
   return (
-    <Box 
+    <Box
       className="notification-container"
       sx={{
         position: 'fixed',
@@ -1076,21 +1085,20 @@ const NotificationContainerInternal: React.FC = () => {
               notification.type === 'success'
                 ? theme.palette.success.main
                 : notification.type === 'error'
-                ? theme.palette.error.main
-                : notification.type === 'warning'
-                ? theme.palette.warning.main
-                : theme.palette.info.main,
+                  ? theme.palette.error.main
+                  : notification.type === 'warning'
+                    ? theme.palette.warning.main
+                    : theme.palette.info.main,
               0.12
             ),
-            borderLeft: `4px solid ${
-              notification.type === 'success'
-                ? theme.palette.success.main
-                : notification.type === 'error'
+            borderLeft: `4px solid ${notification.type === 'success'
+              ? theme.palette.success.main
+              : notification.type === 'error'
                 ? theme.palette.error.main
                 : notification.type === 'warning'
-                ? theme.palette.warning.main
-                : theme.palette.info.main
-            }`
+                  ? theme.palette.warning.main
+                  : theme.palette.info.main
+              }`
           }}
         >
           <Box sx={{ display: 'flex', alignItems: 'flex-start', width: '100%' }}>
@@ -1115,7 +1123,7 @@ const NotificationContainerInternal: React.FC = () => {
                 {notification.message}
               </Typography>
             </Box>
-            <IconButton 
+            <IconButton
               aria-label="close notification"
               size="small"
               onClick={(e) => {
@@ -1123,9 +1131,9 @@ const NotificationContainerInternal: React.FC = () => {
                 // We don't need removeNotification anymore since these toast notifications
                 // are now automatically removed by timeout
               }}
-              sx={{ 
-                p: 0.5, 
-                '&:hover': { backgroundColor: alpha(theme.palette.common.white, 0.15) } 
+              sx={{
+                p: 0.5,
+                '&:hover': { backgroundColor: alpha(theme.palette.common.white, 0.15) }
               }}
             >
               <CloseIcon fontSize="small" />
@@ -1161,7 +1169,7 @@ export const SystemAlert: React.FC<SystemAlertProps> = ({
   sx = {}
 }) => {
   const theme = useTheme();
-  
+
   return (
     <Paper
       elevation={elevation}
@@ -1174,17 +1182,16 @@ export const SystemAlert: React.FC<SystemAlertProps> = ({
         alignItems: 'flex-start',
         backgroundColor: alpha(
           type === 'success' ? theme.palette.success.main :
-          type === 'error' ? theme.palette.error.main :
-          type === 'warning' ? theme.palette.warning.main :
-          theme.palette.info.main,
+            type === 'error' ? theme.palette.error.main :
+              type === 'warning' ? theme.palette.warning.main :
+                theme.palette.info.main,
           theme.palette.mode === 'dark' ? 0.2 : 0.12
         ),
-        borderLeft: `4px solid ${
-          type === 'success' ? theme.palette.success.main :
+        borderLeft: `4px solid ${type === 'success' ? theme.palette.success.main :
           type === 'error' ? theme.palette.error.main :
-          type === 'warning' ? theme.palette.warning.main :
-          theme.palette.info.main
-        }`,
+            type === 'warning' ? theme.palette.warning.main :
+              theme.palette.info.main
+          }`,
         ...sx
       }}
     >
@@ -1210,8 +1217,8 @@ export const SystemAlert: React.FC<SystemAlertProps> = ({
         </Typography>
       </Box>
       {action || (onClose && (
-        <IconButton 
-          size="small" 
+        <IconButton
+          size="small"
           onClick={onClose}
           sx={{ ml: 1, p: 0.5 }}
         >

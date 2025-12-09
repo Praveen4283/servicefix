@@ -1,15 +1,16 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { 
-  Button, 
-  Typography, 
-  Box, 
-  InputAdornment, 
+import { logger } from '../../utils/frontendLogger';
+import {
+  Button,
+  Typography,
+  Box,
+  InputAdornment,
   IconButton,
   Divider,
   Link as MuiLink,
   CircularProgress
 } from '@mui/material';
-import { 
+import {
   Visibility,
   VisibilityOff,
   Email as EmailIcon,
@@ -37,10 +38,10 @@ const LoginPage: React.FC = () => {
   // Check if user was redirected from another page
   const queryParams = new URLSearchParams(location.search);
   const redirectTo = queryParams.get('redirectTo') || '/dashboard';
-  
+
   // Check if user was redirected from registration
   const locationState = location.state as { registered?: boolean; email?: string } | null;
-  
+
   // Show registration success if redirected from registration page
   useEffect(() => {
     const hasShownNotification = sessionStorage.getItem('registrationNotificationShown');
@@ -49,12 +50,12 @@ const LoginPage: React.FC = () => {
         title: 'Registration Complete'
       });
       sessionStorage.setItem('registrationNotificationShown', 'true');
-      
+
       // Clean up location state
       navigate(location.pathname + location.search, { replace: true, state: null });
     }
   }, [locationState, showSuccess, navigate, location.pathname, location.search]);
-  
+
   // Show error notification if there is an auth error
   // This is now handled by AuthContext directly, 
   // so we don't need to show duplicate error notifications here
@@ -94,20 +95,20 @@ const LoginPage: React.FC = () => {
     onSubmit: async (values) => {
       try {
         const loginSuccess = await login(values.email, values.password);
-        
+
         if (loginSuccess) {
           // Clear the registration notification flag
           sessionStorage.removeItem('registrationNotificationShown');
-          
+
           // Add console logging for debugging
           console.log('[LoginPage] Login successful, redirecting to:', redirectTo);
-          
+
           // Immediate navigation after successful login
-          navigate(redirectTo, { 
-            replace: true, 
+          navigate(redirectTo, {
+            replace: true,
             state: { isRedirecting: true }
           });
-          
+
           // Safety check to ensure navigation happened - use a shorter timeout
           setTimeout(() => {
             if (window.location.pathname.includes('login')) {

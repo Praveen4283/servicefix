@@ -21,10 +21,10 @@ export const initializeApp = async (): Promise<boolean> => {
     const client = await pool.connect();
     logger.info('Database connection successful');
     client.release();
-    
+
     // Initialize other services here
     logger.info('Application initialized successfully');
-    
+
     // Register process exit handlers for graceful shutdown
     process.on('SIGTERM', gracefulShutdown);
     process.on('SIGINT', gracefulShutdown);
@@ -36,7 +36,7 @@ export const initializeApp = async (): Promise<boolean> => {
       logger.error('Unhandled rejection:', reason);
       gracefulShutdown();
     });
-    
+
     return true;
   } catch (error) {
     logger.error('Error initializing application:', error);
@@ -49,18 +49,18 @@ export const initializeApp = async (): Promise<boolean> => {
  */
 export const gracefulShutdown = async () => {
   logger.info('Starting graceful shutdown...');
-  
+
   try {
     // Set a timeout for shutdown (force exit after 10 seconds)
     const forceExitTimeout = setTimeout(() => {
       logger.error('Forcing exit after timeout');
       process.exit(1);
     }, 10000);
-    
+
     // Stop SLA checker
     logger.info('Stopping SLA checker...');
     await stopSLAChecker();
-    
+
     // Close socket connections
     logger.info('Closing socket connections...');
     if (globalSocketServer) {
@@ -71,15 +71,15 @@ export const gracefulShutdown = async () => {
         });
       });
     }
-    
+
     // Close database pool
     logger.info('Closing database connections...');
     await pool.end();
     logger.info('Database connections closed');
-    
+
     // Clear the force exit timeout
     clearTimeout(forceExitTimeout);
-    
+
     logger.info('Graceful shutdown completed');
     process.exit(0);
   } catch (error) {

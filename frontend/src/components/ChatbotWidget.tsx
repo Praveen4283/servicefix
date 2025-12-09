@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
-import { 
+import {
   Box,
   Paper,
   Typography,
@@ -20,7 +20,7 @@ import {
   InputAdornment
 } from '@mui/material';
 import { styled } from '@mui/material/styles';
-import { 
+import {
   Chat as ChatIcon,
   Send as SendIcon,
   SmartToy as SmartToyIcon,
@@ -46,6 +46,7 @@ import { useAuth } from '../context/AuthContext';
 import { useNotification } from '../context/NotificationContext';
 import { useTickets } from '../context/TicketContext'; // Import useTickets
 import apiClient from '../services/apiClient';
+import { logger } from '../utils/frontendLogger';
 
 // Styled components
 const ChatContainer = styled(Paper)(({ theme }) => ({
@@ -75,8 +76,8 @@ const ChatContainer = styled(Paper)(({ theme }) => ({
 
 const ChatHeader = styled(Box)(({ theme }) => ({
   padding: theme.spacing(2),
-  backgroundColor: theme.palette.mode === 'dark' 
-    ? alpha(theme.palette.primary.main, 0.9) 
+  backgroundColor: theme.palette.mode === 'dark'
+    ? alpha(theme.palette.primary.main, 0.9)
     : theme.palette.primary.main,
   color: theme.palette.primary.contrastText,
   display: 'flex',
@@ -93,8 +94,8 @@ const MessagesContainer = styled(Box)(({ theme }) => ({
   flexDirection: 'column',
   gap: theme.spacing(2),
   maxHeight: 400,
-  backgroundColor: theme.palette.mode === 'dark' 
-    ? alpha(theme.palette.background.paper, 0.8) 
+  backgroundColor: theme.palette.mode === 'dark'
+    ? alpha(theme.palette.background.paper, 0.8)
     : theme.palette.background.paper,
   scrollbarWidth: 'thin',
   '&::-webkit-scrollbar': {
@@ -115,25 +116,25 @@ const MessageBubble = styled(Box, {
   maxWidth: '80%',
   padding: theme.spacing(1.5),
   borderRadius: isUser ? '18px 18px 0 18px' : '18px 18px 18px 0',
-  backgroundColor: isUser 
-    ? theme.palette.primary.main 
-    : theme.palette.mode === 'dark' 
-      ? alpha(theme.palette.grey[700], 0.7) 
+  backgroundColor: isUser
+    ? theme.palette.primary.main
+    : theme.palette.mode === 'dark'
+      ? alpha(theme.palette.grey[700], 0.7)
       : alpha(theme.palette.grey[100], 0.9),
-  color: isUser 
-    ? theme.palette.primary.contrastText 
+  color: isUser
+    ? theme.palette.primary.contrastText
     : theme.palette.text.primary,
   alignSelf: isUser ? 'flex-end' : 'flex-start',
   position: 'relative',
   wordBreak: 'break-word',
-  boxShadow: isUser 
-    ? `0 1px 2px ${alpha(theme.palette.common.black, 0.2)}` 
+  boxShadow: isUser
+    ? `0 1px 2px ${alpha(theme.palette.common.black, 0.2)}`
     : `0 1px 2px ${alpha(theme.palette.common.black, 0.1)}`,
   transition: 'transform 0.2s ease-in-out',
   '&:hover': {
     transform: 'translateY(-2px)',
-    boxShadow: isUser 
-      ? `0 4px 8px ${alpha(theme.palette.common.black, 0.2)}` 
+    boxShadow: isUser
+      ? `0 4px 8px ${alpha(theme.palette.common.black, 0.2)}`
       : `0 4px 8px ${alpha(theme.palette.common.black, 0.1)}`
   }
 }));
@@ -144,7 +145,7 @@ const ChatFooter = styled(Box)(({ theme }) => ({
   display: 'flex',
   alignItems: 'center',
   gap: theme.spacing(1),
-  backgroundColor: theme.palette.mode === 'dark' 
+  backgroundColor: theme.palette.mode === 'dark'
     ? alpha(theme.palette.background.paper, 0.5)
     : theme.palette.background.paper
 }));
@@ -158,7 +159,7 @@ const ActionButtons = styled(Box)(({ theme }) => ({
 
 const FeedbackBar = styled(Box)(({ theme }) => ({
   display: 'flex',
-  alignItems: 'center', 
+  alignItems: 'center',
   gap: theme.spacing(1),
   marginTop: theme.spacing(0.5),
   justifyContent: 'flex-end'
@@ -199,7 +200,7 @@ interface Message {
 }
 
 // Type for conversation state
-type ConversationState = 
+type ConversationState =
   | 'idle'
   | 'awaiting_intent'
   | 'creating_ticket_subject'
@@ -211,7 +212,7 @@ type ConversationState =
   | 'getting_ticket_id_for_status'
   | 'getting_ticket_id_for_comment'
   | 'getting_comment_text';
-  // Add more states as needed (e.g., for editing)
+// Add more states as needed (e.g., for editing)
 
 // Add an interface for the pending data structure at the beginning of the file
 interface PendingTicketData {
@@ -237,7 +238,7 @@ async function executeWithRetry<T>(
   errorMessage: string
 ): Promise<T> {
   let lastError: any;
-  
+
   for (let attempt = 0; attempt <= MAX_API_RETRIES; attempt++) {
     try {
       // Add increasing delay for each retry attempt
@@ -246,16 +247,16 @@ async function executeWithRetry<T>(
       }
       return await apiCall();
     } catch (error: any) {
-      console.error(`API call failed (attempt ${attempt + 1}/${MAX_API_RETRIES + 1}):`, error);
+      logger.error(`API call failed (attempt ${attempt + 1}/${MAX_API_RETRIES + 1}):`, error);
       lastError = error;
-      
+
       // Don't retry if error is related to authentication or authorization
       if (error.status === 401 || error.status === 403) {
         break;
       }
     }
   }
-  
+
   throw new Error(`${errorMessage}: ${lastError?.message || 'Unknown error'}`);
 }
 
@@ -268,13 +269,13 @@ function sanitizeInput(input: string): string {
   let sanitized = input
     .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '')
     .trim();
-  
+
   // Limit length to prevent abuse
   const MAX_LENGTH = 1000;
   if (sanitized.length > MAX_LENGTH) {
     sanitized = sanitized.substring(0, MAX_LENGTH);
   }
-  
+
   return sanitized;
 }
 
@@ -290,7 +291,7 @@ const ChatbotWidget: React.FC = () => {
       id: 'welcome',
       text: (
         <>
-          Hello! I'm your AI support assistant. How can I help you today? 
+          Hello! I'm your AI support assistant. How can I help you today?
           <br />You can ask me to:
           <StyledOrderedList>
             <li>Create a ticket</li>
@@ -320,14 +321,14 @@ const ChatbotWidget: React.FC = () => {
   const navigate = useNavigate();
 
   // Add a new state for tracking API calls in progress
-  const [apiCallsInProgress, setApiCallsInProgress] = useState<{[key: string]: boolean}>({});
+  const [apiCallsInProgress, setApiCallsInProgress] = useState<{ [key: string]: boolean }>({});
 
   // Scroll to bottom of messages container
   const scrollToBottom = useCallback(() => {
     // Add a slight delay to ensure the DOM is updated before scrolling
     setTimeout(() => {
-        messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-    }, 50); 
+      messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    }, 50);
   }, []);
 
   useEffect(() => {
@@ -339,15 +340,15 @@ const ChatbotWidget: React.FC = () => {
     if (conversationId) {
       return conversationId;
     }
-    
+
     if (!isAuthenticated) {
       addNotification('You need to be logged in to use the chat.', 'warning');
       throw new Error('Authentication required');
     }
-    
+
     // Set API call in progress
-    setApiCallsInProgress(prev => ({...prev, startConversation: true}));
-    
+    setApiCallsInProgress(prev => ({ ...prev, startConversation: true }));
+
     try {
       // Add metadata to link this conversation to relevant context
       const metadata = {
@@ -356,17 +357,17 @@ const ChatbotWidget: React.FC = () => {
         path: window.location.pathname,
         timestamp: new Date().toISOString()
       };
-      
+
       const response = await executeWithRetry(
         () => chatbotService.startConversation(metadata),
         'Could not start chat session'
       );
-      
-      console.log('API Response for startConversation:', JSON.stringify(response));
-      
+
+      logger.debug('API Response for startConversation:', JSON.stringify(response));
+
       // Handle different possible response structures
       let newConversationId;
-      
+
       if (response && typeof response === 'object') {
         // Standard API response structure { status: "success", data: { id: '...' } }
         if (response.data && typeof response.data === 'object' && 'id' in response.data) {
@@ -378,42 +379,42 @@ const ChatbotWidget: React.FC = () => {
         }
         // If the response is another structure, try to extract ID
         else {
-          console.warn('Unexpected conversation response structure:', response);
+          logger.warn('Unexpected conversation response structure:', response);
           // Look for any property that might contain the ID
           const possibleId = Object.entries(response as any)
-            .find(([key, value]) => 
-              (key.toLowerCase().includes('id') || key === 'id') && 
+            .find(([key, value]) =>
+              (key.toLowerCase().includes('id') || key === 'id') &&
               (typeof value === 'string' || typeof value === 'number')
             );
-          
+
           if (possibleId) {
             newConversationId = String(possibleId[1]);
           }
         }
       }
-      
+
       if (!newConversationId) {
         throw new Error('Failed to extract conversation ID from response');
       }
-      
-      console.log('Extracted conversation ID:', newConversationId);
+
+      logger.debug('Extracted conversation ID:', newConversationId);
       setConversationId(newConversationId);
       return newConversationId;
     } catch (error: any) {
-      console.error("Failed to start conversation:", error);
+      logger.error("Failed to start conversation:", error);
       const errorMessage = error.message || 'Could not start chat session. Please try again later.';
       addNotification(errorMessage, 'error');
       throw new Error(errorMessage); // Propagate error
     } finally {
       // Clear API call in progress
-      setApiCallsInProgress(prev => ({...prev, startConversation: false}));
+      setApiCallsInProgress(prev => ({ ...prev, startConversation: false }));
     }
   };
 
   // Enhance addMessage function with better error handling and retries
   const addMessage = async (text: string | React.ReactNode, sender: 'user' | 'bot', extraData?: Partial<Message>) => {
     const messageContent = typeof text === 'string' ? sanitizeInput(text) : '[Rich Content]'; // Get string representation for saving
-    
+
     // 1. Add message to UI state immediately for better UX
     const newMessageId = `${sender}-${Date.now()}`;
     const newMessage: Message = {
@@ -424,12 +425,12 @@ const ChatbotWidget: React.FC = () => {
       feedback: sender === 'bot' ? null : undefined,
       ...extraData
     };
-    
+
     setMessages(prev => [...prev, newMessage]);
     if (sender === 'bot' && !isOpen) {
       setUnreadMessages(prev => prev + 1);
     }
-    
+
     // 2. Save message to backend if user is authenticated
     if (!isAuthenticated && sender === 'user') {
       // If not authenticated and it's a user message, prompt to login
@@ -438,7 +439,7 @@ const ChatbotWidget: React.FC = () => {
       }, 500);
       return;
     }
-    
+
     try {
       // 3. Ensure conversation exists
       let currentConversationId: string;
@@ -446,47 +447,47 @@ const ChatbotWidget: React.FC = () => {
         currentConversationId = await ensureConversation();
       } catch (error) {
         // Don't proceed with saving if conversation creation failed
-        return; 
+        return;
       }
-      
+
       // Set API call in progress
-      setApiCallsInProgress(prev => ({...prev, saveMessage: true}));
-      
+      setApiCallsInProgress(prev => ({ ...prev, saveMessage: true }));
+
       // 4. Save message to backend with retry logic
       const response = await executeWithRetry(
-        () => chatbotService.saveMessage(currentConversationId, { 
-        senderType: sender,
-        content: messageContent,
-          metadata: extraData?.ticketInfo ? { 
+        () => chatbotService.saveMessage(currentConversationId, {
+          senderType: sender,
+          content: messageContent,
+          metadata: extraData?.ticketInfo ? {
             ticketId: (extraData.ticketInfo as Ticket).id,
-            timestamp: new Date().toISOString() 
+            timestamp: new Date().toISOString()
           } : undefined
         }),
         'Failed to save message'
       );
-      
+
       // 5. Update message with server-generated ID if needed
       if (response && response.data && typeof response.data === 'object' && 'id' in response.data) {
         const messageId = (response.data as any).id;
         // Update the message ID in the UI to match the server ID
-        setMessages(prev => 
-          prev.map(msg => 
-            msg.id === newMessageId 
-              ? { ...msg, id: messageId.toString() } 
+        setMessages(prev =>
+          prev.map(msg =>
+            msg.id === newMessageId
+              ? { ...msg, id: messageId.toString() }
               : msg
           )
         );
       }
-      
+
     } catch (error: any) {
-      console.error(`Failed to save ${sender} message to backend:`, error);
+      logger.error(`Failed to save ${sender} message to backend:`, error);
       // Only notify user about errors for user messages
       if (sender === 'user') {
         addNotification('Failed to save your message. You may continue chatting, but history might not be preserved.', 'warning');
       }
     } finally {
       // Clear API call in progress
-      setApiCallsInProgress(prev => ({...prev, saveMessage: false}));
+      setApiCallsInProgress(prev => ({ ...prev, saveMessage: false }));
     }
   };
 
@@ -508,26 +509,26 @@ const ChatbotWidget: React.FC = () => {
   // Enhance loadConversationHistory with retry logic
   const loadConversationHistory = async () => {
     if (!conversationId || !isAuthenticated) return;
-    
+
     // Set API call in progress
-    setApiCallsInProgress(prev => ({...prev, loadHistory: true}));
-    
+    setApiCallsInProgress(prev => ({ ...prev, loadHistory: true }));
+
     try {
       setIsTyping(true); // Show loading indicator
-      
+
       const response = await executeWithRetry(
         () => chatbotService.getConversationHistory(conversationId),
         'Could not load conversation history'
       );
-      
+
       const history = response.data || [];
-      
+
       if (history && history.length > 0) {
         // Clear welcome message if we have history
-        setMessages(prevMessages => 
+        setMessages(prevMessages =>
           prevMessages.filter(msg => msg.id !== 'welcome')
         );
-        
+
         // Convert API messages to UI messages
         const uiMessages: Message[] = history.map(msg => ({
           id: `${msg.id}`,
@@ -538,7 +539,7 @@ const ChatbotWidget: React.FC = () => {
           // Parse metadata if available
           ...(msg.metadata?.ticketId ? { ticketInfo: { id: msg.metadata.ticketId } } : {})
         }));
-        
+
         // Update messages state with history
         setMessages(prevMessages => {
           // Keep only messages not already in the history (by ID)
@@ -546,17 +547,17 @@ const ChatbotWidget: React.FC = () => {
           const newMessages = prevMessages.filter(m => !existingIds.has(m.id));
           return [...uiMessages, ...newMessages];
         });
-        
+
         // Optional success notification
         addNotification('Loaded your conversation history', 'info');
       }
     } catch (error: any) {
-      console.error("Failed to load conversation history:", error);
+      logger.error("Failed to load conversation history:", error);
       addNotification('Could not load conversation history', 'warning');
     } finally {
       setIsTyping(false);
       // Clear API call in progress
-      setApiCallsInProgress(prev => ({...prev, loadHistory: false}));
+      setApiCallsInProgress(prev => ({ ...prev, loadHistory: false }));
     }
   };
 
@@ -580,7 +581,7 @@ const ChatbotWidget: React.FC = () => {
 
     // Sanitize input before processing
     const sanitizedInput = sanitizeInput(currentInput);
-    
+
     // If input was potentially harmful and completely sanitized away, don't proceed
     if (!sanitizedInput) {
       setInputValue('');
@@ -591,18 +592,18 @@ const ChatbotWidget: React.FC = () => {
     const userMessageText = sanitizedInput; // Store before clearing
     setInputValue(''); // Clear input immediately for better UX
     setIsTyping(true);
-    
+
     try {
       // Add user message to UI and save to backend
-      await addMessage(userMessageText, 'user'); 
-      
+      await addMessage(userMessageText, 'user');
+
       // Process user input based on conversation state
       await processUserInput(userMessageText);
     } catch (error: any) {
-      console.error("Chatbot Error:", error);
+      logger.error("Chatbot Error:", error);
       // Use addMessage to also save the error response to backend
       await addMessage(`Sorry, I encountered an error: ${error.message || 'Please try again.'}`, 'bot');
-      setConversationState('idle'); 
+      setConversationState('idle');
       setPendingData({});
     } finally {
       setIsTyping(false);
@@ -618,12 +619,12 @@ const ChatbotWidget: React.FC = () => {
       case 'idle':
       case 'awaiting_intent':
         const lowerInput = input.toLowerCase().trim();
-        
+
         // --- Intent: Create Ticket (Option 1) ---
         if (lowerInput === "1" || lowerInput.includes('create') && lowerInput.includes('ticket')) {
           setConversationState('creating_ticket_subject');
           botResponse = "Okay, I can help create a ticket. What should the subject be?";
-        } 
+        }
         // --- Intent: Check Status (Option 2) ---
         else if (lowerInput === "2" || lowerInput.includes('status') || lowerInput.includes('check ticket')) {
           // Try to extract ID with regex
@@ -631,7 +632,7 @@ const ChatbotWidget: React.FC = () => {
           if (match && match[1]) {
             await fetchAndShowTicketStatus(match[1]);
             botResponse = null; // Response handled in function
-            setConversationState('idle'); 
+            setConversationState('idle');
           } else {
             setConversationState('getting_ticket_id_for_status');
             botResponse = "Sure, I can check a ticket's status. Please enter the ticket ID (format: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx).";
@@ -639,20 +640,20 @@ const ChatbotWidget: React.FC = () => {
         }
         // --- Intent: Add Comment (Option 3) ---
         else if (lowerInput === "3" || lowerInput.includes('comment') || lowerInput.includes('add note')) {
-           // Try to extract ID with regex
-           const match = lowerInput.match(/([a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12})/i); // Basic UUID regex
-           if (match && match[1]) {
-             setPendingData({ ticketId: match[1] });
-             setConversationState('getting_comment_text');
-             botResponse = `Okay, adding a comment to ticket ${match[1]}. What would you like to say?`;
-           } else {
+          // Try to extract ID with regex
+          const match = lowerInput.match(/([a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12})/i); // Basic UUID regex
+          if (match && match[1]) {
+            setPendingData({ ticketId: match[1] });
+            setConversationState('getting_comment_text');
+            botResponse = `Okay, adding a comment to ticket ${match[1]}. What would you like to say?`;
+          } else {
             setConversationState('getting_ticket_id_for_comment');
             botResponse = "Okay, I can add a comment. Please enter the ticket ID (format: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx).";
-           }
-        } 
+          }
+        }
         // --- Default / Help ---
         else {
-           botResponse = (
+          botResponse = (
             <>
               Sorry, I didn't quite catch that. You can ask me to:
               <StyledOrderedList>
@@ -662,8 +663,8 @@ const ChatbotWidget: React.FC = () => {
               </StyledOrderedList>
               Please enter the number (1-3) or type your request.
             </>
-           );
-           setConversationState('idle'); // Stay idle or reset
+          );
+          setConversationState('idle'); // Stay idle or reset
         }
         break;
 
@@ -712,7 +713,7 @@ const ChatbotWidget: React.FC = () => {
 
         // Store description
         setPendingData((prev: PendingTicketData) => ({ ...prev, description: input }));
-        
+
         // Ask for department
         if (departments && departments.length > 0) {
           const departmentOptions = departments.map((d, index) => (
@@ -751,11 +752,11 @@ const ChatbotWidget: React.FC = () => {
           setPendingData({});
           break;
         }
-        
+
         // Handle both number selection and name selection
         let chosenDept: typeof departments[0] | null = null;
         const deptInput = input.trim();
-        
+
         // Check if input is a number
         const deptNumber = parseInt(deptInput);
         if (!isNaN(deptNumber) && deptNumber > 0 && deptNumber <= departments.length) {
@@ -763,11 +764,11 @@ const ChatbotWidget: React.FC = () => {
           chosenDept = departments[deptNumber - 1];
         } else {
           // Try to match by name (case-insensitive)
-          chosenDept = departments.find(d => 
+          chosenDept = departments.find(d =>
             d.name.toLowerCase() === deptInput.toLowerCase()
           ) || null;
         }
-        
+
         if (chosenDept) {
           setPendingData((prev: PendingTicketData) => ({ ...prev, departmentId: chosenDept!.id }));
           // Ask for type
@@ -821,11 +822,11 @@ const ChatbotWidget: React.FC = () => {
           setPendingData({});
           break;
         }
-        
+
         // Handle both number selection and name selection
         let chosenType: typeof ticketTypes[0] | null = null;
         const typeInput = input.trim();
-        
+
         // Check if input is a number
         const typeNumber = parseInt(typeInput);
         if (!isNaN(typeNumber) && typeNumber > 0 && typeNumber <= ticketTypes.length) {
@@ -833,14 +834,14 @@ const ChatbotWidget: React.FC = () => {
           chosenType = ticketTypes[typeNumber - 1];
         } else {
           // Try to match by name (case-insensitive)
-          chosenType = ticketTypes.find(t => 
+          chosenType = ticketTypes.find(t =>
             t.name.toLowerCase() === typeInput.toLowerCase()
           ) || null;
         }
-        
+
         if (chosenType) {
           setPendingData((prev: PendingTicketData) => ({ ...prev, typeId: chosenType!.id }));
-          
+
           // Changed: Now we ask for priority instead of tags
           if (priorities && priorities.length > 0) {
             const priorityOptions = priorities.map((p, index) => (
@@ -858,7 +859,7 @@ const ChatbotWidget: React.FC = () => {
           } else {
             // Fallback if priorities aren't loaded
             botResponse = "Great. You can add some tags to help categorize this ticket (optional, comma-separated), or type 'skip' or leave empty to skip. (Type 'cancel' to abort)";
-          setConversationState('getting_tags');
+            setConversationState('getting_tags');
           }
         } else {
           const typeOptions = ticketTypes.map((t, index) => (
@@ -894,11 +895,11 @@ const ChatbotWidget: React.FC = () => {
           setPendingData({});
           break;
         }
-        
+
         // Handle both number selection and name selection
         let chosenPriority: typeof priorities[0] | null = null;
         const priorityInput = input.trim();
-        
+
         // Check if input is a number
         const priorityNumber = parseInt(priorityInput);
         if (!isNaN(priorityNumber) && priorityNumber > 0 && priorityNumber <= priorities.length) {
@@ -906,11 +907,11 @@ const ChatbotWidget: React.FC = () => {
           chosenPriority = priorities[priorityNumber - 1];
         } else {
           // Try to match by name (case-insensitive)
-          chosenPriority = priorities.find(p => 
+          chosenPriority = priorities.find(p =>
             p.name.toLowerCase() === priorityInput.toLowerCase()
           ) || null;
         }
-        
+
         if (chosenPriority) {
           setPendingData((prev: PendingTicketData) => ({ ...prev, priorityId: chosenPriority!.id }));
           botResponse = "Great. You can add some tags to help categorize this ticket (optional, comma-separated), or type 'skip' or leave empty to skip. (Type 'cancel' to abort)";
@@ -949,7 +950,7 @@ const ChatbotWidget: React.FC = () => {
           setPendingData({});
           break;
         }
-        
+
         // Ensure user is logged in before final creation attempt
         if (!user || !user.id) {
           addNotification('You must be logged in to create a ticket.', 'error');
@@ -962,7 +963,7 @@ const ChatbotWidget: React.FC = () => {
         // Parse tags if provided - handle skip case
         const tagInput = input.trim();
         let tags: string[] = [];
-        
+
         // Allow empty input or "skip" keyword to skip tags
         if (tagInput === "" || tagInput.toLowerCase() === "skip") {
           // User chose to skip tags
@@ -971,51 +972,51 @@ const ChatbotWidget: React.FC = () => {
           // User provided tags
           tags = tagInput.split(',').map(tag => tag.trim()).filter(tag => tag);
         }
-        
+
         // Prepare final ticket data - ensure consistent structure with form
-        const finalTicketData: any = { 
-            subject: pendingData.subject, 
-            description: pendingData.description, 
-            requesterId: user.id, // Use direct access now that we've verified it exists
-            departmentId: pendingData.departmentId,
-            typeId: pendingData.typeId,
-            priorityId: pendingData.priorityId || (priorities && priorities.length > 0 ? priorities[1].id : 1002), // Use selected priority or default to Medium
-            tags: tags, // Add parsed tags
-            source: 'chat' // Set the source to 'chat' for proper tracking in the database
+        const finalTicketData: any = {
+          subject: pendingData.subject,
+          description: pendingData.description,
+          requesterId: user.id, // Use direct access now that we've verified it exists
+          departmentId: pendingData.departmentId,
+          typeId: pendingData.typeId,
+          priorityId: pendingData.priorityId || (priorities && priorities.length > 0 ? priorities[1].id : 1002), // Use selected priority or default to Medium
+          tags: tags, // Add parsed tags
+          source: 'chat' // Set the source to 'chat' for proper tracking in the database
         };
-        
+
         try {
-            console.log("Attempting to create ticket with data:", finalTicketData);
-            const newTicket = await ticketService.createTicket(finalTicketData);
-          
+          logger.debug("Attempting to create ticket with data:", finalTicketData);
+          const newTicket = await ticketService.createTicket(finalTicketData);
+
           // Get priority name for display
           const priorityName = priorities.find(p => p.id === finalTicketData.priorityId)?.name || 'Medium';
-          
-            botResponse = (
-              <React.Fragment>
-                Ticket created successfully! <br />
-                ID: {newTicket.id} <br />
-                Subject: {newTicket.subject} <br />
-                Status: {
-                  typeof newTicket.status === 'object' && newTicket.status?.name 
-                    ? newTicket.status.name.toUpperCase() 
-                    : String(newTicket.status || 'N/A').toUpperCase()
-                } <br />
+
+          botResponse = (
+            <React.Fragment>
+              Ticket created successfully! <br />
+              ID: {newTicket.id} <br />
+              Subject: {newTicket.subject} <br />
+              Status: {
+                typeof newTicket.status === 'object' && newTicket.status?.name
+                  ? newTicket.status.name.toUpperCase()
+                  : String(newTicket.status || 'N/A').toUpperCase()
+              } <br />
               Priority: {priorityName} <br />
-                Department: {departments.find(d => d.id === finalTicketData.departmentId)?.name || 'N/A'} <br />
-                Type: {ticketTypes.find(t => t.id === finalTicketData.typeId)?.name || 'N/A'}
-                {finalTicketData.tags.length > 0 && (
-                  <React.Fragment> <br /> Tags: {finalTicketData.tags.join(', ')}</React.Fragment>
-                )}
-              </React.Fragment>
-            );
-            addNotification('Ticket created successfully!', 'success');
+              Department: {departments.find(d => d.id === finalTicketData.departmentId)?.name || 'N/A'} <br />
+              Type: {ticketTypes.find(t => t.id === finalTicketData.typeId)?.name || 'N/A'}
+              {finalTicketData.tags.length > 0 && (
+                <React.Fragment> <br /> Tags: {finalTicketData.tags.join(', ')}</React.Fragment>
+              )}
+            </React.Fragment>
+          );
+          addNotification('Ticket created successfully!', 'success');
         } catch (err: any) {
-            console.error("Ticket creation failed:", err);
-            // Provide more specific error feedback if possible
-            const errorDetail = err.response?.data?.message || err.message || 'Unknown error';
-            botResponse = `Failed to create ticket: ${errorDetail}`;
-            addNotification('Failed to create ticket', 'error');
+          logger.error("Ticket creation failed:", err);
+          // Provide more specific error feedback if possible
+          const errorDetail = err.response?.data?.message || err.message || 'Unknown error';
+          botResponse = `Failed to create ticket: ${errorDetail}`;
+          addNotification('Failed to create ticket', 'error');
         }
         setConversationState('idle');
         setPendingData({});
@@ -1023,86 +1024,86 @@ const ChatbotWidget: React.FC = () => {
 
       // --- Get Status Flow ---
       case 'getting_ticket_id_for_status':
-         try {
-            // Handle special case if user wants to go back to main menu
-            if (input.toLowerCase() === 'cancel' || input.toLowerCase() === 'back' || input.toLowerCase() === 'menu') {
-              botResponse = (
-                <>
-                  Returning to main menu. What would you like to do?
-                  <StyledOrderedList>
-                    <li>Create a ticket</li>
-                    <li>Check ticket status [ID]</li>
-                    <li>Add comment to ticket [ID]</li>
-                  </StyledOrderedList>
-                  Please enter the number (1-3) or type your request.
-                </>
-              );
-              setConversationState('idle');
-              break;
-            }
-
-            // Attempt to fetch the ticket
-            console.log(`[ChatbotWidget] Calling ticketService.getTicketById with ID: ${input}`);
-            const ticketData = await ticketService.getTicketById(input);
-            console.log(`[ChatbotWidget] Received ticket data for ID ${input}:`, JSON.stringify(ticketData)); // Log received ticket data
-            
-            // Check if ticket data is valid and contains the nested ticket object
-            if (!ticketData || typeof ticketData !== 'object' || !ticketData.ticket) {
-              console.error(`[ChatbotWidget] Invalid or missing nested ticket data received:`, ticketData);
-              throw new Error('Received invalid ticket data structure from server.');
-            }
-            
-            const actualTicket = ticketData.ticket; // Access the nested ticket object
-            
-            // Safely construct the priority display string
-            let priorityDisplay = 'N/A';
-            if (actualTicket.priority) {
-              if (typeof actualTicket.priority === 'string') {
-                priorityDisplay = actualTicket.priority.toUpperCase();
-              } else if (typeof actualTicket.priority === 'object' && actualTicket.priority.name) {
-                priorityDisplay = actualTicket.priority.name;
-              }
-            }
-
-            // Prepare the response content with safe access to the nested object
-            const responseContent = (
-              <React.Fragment>
-                Ticket Found: <br />
-                ID: {actualTicket.id} <br />
-                Subject: {actualTicket.subject || 'N/A'} <br /> 
-                Status: <strong>{
-                  typeof actualTicket.status === 'object' && actualTicket.status?.name 
-                    ? actualTicket.status.name.toUpperCase() 
-                    : String(actualTicket.status || 'N/A').toUpperCase()
-                }</strong> <br />
-                Priority: {priorityDisplay} <br /> 
-                Created: {(actualTicket.createdAt || (actualTicket as any).created_at) 
-                  ? new Date(actualTicket.createdAt || (actualTicket as any).created_at).toLocaleString() 
-                  : 'N/A'} <br />
-                Updated: {(actualTicket.updatedAt || (actualTicket as any).updated_at) 
-                  ? new Date(actualTicket.updatedAt || (actualTicket as any).updated_at).toLocaleString() 
-                  : 'N/A'}
-              </React.Fragment>
+        try {
+          // Handle special case if user wants to go back to main menu
+          if (input.toLowerCase() === 'cancel' || input.toLowerCase() === 'back' || input.toLowerCase() === 'menu') {
+            botResponse = (
+              <>
+                Returning to main menu. What would you like to do?
+                <StyledOrderedList>
+                  <li>Create a ticket</li>
+                  <li>Check ticket status [ID]</li>
+                  <li>Add comment to ticket [ID]</li>
+                </StyledOrderedList>
+                Please enter the number (1-3) or type your request.
+              </>
             );
-            
-            // Use addMessage to display and save (pass the nested ticket for ticketInfo)
-            await addMessage(responseContent, 'bot', { ticketInfo: actualTicket });
-            botResponse = null; // Prevent default response
-          } catch (err: any) {
-            // Log the full error for debugging
-            console.error('Error fetching ticket status:', err);
-            
-            // Construct a user-friendly message
-            let userMessage = 'Please check the ID and try again.';
-            if (err.status === 404) {
-              userMessage = 'Ticket not found. Please verify the ID.';
-            } else if (err.message) {
-              // Use the error message if available, but keep it generic
-              userMessage = `An error occurred (${err.message}). Please try again.`; 
-            }
-             
-            botResponse = `Could not find or load ticket ${input}. ${userMessage}`;
+            setConversationState('idle');
+            break;
           }
+
+          // Attempt to fetch the ticket
+          logger.debug(`[ChatbotWidget] Calling ticketService.getTicketById with ID: ${input}`);
+          const ticketData = await ticketService.getTicketById(input);
+          logger.debug(`[ChatbotWidget] Received ticket data for ID ${input}:`, JSON.stringify(ticketData)); // Log received ticket data
+
+          // Check if ticket data is valid and contains the nested ticket object
+          if (!ticketData || typeof ticketData !== 'object' || !ticketData.ticket) {
+            logger.error(`[ChatbotWidget] Invalid or missing nested ticket data received:`, ticketData);
+            throw new Error('Received invalid ticket data structure from server.');
+          }
+
+          const actualTicket = ticketData.ticket; // Access the nested ticket object
+
+          // Safely construct the priority display string
+          let priorityDisplay = 'N/A';
+          if (actualTicket.priority) {
+            if (typeof actualTicket.priority === 'string') {
+              priorityDisplay = actualTicket.priority.toUpperCase();
+            } else if (typeof actualTicket.priority === 'object' && actualTicket.priority.name) {
+              priorityDisplay = actualTicket.priority.name;
+            }
+          }
+
+          // Prepare the response content with safe access to the nested object
+          const responseContent = (
+            <React.Fragment>
+              Ticket Found: <br />
+              ID: {actualTicket.id} <br />
+              Subject: {actualTicket.subject || 'N/A'} <br />
+              Status: <strong>{
+                typeof actualTicket.status === 'object' && actualTicket.status?.name
+                  ? actualTicket.status.name.toUpperCase()
+                  : String(actualTicket.status || 'N/A').toUpperCase()
+              }</strong> <br />
+              Priority: {priorityDisplay} <br />
+              Created: {(actualTicket.createdAt || (actualTicket as any).created_at)
+                ? new Date(actualTicket.createdAt || (actualTicket as any).created_at).toLocaleString()
+                : 'N/A'} <br />
+              Updated: {(actualTicket.updatedAt || (actualTicket as any).updated_at)
+                ? new Date(actualTicket.updatedAt || (actualTicket as any).updated_at).toLocaleString()
+                : 'N/A'}
+            </React.Fragment>
+          );
+
+          // Use addMessage to display and save (pass the nested ticket for ticketInfo)
+          await addMessage(responseContent, 'bot', { ticketInfo: actualTicket });
+          botResponse = null; // Prevent default response
+        } catch (err: any) {
+          // Log the full error for debugging
+          logger.error('Error fetching ticket status:', err);
+
+          // Construct a user-friendly message
+          let userMessage = 'Please check the ID and try again.';
+          if (err.status === 404) {
+            userMessage = 'Ticket not found. Please verify the ID.';
+          } else if (err.message) {
+            // Use the error message if available, but keep it generic
+            userMessage = `An error occurred (${err.message}). Please try again.`;
+          }
+
+          botResponse = `Could not find or load ticket ${input}. ${userMessage}`;
+        }
         setConversationState('idle');
         break;
 
@@ -1137,8 +1138,8 @@ const ChatbotWidget: React.FC = () => {
           botResponse = `Comment added successfully to ticket ${ticketId}.`;
           addNotification('Comment added successfully!', 'success');
         } catch (err: any) {
-           botResponse = `Failed to add comment to ticket ${ticketId}: ${err.message || 'Unknown error'}`;
-           addNotification('Failed to add comment', 'error');
+          botResponse = `Failed to add comment to ticket ${ticketId}: ${err.message || 'Unknown error'}`;
+          addNotification('Failed to add comment', 'error');
         }
         setConversationState('idle');
         setPendingData({});
@@ -1159,7 +1160,7 @@ const ChatbotWidget: React.FC = () => {
   // Enhance fetchAndShowTicketStatus with retry logic
   const fetchAndShowTicketStatus = async (ticketId: string) => {
     setIsTyping(true);
-    
+
     try {
       const ticketData = await executeWithRetry(
         () => ticketService.getTicketById(ticketId),
@@ -1168,10 +1169,10 @@ const ChatbotWidget: React.FC = () => {
 
       // Check if ticket data is valid and contains the nested ticket object
       if (!ticketData || typeof ticketData !== 'object' || !ticketData.ticket) {
-         console.error(`[ChatbotWidget] Invalid or missing nested ticket data in fetchAndShowTicketStatus:`, ticketData);
+        logger.error(`[ChatbotWidget] Invalid or missing nested ticket data in fetchAndShowTicketStatus:`, ticketData);
         throw new Error('Received invalid ticket data structure from server.');
       }
-      
+
       const actualTicket = ticketData.ticket; // Access the nested ticket object
 
       // Safely construct the priority display string
@@ -1189,42 +1190,42 @@ const ChatbotWidget: React.FC = () => {
           <React.Fragment>
             Ticket Found: <br />
             ID: {actualTicket.id} <br />
-            Subject: {actualTicket.subject || 'N/A'} <br /> 
+            Subject: {actualTicket.subject || 'N/A'} <br />
             Status: <strong>{
-              typeof actualTicket.status === 'object' && actualTicket.status?.name 
-                ? actualTicket.status.name.toUpperCase() 
+              typeof actualTicket.status === 'object' && actualTicket.status?.name
+                ? actualTicket.status.name.toUpperCase()
                 : String(actualTicket.status || 'N/A').toUpperCase()
             }</strong> <br />
-            Priority: {priorityDisplay} <br /> 
-            Created: {(actualTicket.createdAt || (actualTicket as any).created_at) 
-              ? new Date(actualTicket.createdAt || (actualTicket as any).created_at).toLocaleString() 
+            Priority: {priorityDisplay} <br />
+            Created: {(actualTicket.createdAt || (actualTicket as any).created_at)
+              ? new Date(actualTicket.createdAt || (actualTicket as any).created_at).toLocaleString()
               : 'N/A'} <br />
-            Updated: {(actualTicket.updatedAt || (actualTicket as any).updated_at) 
-              ? new Date(actualTicket.updatedAt || (actualTicket as any).updated_at).toLocaleString() 
+            Updated: {(actualTicket.updatedAt || (actualTicket as any).updated_at)
+              ? new Date(actualTicket.updatedAt || (actualTicket as any).updated_at).toLocaleString()
               : 'N/A'}
           </React.Fragment>
-        ), 
+        ),
         'bot',
         { ticketInfo: actualTicket } // Pass the nested ticket for ticketInfo
       );
     } catch (err: any) {
-       // Log the full error for debugging
-       console.error(`Error in fetchAndShowTicketStatus for ID ${ticketId}:`, err);
-            
-       // Construct a user-friendly message
-       let userMessage = 'Please check the ID and try again.';
-       if (err.status === 404) {
-         userMessage = 'Ticket not found. Please verify the ID.';
-       } else if (err.message) {
-         userMessage = `An error occurred (${err.message}). Please try again.`;
-       }
-       
+      // Log the full error for debugging
+      logger.error(`Error in fetchAndShowTicketStatus for ID ${ticketId}:`, err);
+
+      // Construct a user-friendly message
+      let userMessage = 'Please check the ID and try again.';
+      if (err.status === 404) {
+        userMessage = 'Ticket not found. Please verify the ID.';
+      } else if (err.message) {
+        userMessage = `An error occurred (${err.message}). Please try again.`;
+      }
+
       addMessage(`Could not find or load ticket ${ticketId}. ${userMessage}`, 'bot');
     } finally {
       setIsTyping(false);
     }
   };
-  
+
   // Create a ticket from chat
   const handleCreateTicket = async () => {
     try {
@@ -1233,28 +1234,28 @@ const ChatbotWidget: React.FC = () => {
         addMessage("To create a ticket, you need to be logged in. Please log in and try again.", 'bot');
         return;
       }
-      
+
       // Start the ticket creation flow
-    setConversationState('creating_ticket_subject');
+      setConversationState('creating_ticket_subject');
       addMessage("Let's create a support ticket. What should the subject be?", 'bot');
     } catch (error) {
-      console.error('Error in ticket creation flow:', error);
+      logger.error('Error in ticket creation flow:', error);
       addMessage("I'm sorry, I encountered an error trying to create a ticket. Please try again later or use the 'Create Ticket' page directly.", 'bot');
     }
   };
-  
+
   // Complete ticket creation and redirect to ticket detail
   const completeTicketCreation = async (ticketData: Partial<Ticket>) => {
     try {
       // Show processing message
       addMessage("Creating your ticket...", 'bot');
-      
+
       // Check if user is authenticated
       if (!user || !user.id) {
         addMessage("You need to be logged in to create a ticket.", 'bot');
         return;
       }
-      
+
       // Get default priority if none is selected
       let priorityId: number;
       if (typeof ticketData.priority === 'object' && ticketData.priority?.id) {
@@ -1266,7 +1267,7 @@ const ChatbotWidget: React.FC = () => {
         // Fallback to 1002 (Medium) if no priorities are loaded
         priorityId = 1002;
       }
-      
+
       // Prepare ticket data with required fields - use consistent format with main form
       const createTicketRequest: any = {
         subject: ticketData.subject || 'Support request from chat',
@@ -1278,10 +1279,10 @@ const ChatbotWidget: React.FC = () => {
         tags: ticketData.tags || [],
         source: 'chat' // Set the source to 'chat' for proper tracking in the database
       };
-      
+
       // Use the same ticketService method as the form flow
       const response = await ticketService.createTicket(createTicketRequest);
-      
+
       if (response && response.id) {
         // Success message with a link to the created ticket
         addMessage(
@@ -1289,9 +1290,9 @@ const ChatbotWidget: React.FC = () => {
             <Typography variant="body1">
               Your ticket has been created successfully!
             </Typography>
-            <Button 
-              variant="contained" 
-              size="small" 
+            <Button
+              variant="contained"
+              size="small"
               startIcon={<VisibilityIcon />}
               onClick={() => navigate(`/tickets/${response.id}`)}
               sx={{ mt: 1 }}
@@ -1301,34 +1302,34 @@ const ChatbotWidget: React.FC = () => {
           </Box>,
           'bot'
         );
-        
+
         // Reset conversation state
         setConversationState('idle');
       } else {
         throw new Error('Failed to create ticket - no ticket ID returned');
       }
     } catch (error) {
-      console.error('Error creating ticket:', error);
+      logger.error('Error creating ticket:', error);
       addMessage("I'm sorry, there was an error creating your ticket. Please try again or use the 'Create Ticket' page.", 'bot');
       setConversationState('idle');
     }
   };
-  
+
   // View knowledge base article (implementing the placeholder)
   const handleViewArticle = (articleId: string, articleTitle: string) => {
     // Add a message in the chat showing we're navigating to the article
     addMessage(`Opening article: "${articleTitle}" for you...`, 'bot');
-    
+
     // Create a button that will navigate to the article
     addMessage(
       <Box>
         <Typography variant="body1">
           Here's the article you requested:
         </Typography>
-        <Button 
-          variant="contained" 
+        <Button
+          variant="contained"
           color="primary"
-          size="small" 
+          size="small"
           startIcon={<ArticleIcon />}
           onClick={() => navigate(`/knowledge/${articleId}`)}
           sx={{ mt: 1 }}
@@ -1339,7 +1340,7 @@ const ChatbotWidget: React.FC = () => {
       'bot'
     );
   };
-  
+
   // Copy conversation to clipboard
   const handleCopyConversation = () => {
     const conversationText = messages
@@ -1350,7 +1351,7 @@ const ChatbotWidget: React.FC = () => {
         return `${prefix}: ${textContent}`;
       })
       .join('\\n');
-    
+
     navigator.clipboard.writeText(conversationText).then(() => {
       setIsCopied(true);
       setTimeout(() => {
@@ -1359,22 +1360,22 @@ const ChatbotWidget: React.FC = () => {
       addNotification('Conversation copied to clipboard!', 'info');
     }).catch(err => {
       addNotification('Failed to copy conversation.', 'error');
-      console.error('Clipboard copy failed:', err);
+      logger.error('Clipboard copy failed:', err);
     });
   };
-  
+
   // Handle message feedback
   const handleFeedback = (messageId: string, feedbackType: 'positive' | 'negative') => {
-    setMessages(prevMessages => 
-      prevMessages.map(msg => 
-        msg.id === messageId 
-          ? { ...msg, feedback: feedbackType } 
+    setMessages(prevMessages =>
+      prevMessages.map(msg =>
+        msg.id === messageId
+          ? { ...msg, feedback: feedbackType }
           : msg
       )
     );
-    
+
     // In a real app, you would send this feedback to your backend
-    console.log(`Feedback for message ${messageId}: ${feedbackType}`);
+    logger.debug(`Feedback for message ${messageId}: ${feedbackType}`);
     addNotification('Thank you for your feedback!', 'info');
   };
 
@@ -1398,10 +1399,10 @@ const ChatbotWidget: React.FC = () => {
           color="primary"
           aria-label="chat"
           onClick={toggleChat}
-          sx={{ 
-            position: 'fixed', 
-            bottom: 16, 
-            right: 16, 
+          sx={{
+            position: 'fixed',
+            bottom: 16,
+            right: 16,
             zIndex: 1000,
             boxShadow: '0 4px 12px rgba(0,0,0,0.15)',
             transition: 'all 0.3s ease',
@@ -1414,8 +1415,8 @@ const ChatbotWidget: React.FC = () => {
           {isOpen ? (
             <KeyboardArrowUpIcon />
           ) : (
-            <Badge 
-              badgeContent={unreadMessages} 
+            <Badge
+              badgeContent={unreadMessages}
               color="error"
               overlap="circular"
               invisible={unreadMessages === 0}
@@ -1425,14 +1426,14 @@ const ChatbotWidget: React.FC = () => {
           )}
         </Fab>
       </Zoom>
-      
+
       {/* Chat window */}
       <Collapse in={isOpen} timeout="auto" unmountOnExit>
         <ChatContainer>
           <ChatHeader>
             <Box display="flex" alignItems="center" gap={1}>
-              <Avatar 
-                sx={{ 
+              <Avatar
+                sx={{
                   bgcolor: theme.palette.mode === 'dark' ? 'primary.dark' : alpha(theme.palette.common.white, 0.9),
                   color: theme.palette.mode === 'dark' ? theme.palette.common.white : theme.palette.primary.main
                 }}
@@ -1450,16 +1451,16 @@ const ChatbotWidget: React.FC = () => {
             </Box>
             <Box display="flex" alignItems="center">
               <Tooltip title="Copy conversation">
-                <IconButton 
-                  size="small" 
+                <IconButton
+                  size="small"
                   onClick={handleCopyConversation}
                   sx={{ color: alpha(theme.palette.primary.contrastText, 0.8), mr: 1 }}
                 >
                   {isCopied ? <DoneIcon /> : <ContentCopyIcon fontSize="small" />}
                 </IconButton>
               </Tooltip>
-              <IconButton 
-                size="small" 
+              <IconButton
+                size="small"
                 onClick={toggleChat}
                 sx={{ color: alpha(theme.palette.primary.contrastText, 0.8) }}
               >
@@ -1467,47 +1468,47 @@ const ChatbotWidget: React.FC = () => {
               </IconButton>
             </Box>
           </ChatHeader>
-          
+
           <MessagesContainer>
             {messages.map((message) => (
-              <Box 
-                key={message.id} 
-                sx={{ 
-                  width: '100%', 
-                  display: 'flex', 
+              <Box
+                key={message.id}
+                sx={{
+                  width: '100%',
+                  display: 'flex',
                   flexDirection: 'column',
                   alignItems: message.sender === 'user' ? 'flex-end' : 'flex-start'
                 }}
               >
                 {/* Avatar logic could be simplified or removed if not needed */}
                 {/* ... avatar logic ... */}
-                
+
                 <MessageBubble isUser={message.sender === 'user'}>
                   {message.text}
                 </MessageBubble>
-                
+
                 {/* Timestamp (Optional) */}
-                <Typography 
-                  variant="caption" 
-                  sx={{ 
-                    mt: 0.5, 
-                    mx: 1, 
-                    color: 'text.secondary', 
-                    alignSelf: message.sender === 'user' ? 'flex-end' : 'flex-start' 
+                <Typography
+                  variant="caption"
+                  sx={{
+                    mt: 0.5,
+                    mx: 1,
+                    color: 'text.secondary',
+                    alignSelf: message.sender === 'user' ? 'flex-end' : 'flex-start'
                   }}
                 >
-                   {message.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                  {message.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                 </Typography>
 
                 {/* Feedback Buttons for Bot Messages */}
                 {message.sender === 'bot' && !message.isTyping && (
                   <FeedbackBar sx={{ alignSelf: 'flex-start' }}>
                     <Tooltip title="Helpful">
-                      <IconButton 
-                        size="small" 
+                      <IconButton
+                        size="small"
                         color={message.feedback === 'positive' ? 'success' : 'default'}
-                        sx={{ 
-                          p: 0.5, 
+                        sx={{
+                          p: 0.5,
                           opacity: message.feedback === 'positive' ? 1 : 0.5,
                           '&:hover': { opacity: 1 }
                         }}
@@ -1517,11 +1518,11 @@ const ChatbotWidget: React.FC = () => {
                       </IconButton>
                     </Tooltip>
                     <Tooltip title="Not helpful">
-                      <IconButton 
-                        size="small" 
+                      <IconButton
+                        size="small"
                         color={message.feedback === 'negative' ? 'error' : 'default'}
-                        sx={{ 
-                          p: 0.5, 
+                        sx={{
+                          p: 0.5,
                           opacity: message.feedback === 'negative' ? 1 : 0.5,
                           '&:hover': { opacity: 1 }
                         }}
@@ -1532,20 +1533,20 @@ const ChatbotWidget: React.FC = () => {
                     </Tooltip>
                   </FeedbackBar>
                 )}
-                
+
                 {/* Action Buttons / Suggestions for Bot Messages */}
                 {message.sender === 'bot' && message.suggestions && (
                   <Box mt={1} display="flex" flexDirection="column" gap={1} sx={{ alignSelf: 'flex-start', maxWidth: '80%' }}>
                     {/* Knowledge Article Suggestions */}
                     {message.suggestions.knowledgeArticles && message.suggestions.knowledgeArticles.length > 0 && (
-                      <Card 
-                        variant="outlined" 
-                        sx={{ 
-                          maxWidth: '80%', 
+                      <Card
+                        variant="outlined"
+                        sx={{
+                          maxWidth: '80%',
                           alignSelf: 'flex-start',
                           borderRadius: 2,
-                          borderColor: theme.palette.mode === 'dark' 
-                            ? alpha(theme.palette.primary.main, 0.3) 
+                          borderColor: theme.palette.mode === 'dark'
+                            ? alpha(theme.palette.primary.main, 0.3)
                             : alpha(theme.palette.primary.main, 0.2),
                           background: theme.palette.mode === 'dark'
                             ? alpha(theme.palette.background.paper, 0.4)
@@ -1556,17 +1557,17 @@ const ChatbotWidget: React.FC = () => {
                           <Typography variant="caption" color="text.secondary" gutterBottom>
                             Related articles that might help:
                           </Typography>
-                          
+
                           {message.suggestions.knowledgeArticles.map(article => (
-                            <Box 
+                            <Box
                               key={article.id}
-                              display="flex" 
-                              alignItems="center" 
+                              display="flex"
+                              alignItems="center"
                               gap={1}
                               onClick={() => handleViewArticle(article.id, article.title)}
-                              sx={{ 
+                              sx={{
                                 cursor: 'pointer',
-                                '&:hover': { 
+                                '&:hover': {
                                   bgcolor: theme.palette.mode === 'dark'
                                     ? alpha(theme.palette.primary.main, 0.15)
                                     : alpha(theme.palette.primary.main, 0.08)
@@ -1584,18 +1585,18 @@ const ChatbotWidget: React.FC = () => {
                         </CardContent>
                       </Card>
                     )}
-                    
+
                     {/* Create Ticket Suggestion */}
                     {message.suggestions.createTicket && (
-                        <Button
-                         startIcon={<ConfirmationNumberIcon />} 
-                          variant="outlined"
-                          size="small"
-                          onClick={handleCreateTicket}
-                         sx={{ alignSelf: 'flex-start' }}
-                       >
-                         Create Ticket from this issue?
-                        </Button>
+                      <Button
+                        startIcon={<ConfirmationNumberIcon />}
+                        variant="outlined"
+                        size="small"
+                        onClick={handleCreateTicket}
+                        sx={{ alignSelf: 'flex-start' }}
+                      >
+                        Create Ticket from this issue?
+                      </Button>
                     )}
                   </Box>
                 )}
@@ -1603,37 +1604,37 @@ const ChatbotWidget: React.FC = () => {
             ))}
             {isTyping && (
               <Box display="flex" alignItems="center" gap={1} sx={{ alignSelf: 'flex-start' }}>
-                  <Avatar sx={{ width: 24, height: 24, bgcolor: theme.palette.primary.main, fontSize: '0.875rem' }}>
+                <Avatar sx={{ width: 24, height: 24, bgcolor: theme.palette.primary.main, fontSize: '0.875rem' }}>
                   <SmartToyIcon fontSize="small" />
                 </Avatar>
-                  <MessageBubble isUser={false}>
-                      <CircularProgress size={20} color="inherit" />
+                <MessageBubble isUser={false}>
+                  <CircularProgress size={20} color="inherit" />
                 </MessageBubble>
               </Box>
             )}
             <div ref={messagesEndRef} />
           </MessagesContainer>
-          
+
           <ChatFooter>
-              <TextField
-                fullWidth
-                variant="outlined"
+            <TextField
+              fullWidth
+              variant="outlined"
               size="small"
-                placeholder="Type your message..."
-                value={inputValue}
-                onChange={handleInputChange}
-                inputRef={inputRef}
+              placeholder="Type your message..."
+              value={inputValue}
+              onChange={handleInputChange}
+              inputRef={inputRef}
               onKeyPress={(e) => e.key === 'Enter' && !e.shiftKey ? handleSubmit() : null} // Submit on Enter
               sx={{
                 '& .MuiOutlinedInput-root': {
                   borderRadius: '20px',
                   backgroundColor: theme.palette.background.default,
-                  }
-                }}
-              />
+                }
+              }}
+            />
             <IconButton color="primary" onClick={handleSubmit} disabled={!inputValue.trim() || isTyping}>
-                <SendIcon />
-              </IconButton>
+              <SendIcon />
+            </IconButton>
           </ChatFooter>
         </ChatContainer>
       </Collapse>

@@ -413,51 +413,146 @@ CREATE TABLE IF NOT EXISTS scheduled_maintenance (
 CREATE TABLE IF NOT EXISTS settings (
     id SERIAL PRIMARY KEY,
     category VARCHAR(50) NOT NULL,
-    settings_data JSONB NOT NULL,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    -- General Settings
+    company_name VARCHAR(255),
+    support_email VARCHAR(255),
+    max_file_size VARCHAR(50),
+    default_time_zone VARCHAR(100),
+    allow_guest_tickets BOOLEAN DEFAULT TRUE,
+    -- Email Settings
+    smtp_server VARCHAR(255),
+    smtp_port INTEGER,
+    smtp_username VARCHAR(255),
+    smtp_password VARCHAR(255),
+    email_from_name VARCHAR(255),
+    email_reply_to VARCHAR(255),
+    enable_email_notifications BOOLEAN DEFAULT TRUE,
+    -- Ticket Settings
+    default_priority VARCHAR(50),
+    closed_ticket_reopen INTEGER,
+    auto_close_resolved INTEGER,
+    enable_customer_satisfaction BOOLEAN DEFAULT TRUE,
+    require_category BOOLEAN DEFAULT TRUE,
+    -- Integration Settings
+    slack_enabled BOOLEAN DEFAULT FALSE,
+    slack_webhook_url VARCHAR(255),
+    slack_channel VARCHAR(100),
+    slack_notify_on_new_ticket BOOLEAN DEFAULT TRUE,
+    slack_notify_on_ticket_updates BOOLEAN DEFAULT FALSE,
+    teams_enabled BOOLEAN DEFAULT FALSE,
+    teams_webhook_url VARCHAR(255),
+    teams_notify_on_new_ticket BOOLEAN DEFAULT TRUE,
+    teams_notify_on_ticket_updates BOOLEAN DEFAULT FALSE,
+    jira_enabled BOOLEAN DEFAULT FALSE,
+    jira_url VARCHAR(255),
+    jira_username VARCHAR(255),
+    jira_api_token VARCHAR(255),
+    jira_project VARCHAR(100),
+    jira_create_issues_for_tickets BOOLEAN DEFAULT TRUE,
+    github_enabled BOOLEAN DEFAULT FALSE,
+    github_access_token VARCHAR(255),
+    github_repository VARCHAR(255),
+    github_create_issues_for_tickets BOOLEAN DEFAULT TRUE,
+    -- Advanced Settings
+    api_enabled BOOLEAN DEFAULT TRUE,
+    api_rate_limit_per_hour INTEGER DEFAULT 1000,
+    api_rate_limit_window_minutes INTEGER DEFAULT 15,
+    enable_api_documentation BOOLEAN DEFAULT TRUE,
+    max_login_attempts INTEGER DEFAULT 5,
+    password_expiry_days INTEGER DEFAULT 90,
+    session_timeout_minutes INTEGER DEFAULT 60,
+    enforce_mfa BOOLEAN DEFAULT FALSE,
+    cache_duration_minutes INTEGER DEFAULT 15,
+    max_concurrent_file_uploads INTEGER DEFAULT 5,
+    enable_custom_fields BOOLEAN DEFAULT TRUE,
+    max_custom_fields_per_ticket INTEGER DEFAULT 10,
+    enable_ai_suggestions BOOLEAN DEFAULT TRUE,
+    enable_auto_tagging BOOLEAN DEFAULT TRUE,
+    enable_sentiment_analysis BOOLEAN DEFAULT TRUE,
+    ai_model_name VARCHAR(100),
+    ai_provider VARCHAR(50),
+    ai_api_key VARCHAR(255)
 );
 
 -- Create unique constraint on category
 CREATE UNIQUE INDEX IF NOT EXISTS idx_settings_category ON settings (category);
 
 -- Add initial default email settings
-INSERT INTO settings (category, settings_data) 
+INSERT INTO settings (
+    category, 
+    smtp_server, smtp_port, smtp_username, smtp_password, 
+    email_from_name, email_reply_to, enable_email_notifications
+) 
 VALUES (
     'email', 
-    '{"smtpServer": "smtp.example.com", "smtpPort": 587, "smtpUsername": "username", "smtpPassword": "password_placeholder", "emailFromName": "ServiceFix Support", "emailReplyTo": "support@example.com", "enableEmailNotifications": true}'
+    'smtp.example.com', 587, 'username', 'password_placeholder', 
+    'ServiceFix Support', 'support@example.com', true
 )
 ON CONFLICT (category) DO NOTHING;
 
 -- Add initial default general settings
-INSERT INTO settings (category, settings_data) 
+INSERT INTO settings (
+    category, 
+    company_name, support_email, max_file_size, 
+    allow_guest_tickets, default_time_zone
+) 
 VALUES (
     'general', 
-    '{"companyName": "ServiceFix", "supportEmail": "support@servicefix.com", "maxFileSize": 5, "allowGuestTickets": true, "defaultTimeZone": "UTC"}'
+    'ServiceFix', 'support@servicefix.com', '5', 
+    true, 'UTC'
 )
 ON CONFLICT (category) DO NOTHING;
 
 -- Add initial default ticket settings
-INSERT INTO settings (category, settings_data) 
+INSERT INTO settings (
+    category, 
+    default_priority, closed_ticket_reopen, auto_close_resolved, 
+    enable_customer_satisfaction, require_category
+) 
 VALUES (
     'ticket', 
-    '{"defaultPriority": "medium", "closedTicketReopen": 7, "autoCloseResolved": 3, "enableCustomerSatisfaction": true, "requireCategory": true, "enableSLA": false}'
+    'medium', 7, 3, 
+    true, true
 )
 ON CONFLICT (category) DO NOTHING;
 
 -- Add initial default integration settings
-INSERT INTO settings (category, settings_data) 
+INSERT INTO settings (
+    category, 
+    slack_enabled, slack_webhook_url, slack_channel, slack_notify_on_new_ticket, slack_notify_on_ticket_updates,
+    teams_enabled, teams_webhook_url, teams_notify_on_new_ticket, teams_notify_on_ticket_updates,
+    jira_enabled, jira_url, jira_username, jira_api_token, jira_project, jira_create_issues_for_tickets,
+    github_enabled, github_access_token, github_repository, github_create_issues_for_tickets
+) 
 VALUES (
     'integration', 
-    '{"slackEnabled": false, "slackWebhookUrl": "", "slackChannel": "", "slackNotifyOnNewTicket": true, "slackNotifyOnTicketUpdates": false, "teamsEnabled": false, "teamsWebhookUrl": "", "teamsNotifyOnNewTicket": true, "teamsNotifyOnTicketUpdates": false, "jiraEnabled": false, "jiraUrl": "", "jiraUsername": "", "jiraApiToken": "", "jiraProject": "", "jiraCreateIssuesForTickets": true, "githubEnabled": false, "githubAccessToken": "", "githubRepository": "", "githubCreateIssuesForTickets": true}'
+    false, '', '', true, false, 
+    false, '', true, false, 
+    false, '', '', '', '', true, 
+    false, '', '', true
 )
 ON CONFLICT (category) DO NOTHING;
 
 -- Add initial default advanced settings
-INSERT INTO settings (category, settings_data) 
+INSERT INTO settings (
+    category, 
+    api_enabled, api_rate_limit_per_hour, api_rate_limit_window_minutes, enable_api_documentation,
+    max_login_attempts, password_expiry_days, session_timeout_minutes, enforce_mfa,
+    cache_duration_minutes, max_concurrent_file_uploads,
+    enable_custom_fields, max_custom_fields_per_ticket,
+    enable_ai_suggestions, enable_auto_tagging, enable_sentiment_analysis,
+    ai_model_name
+) 
 VALUES (
     'advanced', 
-    '{"apiEnabled": true, "apiRateLimitPerHour": 1000, "apiRateLimitWindowMinutes": 15, "enableApiDocumentation": true, "maxLoginAttempts": 5, "passwordExpiryDays": 90, "sessionTimeoutMinutes": 60, "enforceMfa": false, "cacheDurationMinutes": 15, "maxConcurrentFileUploads": 5, "enableCustomFields": true, "maxCustomFieldsPerTicket": 10, "enableAiSuggestions": true, "enableAutoTagging": true, "enableSentimentAnalysis": true, "aiModelName": "gpt-3.5-turbo"}'
+    true, 1000, 15, true, 
+    5, 90, 60, false, 
+    15, 5, 
+    true, 10, 
+    true, true, true, 
+    'gpt-3.5-turbo'
 )
 ON CONFLICT (category) DO NOTHING;
 

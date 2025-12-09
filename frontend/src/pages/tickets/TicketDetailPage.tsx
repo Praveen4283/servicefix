@@ -69,6 +69,7 @@ import { useAuth } from '../../context/AuthContext';
 import apiClient from '../../services/apiClient';
 import SLABadge from '../../components/tickets/SLABadge';
 import slaService from '../../services/slaService';
+import { logger } from '../../utils/frontendLogger';
 
 interface TabPanelProps {
   children?: React.ReactNode;
@@ -178,11 +179,11 @@ const gradientAccent = (theme: any) => ({
 
 // Field label component to standardize label styles
 const FieldLabel: React.FC<{ label: string }> = ({ label }) => (
-  <Typography 
-    variant="subtitle2" 
-    color="text.secondary" 
-    fontWeight="medium" 
-    gutterBottom 
+  <Typography
+    variant="subtitle2"
+    color="text.secondary"
+    fontWeight="medium"
+    gutterBottom
     sx={{ fontSize: '0.75rem', textTransform: 'uppercase', letterSpacing: '0.5px' }}
   >
     {label}
@@ -192,11 +193,11 @@ const FieldLabel: React.FC<{ label: string }> = ({ label }) => (
 // Add a file size limit and accepted file types constants (matching CreateTicketPage)
 const FILE_SIZE_LIMIT = 10 * 1024 * 1024; // 10MB
 const ACCEPTED_FILE_TYPES = [
-  'image/jpeg', 
-  'image/png', 
-  'image/gif', 
-  'application/pdf', 
-  'application/msword', 
+  'image/jpeg',
+  'image/png',
+  'image/gif',
+  'application/pdf',
+  'application/msword',
   'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
   'text/plain',
   'application/zip'
@@ -208,14 +209,14 @@ const TicketDetailPage: React.FC = () => {
   const theme = useTheme();
   const muiTheme = useMuiTheme();
   const { user } = useAuth();
-  
+
   // Get ticket data from context
-  const { 
-    currentTicket, 
-    isLoading, 
-    error, 
-    fetchTicketById, 
-    updateTicket, 
+  const {
+    currentTicket,
+    isLoading,
+    error,
+    fetchTicketById,
+    updateTicket,
     addComment,
     statuses,
     priorities,
@@ -226,9 +227,9 @@ const TicketDetailPage: React.FC = () => {
     refreshCounter,
     setRefreshCounter
   } = useTickets();
-  
+
   const { addNotification } = useNotification();
-  
+
   // Local state
   const [tabValue, setTabValue] = useState(0);
   const [commentText, setCommentText] = useState('');
@@ -247,19 +248,19 @@ const TicketDetailPage: React.FC = () => {
   const [commentError, setCommentError] = useState<string | null>(null);
   const [agents, setAgents] = useState<any[]>([]);
   const [loadingAgents, setLoadingAgents] = useState(false);
-  
+
   // State for file uploads
   const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
   const [isUploading, setIsUploading] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [uploadSuccess, setUploadSuccess] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  
+
   // Fetch activity history when component mounts
   const [ticketHistory, setTicketHistory] = useState<any[]>([]);
   const [isHistoryLoading, setIsHistoryLoading] = useState(false);
   const [historyError, setHistoryError] = useState<string | null>(null);
-  
+
   // Determine user timezone with fallback
   const userTimeZone = user?.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
 
@@ -268,19 +269,19 @@ const TicketDetailPage: React.FC = () => {
   const isAgent = user?.role === 'agent';
   const isCustomer = user?.role === 'customer';
   const isAgentOrAdmin = isAdmin || isAgent;
-  
+
   // Add a state variable for department management
   const [departmentMenuAnchor, setDepartmentMenuAnchor] = useState<null | HTMLElement>(null);
   const [departments, setDepartments] = useState<any[]>([]);
   const [loadingDepartments, setLoadingDepartments] = useState(false);
   const [departmentUpdateLoading, setDepartmentUpdateLoading] = useState(false);
-  
+
   // Add function to navigate to SLA settings tab in SettingsPage
   const navigateToSLASettings = useCallback(() => {
     // Navigate to the settings page with the SLA tab selected (index 3)
     navigate('/settings', { state: { initialTab: 3 } });
   }, [navigate]);
-  
+
   // Fetch ticket data when component mounts or ID changes
   useEffect(() => {
     if (id) {
@@ -294,22 +295,22 @@ const TicketDetailPage: React.FC = () => {
       if (!isAgentOrAdmin) {
         return; // Early return if not agent or admin
       }
-      
+
       setLoadingAgents(true);
       try {
         const agentsList = await getAgentsList();
-        
+
         // Log each agent's ID to diagnose the issue
         if (agentsList && agentsList.length > 0) {
-          console.log('Example agent object structure:', agentsList[0]);
+          logger.debug('Example agent object structure:', agentsList[0]);
         }
-        
+
         // Force agent IDs to be numbers - this is crucial for the backend
         const processedAgents = agentsList.map(agent => ({
           ...agent,
           id: typeof agent.id === 'string' ? Number(agent.id.replace(/\D/g, '')) || 1001 : agent.id
         }));
-        
+
         setAgents(processedAgents || []); // Save the processed agent list
       } catch (error) {
         // Set empty array on error to avoid UI issues
@@ -330,7 +331,7 @@ const TicketDetailPage: React.FC = () => {
   useEffect(() => {
     if (currentTicket) {
       const events: TimelineEvent[] = [];
-      
+
       // Created event
       events.push({
         id: `create-${currentTicket.id}`,
@@ -344,7 +345,7 @@ const TicketDetailPage: React.FC = () => {
         },
         details: {}
       });
-      
+
       // Comments as events
       if (Array.isArray(currentTicket.comments)) {
         currentTicket.comments.forEach(comment => {
@@ -352,7 +353,7 @@ const TicketDetailPage: React.FC = () => {
           if (user?.role === 'customer' && comment.isInternal) {
             return;
           }
-          
+
           // Ensure comment has valid user data
           const commentUser = comment.user || {
             id: '0',
@@ -360,7 +361,7 @@ const TicketDetailPage: React.FC = () => {
             lastName: '',
             avatar: null
           };
-          
+
           events.push({
             id: String(comment.id),
             type: 'comment',
@@ -378,7 +379,7 @@ const TicketDetailPage: React.FC = () => {
           });
         });
       }
-      
+
       // Attachments as events
       if (Array.isArray(currentTicket.attachments)) {
         currentTicket.attachments.forEach(attachment => {
@@ -398,7 +399,7 @@ const TicketDetailPage: React.FC = () => {
           });
         });
       }
-      
+
       // Status changes, priority changes, assignment changes
       // Sort events by timestamp
       setTimelineEvents(events.sort((a, b) => {
@@ -417,10 +418,10 @@ const TicketDetailPage: React.FC = () => {
 
   const handleSubmitComment = async () => {
     if (!commentText.trim()) return;
-    
+
     setIsSubmittingComment(true);
     setCommentError(null);
-    
+
     try {
       if (id) {
         // Direct API call instead of using the context
@@ -428,14 +429,14 @@ const TicketDetailPage: React.FC = () => {
           content: commentText,
           isInternal: isInternalComment
         });
-        
+
         // Clear the input and reset the internal flag
         setCommentText('');
         setIsInternalComment(false);
-        
+
         // Show success notification
         addNotification('Comment added successfully', 'success');
-        
+
         // Refresh ticket data to get the updated comments
         await fetchTicketById(id);
       }
@@ -453,42 +454,42 @@ const TicketDetailPage: React.FC = () => {
       setStatusMenuAnchor(null);
       return;
     }
-    
+
     setStatusUpdateLoading(true);
     setActionError(null);
-    
+
     try {
       if (id) {
         // Get current status and the new status details
         const currentStatusName = currentTicket?.status?.name?.toLowerCase() || '';
         const newStatus = statuses.find(s => s.id === newStatusId);
         const newStatusName = newStatus?.name?.toLowerCase() || '';
-        
+
         // Update the ticket status
         await updateTicket(id, { statusId: newStatusId });
-        
+
         // Handle SLA pause/resume based on status change
         let slaUpdateSuccess = false;
         try {
           // If new status is "pending", pause the SLA
           if (newStatusName === 'pending') {
-            console.log('Status changed to pending, pausing SLA...');
+            logger.debug('Status changed to pending, pausing SLA...');
             const pauseResult = await slaService.pauseSLA(id);
             slaUpdateSuccess = pauseResult;
-            console.log('SLA pause result:', pauseResult);
-          } 
+            logger.debug('SLA pause result:', pauseResult);
+          }
           // If status is changing from "pending" to something else, resume the SLA
           else if (currentStatusName === 'pending' && newStatusName !== 'pending') {
-            console.log('Status changed from pending, resuming SLA...');
+            logger.debug('Status changed from pending, resuming SLA...');
             const resumeResult = await slaService.resumeSLA(id);
             slaUpdateSuccess = resumeResult;
-            console.log('SLA resume result:', resumeResult);
+            logger.debug('SLA resume result:', resumeResult);
           }
         } catch (slaError) {
           console.error('Failed to update SLA pause/resume status:', slaError);
           // Don't show SLA errors to user as the main status update was successful
         }
-        
+
         // Show appropriate notification
         if (slaUpdateSuccess) {
           if (newStatusName === 'pending') {
@@ -505,7 +506,7 @@ const TicketDetailPage: React.FC = () => {
             title: 'Status Updated'
           });
         }
-        
+
         // Refresh the ticket to get updated SLA information
         await fetchTicketById(id);
       }
@@ -521,34 +522,34 @@ const TicketDetailPage: React.FC = () => {
   const handlePriorityChange = async (newPriorityId: string) => {
     setPriorityUpdateLoading(true);
     setActionError(null);
-    
+
     try {
       if (id) {
         // Update the ticket priority
         await updateTicket(id, { priorityId: newPriorityId });
-        
+
         // Attempt to update the SLA policy based on the new priority
         let slaUpdateSuccess = false;
         let slaUpdateError = null;
-        
+
         try {
           // First try the auto-assign SLA endpoint
-          console.log('Updating SLA policy based on new priority...');
+          logger.debug('Updating SLA policy based on new priority...');
           const response = await apiClient.post(`/sla/auto-assign/${id}`);
-          
+
           if (response && response.data) {
-            console.log('New SLA policy assigned based on priority change:', response.data);
+            logger.debug('New SLA policy assigned based on priority change:', response.data);
             slaUpdateSuccess = true;
           }
         } catch (slaError: any) {
           slaUpdateError = slaError;
           console.warn('Failed to auto-assign SLA policy after priority change, will try update-sla endpoint:', slaError);
-          
+
           // If auto-assign fails, try our dedicated update-sla endpoint as a fallback
           try {
             const slaResponse = await apiClient.post(`/tickets/${id}/update-sla`);
             if (slaResponse && slaResponse.data) {
-              console.log('SLA updated using fallback endpoint:', slaResponse.data);
+              logger.debug('SLA updated using fallback endpoint:', slaResponse.data);
               slaUpdateSuccess = true;
               slaUpdateError = null;
             }
@@ -558,11 +559,11 @@ const TicketDetailPage: React.FC = () => {
             // Still don't show this error to the user, as the priority update was successful
           }
         }
-        
+
         // Get the new priority name for the notification
         const priority = priorities.find(p => p.id === newPriorityId);
         const priorityName = priority ? priority.name : 'new priority';
-        
+
         // Show appropriate notification based on SLA update status
         if (slaUpdateSuccess) {
           addNotification(`Ticket priority changed to ${priorityName} and SLA policy has been updated.`, 'success', {
@@ -572,16 +573,16 @@ const TicketDetailPage: React.FC = () => {
           addNotification(`Ticket priority has been updated to ${priorityName}.`, 'success', {
             title: 'Priority Updated'
           });
-          
+
           // Log SLA update failure for debugging
           if (slaUpdateError) {
             console.error('SLA update failed with error:', slaUpdateError);
           }
         }
-        
+
         // Increment the refreshCounter to trigger SLA component refresh
         setRefreshCounter(prev => prev + 1);
-        
+
         // Refresh the ticket to get updated SLA information
         await fetchTicketById(id);
       }
@@ -597,7 +598,7 @@ const TicketDetailPage: React.FC = () => {
   // Add a function to fetch departments
   const fetchDepartments = useCallback(async () => {
     if (!isAgentOrAdmin) return;
-    
+
     setLoadingDepartments(true);
     try {
       // Use the correct endpoint for departments
@@ -615,16 +616,16 @@ const TicketDetailPage: React.FC = () => {
   const handleDepartmentChange = async (departmentId: string | number) => {
     setDepartmentUpdateLoading(true);
     setActionError(null);
-    
+
     try {
       if (id) {
         // Update the ticket department
         await updateTicket(id, { departmentId });
-        
+
         addNotification('Department has been updated successfully.', 'success', {
           title: 'Department Updated'
         });
-        
+
         // Refresh ticket data
         await fetchTicketById(id);
       }
@@ -640,12 +641,12 @@ const TicketDetailPage: React.FC = () => {
   const handleAssignTicket = async (agentId: string | number) => {
     setAssignUpdateLoading(true);
     setActionError(null);
-    
+
     try {
       if (id) {
         // Ensure we're sending a number to the backend
         let numericAgentId: number;
-        
+
         if (typeof agentId === 'number') {
           numericAgentId = agentId;
         } else {
@@ -653,97 +654,97 @@ const TicketDetailPage: React.FC = () => {
           const numericPart = agentId.replace(/\D/g, '');
           numericAgentId = numericPart ? parseInt(numericPart, 10) : 1001;
         }
-        
+
         // Find the assigned agent from our local list
         const assignedAgent = agents.find(a => a.id === agentId || a.id === numericAgentId);
-        console.log('Selected agent:', assignedAgent);
-        
+        logger.debug('Selected agent:', assignedAgent);
+
         // Find the "Open" status ID
         const openStatus = statuses.find(status => status.name.toLowerCase() === 'open');
         const openStatusId = openStatus ? openStatus.id : null;
-        
+
         // Initialize the update data with the assignee ID
         const updateData: any = { assigneeId: numericAgentId };
-        
+
         // Add status update if the current status is "new"
         if (openStatusId && currentTicket?.status?.name.toLowerCase() === 'new') {
           updateData.statusId = openStatusId;
         }
-        
+
         // Try to find the department ID from various sources
         let departmentId = null;
-        
+
         // First, try direct API call to get user details including department
         try {
           const userResponse = await apiClient.get(`/users/${numericAgentId}`);
-          console.log('User response:', userResponse);
-          
+          logger.debug('User response:', userResponse);
+
           // Check if agent has a department
           if (userResponse) {
             // Log all possible department-related fields to help with debugging
-            console.log('Department fields in user response:',
+            logger.debug('Department fields in user response:',
               userResponse.department,
               userResponse.departmentId,
               userResponse.department_id
             );
-            
+
             if (userResponse.department && userResponse.department.id) {
               departmentId = userResponse.department.id;
-              console.log('Found department.id in user response:', departmentId);
+              logger.debug('Found department.id in user response:', departmentId);
             } else if (userResponse.departmentId) {
               departmentId = userResponse.departmentId;
-              console.log('Found departmentId in user response:', departmentId);
+              logger.debug('Found departmentId in user response:', departmentId);
             } else if (userResponse.department_id) {
               departmentId = userResponse.department_id;
-              console.log('Found department_id in user response:', departmentId);
+              logger.debug('Found department_id in user response:', departmentId);
             }
           }
         } catch (error) {
           console.error('Error fetching user details:', error);
         }
-        
+
         // If we still don't have a department ID, try from our agent object
         if (!departmentId && assignedAgent) {
-          console.log('Checking department from agent object:', 
+          logger.debug('Checking department from agent object:',
             assignedAgent.department,
             assignedAgent.departmentId,
             assignedAgent.department_id
           );
-          
+
           if (assignedAgent.department && assignedAgent.department.id) {
             departmentId = assignedAgent.department.id;
-            console.log('Found department.id in agent object:', departmentId);
+            logger.debug('Found department.id in agent object:', departmentId);
           } else if (assignedAgent.departmentId) {
             departmentId = assignedAgent.departmentId;
-            console.log('Found departmentId in agent object:', departmentId);
+            logger.debug('Found departmentId in agent object:', departmentId);
           } else if (assignedAgent.department_id) {
             departmentId = assignedAgent.department_id;
-            console.log('Found department_id in agent object:', departmentId);
+            logger.debug('Found department_id in agent object:', departmentId);
           }
         }
-        
+
         // If we found a department ID, include it in the update data
         if (departmentId) {
           updateData.departmentId = departmentId;
-          console.log('Setting ticket department ID to:', departmentId);
+          logger.debug('Setting ticket department ID to:', departmentId);
         } else {
           console.warn('Could not find department ID for agent:', numericAgentId);
         }
-        
-        console.log('Updating ticket with data:', updateData);
-        
+
+        logger.debug('Updating ticket with data:', updateData);
+
         // Update the ticket with the data
         const updatedTicket = await updateTicket(id, updateData);
-        
+
         // Show success notification with agent name if available
-        const agentName = assignedAgent 
-          ? `${assignedAgent.firstName} ${assignedAgent.lastName}` 
+        const agentName = assignedAgent
+          ? `${assignedAgent.firstName} ${assignedAgent.lastName}`
           : 'selected agent';
-        
+
         addNotification(`Ticket has been assigned to ${agentName}.`, 'success', {
           title: 'Ticket Assigned'
         });
-        
+
         // Refresh ticket data to ensure we have the latest information
         await fetchTicketById(id);
       }
@@ -771,7 +772,7 @@ const TicketDetailPage: React.FC = () => {
 
   const formatFileSize = (bytes: number | undefined | null): string => {
     if (bytes === undefined || bytes === null) return 'Unknown';
-    
+
     const sizes = ['Bytes', 'KB', 'MB', 'GB', 'TB'];
     if (bytes === 0) return '0 Byte';
     const i = Math.floor(Math.log(bytes) / Math.log(1024));
@@ -782,21 +783,21 @@ const TicketDetailPage: React.FC = () => {
   const handleFileSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
     if (event.target.files) {
       const newFiles = Array.from(event.target.files);
-      
+
       // Filter out files that exceed the size limit or have invalid types
       const validFiles = newFiles.filter(file => {
         const isValidSize = file.size <= FILE_SIZE_LIMIT;
         const isValidType = ACCEPTED_FILE_TYPES.includes(file.type);
-        
+
         if (!isValidSize) {
           setUploadError(`File ${file.name} exceeds the maximum size limit of 10MB`);
         } else if (!isValidType) {
           setUploadError(`File ${file.name} has an unsupported file type`);
         }
-        
+
         return isValidSize && isValidType;
       });
-      
+
       setSelectedFiles(prevFiles => [...prevFiles, ...validFiles]);
     }
   };
@@ -807,31 +808,31 @@ const TicketDetailPage: React.FC = () => {
 
   const handleUploadAttachments = async () => {
     if (!id || selectedFiles.length === 0) return;
-    
+
     setIsUploading(true);
     setUploadError(null);
     setUploadSuccess(null);
-    
+
     try {
       // Create FormData for the file upload
       const formData = new FormData();
       selectedFiles.forEach((file) => {
         formData.append('attachments', file, file.name);
       });
-      
+
       // Add the ticket ID
       formData.append('ticketId', id);
-      
+
       // Call the addAttachment function from context
       await addAttachment(id, formData);
-      
+
       // Clear selected files and show success message
       setSelectedFiles([]);
       setUploadSuccess('Attachments uploaded successfully!');
-      
+
       // Refresh ticket data to show new attachments
       await fetchTicketById(id);
-      
+
       // Reset file input
       if (fileInputRef.current) {
         fileInputRef.current.value = '';
@@ -848,10 +849,10 @@ const TicketDetailPage: React.FC = () => {
   useEffect(() => {
     const fetchTicketHistory = async () => {
       if (!id) return;
-      
+
       setIsHistoryLoading(true);
       setHistoryError(null);
-      
+
       try {
         const history = await getTicketHistory(id);
         setTicketHistory(history || []);
@@ -873,18 +874,18 @@ const TicketDetailPage: React.FC = () => {
     try {
       // Call the API to get the download URL
       const response = await apiClient.get(`/tickets/attachments/download/${attachmentId}`);
-      
+
       if (response.downloadUrl) {
         // Create a temporary link and simulate a click to download
         const link = document.createElement('a');
         link.href = response.downloadUrl;
         link.target = '_blank';
-        
+
         // Set download attribute with filename if available
         if (response.filename) {
           link.download = response.filename;
         }
-        
+
         // Append to body, click, and remove
         document.body.appendChild(link);
         link.click();
@@ -931,15 +932,15 @@ const TicketDetailPage: React.FC = () => {
   }
 
   // Filter statuses to exclude "new" and "closed"
-  const availableStatuses = statuses.filter(status => 
-    status.name.toLowerCase() !== 'new' && 
+  const availableStatuses = statuses.filter(status =>
+    status.name.toLowerCase() !== 'new' &&
     status.name.toLowerCase() !== 'closed'
   );
 
   return (
-    <Container 
+    <Container
       maxWidth={false}
-      sx={{ 
+      sx={{
         py: { xs: 2, md: 3 },
         position: 'relative',
         width: '100%',
@@ -951,7 +952,7 @@ const TicketDetailPage: React.FC = () => {
           right: 0,
           width: { xs: '100%', lg: '25%' },
           height: { xs: '40%', lg: '100%' },
-          background: muiTheme.palette.mode === 'dark' 
+          background: muiTheme.palette.mode === 'dark'
             ? `radial-gradient(circle at 100% 0%, ${alpha(muiTheme.palette.primary.dark, 0.15)} 0%, transparent 70%)`
             : `radial-gradient(circle at 100% 0%, ${alpha(muiTheme.palette.primary.light, 0.15)} 0%, transparent 70%)`,
           zIndex: -1,
@@ -965,7 +966,7 @@ const TicketDetailPage: React.FC = () => {
           left: 0,
           width: { xs: '100%', lg: '25%' },
           height: { xs: '30%', lg: '60%' },
-          background: muiTheme.palette.mode === 'dark' 
+          background: muiTheme.palette.mode === 'dark'
             ? `radial-gradient(circle at 0% 100%, ${alpha(muiTheme.palette.secondary.dark, 0.15)} 0%, transparent 70%)`
             : `radial-gradient(circle at 0% 100%, ${alpha(muiTheme.palette.secondary.light, 0.15)} 0%, transparent 70%)`,
           zIndex: -1,
@@ -974,7 +975,7 @@ const TicketDetailPage: React.FC = () => {
         }
       }}
     >
-      <Box sx={{ 
+      <Box sx={{
         animation: 'fadeIn 1s ease forwards',
         opacity: 0,
         '@keyframes fadeIn': {
@@ -984,32 +985,32 @@ const TicketDetailPage: React.FC = () => {
       }}>
         <Box mt={0}>
           {actionError && (
-            <SystemAlert 
-              type="error" 
-              message={actionError} 
-              sx={{ mb: 2 }} 
+            <SystemAlert
+              type="error"
+              message={actionError}
+              sx={{ mb: 2 }}
             />
           )}
 
           {commentError && (
-            <SystemAlert 
-              type="error" 
-              message={commentError} 
-              sx={{ mb: 2 }} 
+            <SystemAlert
+              type="error"
+              message={commentError}
+              sx={{ mb: 2 }}
             />
           )}
-          
+
           <Grid container spacing={3}>
             {/* Ticket main section */}
             <Grid item xs={12} md={8}>
-              <Paper 
-                elevation={0} 
+              <Paper
+                elevation={0}
                 sx={{
                   ...cardStyles,
                   overflow: 'hidden',
-                  p: 3, 
+                  p: 3,
                   mb: 3,
-                  ...gradientAccent(muiTheme) 
+                  ...gradientAccent(muiTheme)
                 }}
               >
                 {/* Enterprise-level header with clear labels */}
@@ -1075,41 +1076,41 @@ const TicketDetailPage: React.FC = () => {
                     </Grid>
                   </Grid>
                 </Box>
-                
+
                 <FieldLabel label="Subject" />
                 <Typography variant="h4" component="h1" gutterBottom>
                   {currentTicket.subject}
                 </Typography>
-                
+
                 <Divider sx={{ my: 3 }} />
-                
+
                 {/* Description section */}
                 <Box sx={{ mb: 3 }}>
                   <FieldLabel label="Description" />
-                  <Typography 
-                    variant="body1" 
-                    paragraph 
-                    sx={{ 
-                      whiteSpace: 'pre-line', 
-                      p: 2, 
-                      border: `1px solid ${alpha(muiTheme.palette.divider, 0.2)}`, 
-                      borderRadius: 1, 
-                      bgcolor: alpha(muiTheme.palette.background.default, 0.5) 
+                  <Typography
+                    variant="body1"
+                    paragraph
+                    sx={{
+                      whiteSpace: 'pre-line',
+                      p: 2,
+                      border: `1px solid ${alpha(muiTheme.palette.divider, 0.2)}`,
+                      borderRadius: 1,
+                      bgcolor: alpha(muiTheme.palette.background.default, 0.5)
                     }}
                   >
                     {currentTicket.description}
                   </Typography>
                 </Box>
-                
+
                 {/* Tags section with better type handling */}
                 {currentTicket.tags && Array.isArray(currentTicket.tags) && currentTicket.tags.length > 0 && (
-                  <Box mt={2}> 
+                  <Box mt={2}>
                     <FieldLabel label="Tags" />
                     <Box mt={1}>
                       {currentTicket.tags.map((tagItem, index) => {
                         // Extract tag text based on type
                         let tagText = '';
-                        
+
                         if (typeof tagItem === 'string') {
                           tagText = tagItem;
                         } else if (tagItem && typeof tagItem === 'object') {
@@ -1117,7 +1118,7 @@ const TicketDetailPage: React.FC = () => {
                           const tagObj = tagItem as any;
                           tagText = tagObj.name || tagObj.value || tagObj.tag || String(tagItem);
                         }
-                        
+
                         // Only render chip if we have tag text
                         if (tagText) {
                           return (
@@ -1127,8 +1128,8 @@ const TicketDetailPage: React.FC = () => {
                               size="small"
                               variant="outlined"
                               color="primary"
-                              sx={{ 
-                                mr: 0.5, 
+                              sx={{
+                                mr: 0.5,
                                 mb: 0.5,
                                 borderRadius: '16px',
                                 '&:hover': {
@@ -1144,14 +1145,14 @@ const TicketDetailPage: React.FC = () => {
                   </Box>
                 )}
               </Paper>
-              
+
               {/* Tabs and content */}
-              <Paper 
+              <Paper
                 elevation={0}
-                sx={{ 
+                sx={{
                   ...cardStyles,
                   overflow: 'hidden',
-                  ...gradientAccent(muiTheme) 
+                  ...gradientAccent(muiTheme)
                 }}
               >
                 <Box sx={{ borderBottom: 1, borderColor: 'divider' }}>
@@ -1159,7 +1160,7 @@ const TicketDetailPage: React.FC = () => {
                     value={tabValue}
                     onChange={handleTabChange}
                     aria-label="ticket details tabs"
-                    sx={{ px: 2 }} 
+                    sx={{ px: 2 }}
                   >
                     <Tab
                       icon={<CommentIcon fontSize="small" />}
@@ -1181,12 +1182,12 @@ const TicketDetailPage: React.FC = () => {
                     )}
                   </Tabs>
                 </Box>
-                
+
                 <TabPanel value={tabValue} index={0}>
-                  <Box sx={{ p: 3 }}> 
+                  <Box sx={{ p: 3 }}>
                     {/* Add Comment Section Header */}
                     <FieldLabel label="Add Comment" />
-                    
+
                     {/* Comment input Box */}
                     <Box mb={4}>
                       <TextField
@@ -1223,7 +1224,7 @@ const TicketDetailPage: React.FC = () => {
                         </Button>
                       </Box>
                     </Box>
-                    
+
                     {/* Comments from timeline */}
                     <FieldLabel label="Comments" />
                     {timelineEvents.filter(event => event.type === 'comment').length === 0 ? (
@@ -1231,18 +1232,18 @@ const TicketDetailPage: React.FC = () => {
                         No comments yet
                       </Typography>
                     ) : (
-                      <TicketTimeline 
-                        events={timelineEvents.filter(event => event.type === 'comment')} 
+                      <TicketTimeline
+                        events={timelineEvents.filter(event => event.type === 'comment')}
                       />
                     )}
                   </Box>
                 </TabPanel>
-                
+
                 <TabPanel value={tabValue} index={1}>
-                  <Box sx={{ p: 3 }}> 
+                  <Box sx={{ p: 3 }}>
                     <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
                       <FieldLabel label="Attachments" />
-                      
+
                       <Button
                         variant="outlined"
                         startIcon={<CloudUploadIcon />}
@@ -1267,26 +1268,26 @@ const TicketDetailPage: React.FC = () => {
                         {uploadSuccess}
                       </Alert>
                     )}
-                    
+
                     {uploadError && (
                       <Alert severity="error" sx={{ mb: 2 }} onClose={() => setUploadError(null)}>
                         {uploadError}
                       </Alert>
                     )}
-                    
+
                     {/* Selected files section */}
                     {selectedFiles.length > 0 && (
                       <Paper variant="outlined" sx={{ p: 2, mb: 3 }}>
                         <Typography variant="subtitle2" gutterBottom>
                           Selected Files ({selectedFiles.length})
                         </Typography>
-                        
+
                         <Grid container spacing={1}>
                           {selectedFiles.map((file, index) => (
                             <Grid item xs={12} key={`selected-${index}`}>
-                              <Box 
-                                sx={{ 
-                                  display: 'flex', 
+                              <Box
+                                sx={{
+                                  display: 'flex',
                                   alignItems: 'center',
                                   p: 1,
                                   borderRadius: 1,
@@ -1302,8 +1303,8 @@ const TicketDetailPage: React.FC = () => {
                                     {formatFileSize(file.size)}
                                   </Typography>
                                 </Box>
-                                <IconButton 
-                                  size="small" 
+                                <IconButton
+                                  size="small"
                                   onClick={() => handleRemoveFile(index)}
                                   sx={{ color: theme.palette.error.main }}
                                 >
@@ -1313,7 +1314,7 @@ const TicketDetailPage: React.FC = () => {
                             </Grid>
                           ))}
                         </Grid>
-                        
+
                         <Box sx={{ mt: 2, display: 'flex', justifyContent: 'flex-end' }}>
                           <Button
                             variant="contained"
@@ -1336,11 +1337,11 @@ const TicketDetailPage: React.FC = () => {
                       <Grid container spacing={2} sx={{ mt: 1 }}>
                         {currentTicket.attachments.map((attachment) => (
                           <Grid item xs={12} sm={6} md={4} key={attachment.id}>
-                            <Card 
-                              elevation={0} 
-                              variant="outlined" 
-                              sx={{ 
-                                height: '100%', 
+                            <Card
+                              elevation={0}
+                              variant="outlined"
+                              sx={{
+                                height: '100%',
                                 transition: 'box-shadow 0.2s ease-in-out, transform 0.2s ease-in-out',
                                 '&:hover': {
                                   boxShadow: muiTheme.shadows[4],
@@ -1350,11 +1351,11 @@ const TicketDetailPage: React.FC = () => {
                             >
                               <CardContent sx={{ display: 'flex', alignItems: 'center', p: 1.5 }}>
                                 <Box
-                                  sx={{ 
-                                    display: 'flex', 
-                                    alignItems: 'center', 
+                                  sx={{
+                                    display: 'flex',
+                                    alignItems: 'center',
                                     width: '100%',
-                                    p: 0.5, 
+                                    p: 0.5,
                                     borderRadius: 1,
                                     cursor: 'pointer',
                                   }}
@@ -1372,8 +1373,8 @@ const TicketDetailPage: React.FC = () => {
                                     </Typography>
                                   </Box>
                                   <Tooltip title="Download">
-                                    <IconButton 
-                                      size="small" 
+                                    <IconButton
+                                      size="small"
                                       color="primary"
                                       onClick={(e) => {
                                         e.stopPropagation(); // Prevent the parent click
@@ -1392,11 +1393,11 @@ const TicketDetailPage: React.FC = () => {
                     )}
                   </Box>
                 </TabPanel>
-                
+
                 <TabPanel value={tabValue} index={2}>
-                  <Box sx={{ p: 3 }}> 
+                  <Box sx={{ p: 3 }}>
                     <FieldLabel label="Activity Log" />
-                    
+
                     {isHistoryLoading ? (
                       <Box display="flex" justifyContent="center" py={4}>
                         <CircularProgress size={30} />
@@ -1410,42 +1411,42 @@ const TicketDetailPage: React.FC = () => {
                         No activity recorded yet
                       </Typography>
                     ) : (
-                      <TicketTimeline 
-                        events={[...timelineEvents, 
-                          ...ticketHistory.map(history => ({
-                            id: `history-${history.id}`,
-                            type: history.field_name === 'status_id' ? 'status_change' : 
-                                 history.field_name === 'priority_id' ? 'priority_change' :
-                                 history.field_name === 'assignee_id' ? 'assignment' : 'edited',
-                            timestamp: history.created_at,
-                            user: history.user || {
-                              id: 'system',
-                              firstName: 'System',
-                              lastName: '',
-                              avatar: undefined
-                            },
-                            details: {
-                              field: history.field_name,
-                              from: history.old_value,
-                              to: history.new_value,
-                              oldPriority: history.field_name === 'priority_id' ? { name: history.old_value } : undefined,
-                              newPriority: history.field_name === 'priority_id' ? { name: history.new_value } : undefined,
-                              fromStatus: history.field_name === 'status_id' ? { name: history.old_value } : undefined,
-                              toStatus: history.field_name === 'status_id' ? { name: history.new_value } : undefined,
-                              fromColor: undefined, 
-                              toColor: undefined,
-                            }
-                          })) as TimelineEvent[]
+                      <TicketTimeline
+                        events={[...timelineEvents,
+                        ...ticketHistory.map(history => ({
+                          id: `history-${history.id}`,
+                          type: history.field_name === 'status_id' ? 'status_change' :
+                            history.field_name === 'priority_id' ? 'priority_change' :
+                              history.field_name === 'assignee_id' ? 'assignment' : 'edited',
+                          timestamp: history.created_at,
+                          user: history.user || {
+                            id: 'system',
+                            firstName: 'System',
+                            lastName: '',
+                            avatar: undefined
+                          },
+                          details: {
+                            field: history.field_name,
+                            from: history.old_value,
+                            to: history.new_value,
+                            oldPriority: history.field_name === 'priority_id' ? { name: history.old_value } : undefined,
+                            newPriority: history.field_name === 'priority_id' ? { name: history.new_value } : undefined,
+                            fromStatus: history.field_name === 'status_id' ? { name: history.old_value } : undefined,
+                            toStatus: history.field_name === 'status_id' ? { name: history.new_value } : undefined,
+                            fromColor: undefined,
+                            toColor: undefined,
+                          }
+                        })) as TimelineEvent[]
                         ].sort((a, b) => {
                           return new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime();
-                        })} 
+                        })}
                       />
                     )}
                   </Box>
                 </TabPanel>
               </Paper>
             </Grid>
-            
+
             {/* Ticket sidebar */}
             <Grid item xs={12} md={4}>
               {/* Right-side back button aligned with the main content on left */}
@@ -1457,35 +1458,35 @@ const TicketDetailPage: React.FC = () => {
               >
                 Back to Tickets
               </Button>
-              
+
               {/* Ticket Properties container now moved below the button */}
-              <Paper 
-                elevation={0} 
-                sx={{ 
+              <Paper
+                elevation={0}
+                sx={{
                   ...cardStyles,
                   overflow: 'hidden',
-                  p: 3, 
+                  p: 3,
                   mb: 3,
-                  ...gradientAccent(muiTheme) 
+                  ...gradientAccent(muiTheme)
                 }}
               >
                 <Typography variant="h6" gutterBottom sx={{ fontWeight: 600, mb: 2 }}>
                   Ticket Properties
                 </Typography>
-                
+
                 <Stack spacing={2.5}>
                   {/* Only show SLA information to agents and admins */}
                   {isAgentOrAdmin && (
                     <Box>
                       <FieldLabel label="SLA Status" />
                       <Box sx={{ mt: 1, display: 'flex', flexDirection: 'column' }}>
-                        <SLABadge 
+                        <SLABadge
                           ticketId={Number(id)}
                           refreshTrigger={refreshCounter}
                           showDetails={true}
                           ticketPriorityId={currentTicket?.priority?.id}
                         />
-                        
+
                         {/* Make the SLA management button visible only to admins */}
                         {isAdmin && (
                           <Button
@@ -1501,7 +1502,7 @@ const TicketDetailPage: React.FC = () => {
                       </Box>
                     </Box>
                   )}
-                  
+
                   <Box>
                     <FieldLabel label="Requester" />
                     <UserAvatar
@@ -1509,7 +1510,7 @@ const TicketDetailPage: React.FC = () => {
                       showEmail
                     />
                   </Box>
-                  
+
                   <Box>
                     <FieldLabel label="Assignee" />
                     {currentTicket.assignee ? (
@@ -1524,8 +1525,8 @@ const TicketDetailPage: React.FC = () => {
                               <CircularProgress size={18} sx={{ ml: 1 }} />
                             ) : (
                               <Tooltip title="Reassign Ticket">
-                                <IconButton 
-                                  size="small" 
+                                <IconButton
+                                  size="small"
                                   sx={{ ml: 1 }}
                                   onClick={(e) => setAssignMenuAnchor(e.currentTarget)}
                                 >
@@ -1553,9 +1554,9 @@ const TicketDetailPage: React.FC = () => {
                       </Box>
                     )}
                   </Box>
-                  
+
                   <Divider sx={{ my: 1 }} />
-                  
+
                   {currentTicket?.department && (
                     <Box>
                       <FieldLabel label="Department" />
@@ -1569,8 +1570,8 @@ const TicketDetailPage: React.FC = () => {
                               <CircularProgress size={18} sx={{ ml: 1 }} />
                             ) : (
                               <Tooltip title="Change Department">
-                                <IconButton 
-                                  size="small" 
+                                <IconButton
+                                  size="small"
                                   sx={{ ml: 1 }}
                                   onClick={(e) => setDepartmentMenuAnchor(e.currentTarget)}
                                 >
@@ -1583,7 +1584,7 @@ const TicketDetailPage: React.FC = () => {
                       </Box>
                     </Box>
                   )}
-                  
+
                   {currentTicket?.type && (
                     <Box>
                       <FieldLabel label="Type" />
@@ -1592,16 +1593,16 @@ const TicketDetailPage: React.FC = () => {
                       </Typography>
                     </Box>
                   )}
-                  
+
                   {(currentTicket?.department || currentTicket?.type) ? <Divider sx={{ my: 1 }} /> : null}
-                  
+
                   <Box>
                     <FieldLabel label="Last Updated" />
                     <Typography variant="body1">
                       {formatDate(currentTicket.updatedAt)}
                     </Typography>
                   </Box>
-                  
+
                   {currentTicket.dueDate && (
                     <Box>
                       <FieldLabel label="Due Date" />
@@ -1615,7 +1616,7 @@ const TicketDetailPage: React.FC = () => {
             </Grid>
           </Grid>
         </Box>
-        
+
         {/* Status change menu */}
         <Menu
           anchorEl={statusMenuAnchor}
@@ -1632,7 +1633,7 @@ const TicketDetailPage: React.FC = () => {
             </MenuItem>
           ))}
         </Menu>
-        
+
         {/* Priority change menu */}
         <Menu
           anchorEl={priorityMenuAnchor}
@@ -1649,7 +1650,7 @@ const TicketDetailPage: React.FC = () => {
             </MenuItem>
           ))}
         </Menu>
-        
+
         {/* Agent assignment menu */}
         <Menu
           anchorEl={assignMenuAnchor}
@@ -1670,8 +1671,8 @@ const TicketDetailPage: React.FC = () => {
                 selected={currentTicket?.assignee?.id === agent.id}
               >
                 <Box display="flex" alignItems="center" width="100%">
-                  <Avatar 
-                    src={agent.avatarUrl} 
+                  <Avatar
+                    src={agent.avatarUrl}
                     alt={`${agent.firstName} ${agent.lastName}`}
                     sx={{ width: 24, height: 24, mr: 1 }}
                   >
@@ -1685,7 +1686,7 @@ const TicketDetailPage: React.FC = () => {
             ))
           )}
         </Menu>
-        
+
         {/* Department change menu */}
         <Menu
           anchorEl={departmentMenuAnchor}

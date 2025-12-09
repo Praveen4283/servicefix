@@ -35,7 +35,7 @@ class KnowledgeBaseService {
 
     return savedArticle;
   }
-  
+
   /**
    * Update an existing knowledge base article
    * @param id Article ID
@@ -60,11 +60,11 @@ class KnowledgeBaseService {
     }
 
     Object.assign(article, {
-        ...articleData,
-        authorId: articleData.authorId !== undefined ? (typeof articleData.authorId === 'string' ? parseInt(articleData.authorId, 10) : articleData.authorId) : article.authorId,
-        categoryId: articleData.categoryId !== undefined ? (typeof articleData.categoryId === 'string' ? parseInt(articleData.categoryId, 10) : articleData.categoryId) : article.categoryId,
+      ...articleData,
+      authorId: articleData.authorId !== undefined ? (typeof articleData.authorId === 'string' ? parseInt(articleData.authorId, 10) : articleData.authorId) : article.authorId,
+      categoryId: articleData.categoryId !== undefined ? (typeof articleData.categoryId === 'string' ? parseInt(articleData.categoryId, 10) : articleData.categoryId) : article.categoryId,
     });
-    
+
     article.updatedAt = new Date();
     const savedArticle = await articleRepository.save(article);
 
@@ -72,7 +72,7 @@ class KnowledgeBaseService {
     if (articleData.tags && Array.isArray(articleData.tags)) {
       // First remove all existing tags
       await pool.query('DELETE FROM kb_article_tags WHERE article_id = $1', [article.id]);
-      
+
       // Then add new tags
       for (const tagId of articleData.tags) {
         await pool.query(
@@ -84,7 +84,7 @@ class KnowledgeBaseService {
 
     return savedArticle;
   }
-  
+
   /**
    * Get an article by ID
    * @param id Article ID
@@ -95,10 +95,10 @@ class KnowledgeBaseService {
     if (isNaN(articleIdNumber)) {
       throw new Error('Invalid article ID format');
     }
-    
-    const article = await articleRepository.findOne({ 
-        where: { id: articleIdNumber },
-        relations: ['category', 'author'] // Include relations
+
+    const article = await articleRepository.findOne({
+      where: { id: articleIdNumber },
+      relations: ['category', 'author'] // Include relations
     });
 
     if (article) {
@@ -107,17 +107,17 @@ class KnowledgeBaseService {
         `SELECT t.id, t.name, t.color 
          FROM tags t 
          JOIN kb_article_tags kat ON t.id = kat.tag_id 
-         WHERE kat.article_id = $1`, 
+         WHERE kat.article_id = $1`,
         [article.id]
       );
-      
+
       // Attach tags to the article object
       article.tags = tagsResult.rows;
     }
-    
+
     return article;
   }
-  
+
   /**
    * Search articles based on query and filters with pagination
    * @param options Search options and filters
@@ -136,18 +136,18 @@ class KnowledgeBaseService {
       includeCount?: boolean,
     } = {}
   ): Promise<{ articles: KnowledgeBaseArticle[], total: number }> {
-    const { 
-      page = 1, 
-      limit = 10, 
-      categoryId, 
-      tagId, 
-      status, 
+    const {
+      page = 1,
+      limit = 10,
+      categoryId,
+      tagId,
+      status,
       visibility,
-      organizationId, 
+      organizationId,
       query: searchQuery,
-      includeCount = true 
+      includeCount = true
     } = options;
-    
+
     const skip = (page - 1) * limit;
 
     // Build SQL query with filters
@@ -162,31 +162,31 @@ class KnowledgeBaseService {
       LEFT JOIN users u ON a.author_id = u.id
       LEFT JOIN kb_categories c ON a.category_id = c.id
     `;
-    
+
     const whereConditions: string[] = [];
-    const queryParams: any[] = [];
+    const queryParams: (string | number)[] = [];
     let paramCount = 1;
-    
+
     if (organizationId) {
       whereConditions.push(`a.organization_id = $${paramCount++}`);
       queryParams.push(organizationId);
     }
-    
+
     if (categoryId) {
       whereConditions.push(`a.category_id = $${paramCount++}`);
       queryParams.push(parseInt(categoryId, 10));
     }
-    
+
     if (status) {
       whereConditions.push(`a.status = $${paramCount++}`);
       queryParams.push(status);
     }
-    
+
     if (visibility) {
       whereConditions.push(`a.visibility = $${paramCount++}`);
       queryParams.push(visibility);
     }
-    
+
     if (tagId) {
       // Join with kb_article_tags to filter by tag
       sqlQuery += `
@@ -195,18 +195,18 @@ class KnowledgeBaseService {
       `;
       queryParams.push(parseInt(tagId, 10));
     }
-    
+
     if (searchQuery) {
       const searchCondition = `(a.title ILIKE $${paramCount} OR a.content ILIKE $${paramCount} OR a.excerpt ILIKE $${paramCount})`;
       whereConditions.push(searchCondition);
       queryParams.push(`%${searchQuery}%`);
       paramCount++;
     }
-    
+
     if (whereConditions.length > 0) {
       sqlQuery += ` WHERE ${whereConditions.join(' AND ')}`;
     }
-    
+
     // Add order and limits
     sqlQuery += `
       ORDER BY a.created_at DESC
@@ -217,14 +217,30 @@ class KnowledgeBaseService {
       sqlQuery += `LIMIT $${paramCount++} OFFSET $${paramCount++}`;
       queryParams.push(limit, skip);
     }
-    
+
     // Execute query
     const result = await pool.query(sqlQuery, queryParams);
     const articles = result.rows;
     const total = articles.length > 0 && includeCount ? parseInt(articles[0].full_count, 10) : articles.length;
-    
+
     // Format articles with proper structure
-    const formattedArticles = articles.map((row: any) => {
+    const formattedArticles = articles.map((row: {
+      id: number;
+      title: string;
+      content: string;
+      excerpt: string;
+      slug: string;
+      author_id: number;
+      category_id: number;
+      view_count: number;
+      is_published: boolean;
+      created_at: Date;
+      updated_at: Date;
+      author_first_name?: string;
+      author_last_name?: string;
+      category_name?: string;
+      full_count?: string;
+    }) => {
       const article = new KnowledgeBaseArticle();
       // Map database columns to article properties
       Object.entries(row).forEach(([key, value]) => {
@@ -232,7 +248,7 @@ class KnowledgeBaseService {
           (article as any)[key] = value;
         }
       });
-      
+
       // Add author info
       if (row.author_id) {
         article.author = {
@@ -241,7 +257,7 @@ class KnowledgeBaseService {
           lastName: row.author_last_name
         } as any;
       }
-      
+
       // Add category info if available
       if (row.category_id) {
         article.category = {
@@ -249,10 +265,10 @@ class KnowledgeBaseService {
           name: row.category_name
         } as any;
       }
-      
+
       return article;
     });
-    
+
     // For each article, get its tags
     if (formattedArticles.length > 0) {
       const articleIds = formattedArticles.map((a: KnowledgeBaseArticle) => a.id);
@@ -262,12 +278,12 @@ class KnowledgeBaseService {
         JOIN tags t ON kat.tag_id = t.id
         WHERE kat.article_id = ANY($1)
       `;
-      
+
       const tagsResult = await pool.query(tagsQuery, [articleIds]);
-      
+
       // Group tags by article_id
       const tagsByArticleId: Record<number, any[]> = {};
-      tagsResult.rows.forEach((row: any) => {
+      tagsResult.rows.forEach((row: { article_id: number; id: number; name: string; color: string }) => {
         if (!tagsByArticleId[row.article_id]) {
           tagsByArticleId[row.article_id] = [];
         }
@@ -277,33 +293,18 @@ class KnowledgeBaseService {
           color: row.color
         });
       });
-      
+
       // Assign tags to each article
       formattedArticles.forEach((article: KnowledgeBaseArticle) => {
         article.tags = tagsByArticleId[article.id] || [];
       });
     }
-    
+
     return { articles: formattedArticles, total };
   }
 
-  /**
-   * Legacy method - delegates to getArticles for backward compatibility
-   * @param query Search query
-   * @param filters Additional filters 
-   * @returns Matching articles
-   * @deprecated Use getArticles() instead
-   */
-  async searchArticles(query: string, filters: any): Promise<KnowledgeBaseArticle[]> {
-    const result = await this.getArticles({
-      query,
-      limit: 50,
-      page: 1,
-      ...filters,
-    });
-    return result.articles;
-  }
-  
+
+
   /**
    * Increment article view count
    * @param id Article ID
@@ -314,15 +315,15 @@ class KnowledgeBaseService {
     if (isNaN(articleIdNumber)) {
       throw new Error('Invalid article ID format');
     }
-    
+
     const result = await pool.query(
       'UPDATE kb_articles SET view_count = view_count + 1 WHERE id = $1 RETURNING view_count',
       [articleIdNumber]
     );
-    
+
     return result.rows[0]?.view_count || 0;
   }
-  
+
   /**
    * Record article feedback
    * @param id Article ID
@@ -334,17 +335,17 @@ class KnowledgeBaseService {
     if (isNaN(articleIdNumber)) {
       throw new Error('Invalid article ID format');
     }
-    
+
     const columnToUpdate = isHelpful ? 'helpful_count' : 'not_helpful_count';
-    
+
     const result = await pool.query(
       `UPDATE kb_articles SET ${columnToUpdate} = ${columnToUpdate} + 1 WHERE id = $1 RETURNING id`,
       [articleIdNumber]
     );
-    
+
     return result.rowCount !== null && result.rowCount > 0;
   }
-  
+
   /**
    * Generate URL-friendly slug from title
    * @param title Article title
@@ -379,7 +380,7 @@ class KnowledgeBaseService {
     if (!categoryData.slug && categoryData.name) {
       categoryData.slug = this.generateSlug(categoryData.name);
     }
-    
+
     const newCategory = categoryRepository.create(categoryData);
     return categoryRepository.save(newCategory);
   }

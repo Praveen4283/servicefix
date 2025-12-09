@@ -13,7 +13,7 @@ export const registerVersionedRoutes = (
 ): void => {
   // Register the versioned route
   router.use(`/v1/${moduleName}`, moduleRouter);
-  
+
   // For backward compatibility, also register the non-versioned route
   router.use(`/${moduleName}`, moduleRouter);
 };

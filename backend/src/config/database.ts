@@ -3,6 +3,7 @@ import { DataSource, ObjectLiteral, EntityTarget, QueryRunner } from 'typeorm';
 import * as dotenv from 'dotenv';
 import path from 'path';
 import { logger } from '../utils/logger';
+import { getEnvOptional, getEnvNumber, getEnvOptionalBoolean } from '../utils/envValidator';
 
 // Import Entities Explicitly
 import { User } from '../models/User';
@@ -30,24 +31,27 @@ import { Holiday } from '../models/Holiday';
 dotenv.config();
 
 // Debug: Log the entities path
-const entitiesPath = process.env.NODE_ENV === 'production' 
-  ? path.join(__dirname, '../models/**/*.js') 
+const entitiesPath = process.env.NODE_ENV === 'production'
+  ? path.join(__dirname, '../models/**/*.js')
   : path.join(__dirname, '../models/**/*.ts');
-console.log(`[database.ts] Loading TypeORM entities from: ${entitiesPath}`);
-console.log(`[database.ts] Current NODE_ENV: ${process.env.NODE_ENV}`);
-console.log(`[database.ts] Current __dirname: ${__dirname}`);
+logger.info(`[database.ts] Loading TypeORM entities from: ${entitiesPath}`);
+logger.info(`[database.ts] Current NODE_ENV: ${process.env.NODE_ENV}`);
+logger.info(`[database.ts] Current __dirname: ${__dirname}`);
 
-// Environment variables for pool configuration
-const DB_POOL_MIN = parseInt(process.env.DB_POOL_MIN || '2', 10);
-const DB_POOL_MAX = parseInt(process.env.DB_POOL_MAX || '10', 10);
-const DB_POOL_IDLE_TIMEOUT = parseInt(process.env.DB_POOL_IDLE_TIMEOUT || '30000', 10); // 30 seconds
-const DB_POOL_CONNECTION_TIMEOUT = parseInt(process.env.DB_POOL_CONNECTION_TIMEOUT || '5000', 10); // 5 seconds
+// Environment variables for pool configuration  
+const DB_POOL_MIN = getEnvNumber('DB_POOL_MIN', 5); // Increased from 2
+const DB_POOL_MAX = getEnvNumber('DB_POOL_MAX', 20); // Increased from 10
+const DB_POOL_IDLE_TIMEOUT = getEnvNumber('DB_POOL_IDLE_TIMEOUT', 30000); // 30 seconds
+const DB_POOL_CONNECTION_TIMEOUT = getEnvNumber('DB_POOL_CONNECTION_TIMEOUT', 5000); // 5 seconds
+
 
 // Support for Supabase connection string
 const getDatabaseConfig = () => {
+  const isProduction = process.env.NODE_ENV === 'production';
+
   // Use DATABASE_URL if provided (Supabase format)
   if (process.env.DATABASE_URL) {
-    return { 
+    return {
       url: process.env.DATABASE_URL,
       ssl: process.env.DB_SSL === 'false' ? false : {
         rejectUnauthorized: false
@@ -55,18 +59,33 @@ const getDatabaseConfig = () => {
     };
   }
 
+  // Validate required environment variables in production
+  if (isProduction) {
+    const requiredVars = ['DB_HOST', 'DB_PORT', 'DB_USERNAME', 'DB_PASSWORD', 'DB_DATABASE'];
+    const missingVars = requiredVars.filter(varName => !process.env[varName]);
+
+    if (missingVars.length > 0) {
+      throw new Error(
+        `Missing required database environment variables in production: ${missingVars.join(', ')}. ` +
+        'Please set these variables or use DATABASE_URL for connection string.'
+      );
+    }
+  }
+
   // Otherwise use individual connection parameters
+  // In development, use safe defaults. In production, this won't be reached if vars are missing.
   return {
-    host: process.env.DB_HOST || 'localhost',
-    port: parseInt(process.env.DB_PORT || '5432'),
-    username: process.env.DB_USERNAME || 'postgres',
-    password: process.env.DB_PASSWORD || 'postgres',
-    database: process.env.DB_DATABASE || 'servicedesk',
-    ssl: process.env.DB_SSL === 'true' ? {
+    host: getEnvOptional('DB_HOST', 'localhost'),
+    port: getEnvNumber('DB_PORT', 5432),
+    username: getEnvOptional('DB_USERNAME', 'postgres'),
+    password: getEnvOptional('DB_PASSWORD', 'postgres'),
+    database: getEnvOptional('DB_DATABASE', 'servicedesk'),
+    ssl: getEnvOptionalBoolean('DB_SSL', false) ? {
       rejectUnauthorized: false
     } : false
   };
 };
+
 
 const dbConfig = getDatabaseConfig();
 
@@ -78,7 +97,7 @@ export const AppDataSource = new DataSource({
   logging: process.env.DB_LOGGING === 'true',
   poolSize: DB_POOL_MAX, // Set maximum pool size
   connectTimeoutMS: DB_POOL_CONNECTION_TIMEOUT,
-  entities: [ 
+  entities: [
     // Add your entities dynamically from the models directory
     path.join(__dirname, '../models/**/*.{ts,js}')
   ],
@@ -104,26 +123,26 @@ export interface DatabaseClient {
 // Helper function for basic query execution with retries
 export const query = async (
   text: string,
-  params: any[] = [],
+  params: unknown[] = [],
   retries = 3
 ): Promise<QueryResult> => {
   let lastError: Error | unknown;
-  
+
   for (let i = 0; i < retries; i++) {
     try {
       if (!AppDataSource.isInitialized) {
         throw new Error("Database connection not initialized");
       }
-      
+
       const result = await AppDataSource.query(text, params);
       return { rows: result, rowCount: result.length };
     } catch (error: unknown) {
       lastError = error;
-      
+
       // If this is a connection error, wait a bit before retrying
-      if (error instanceof Error && 
-          ('code' in error) && 
-          (error.code === 'ECONNREFUSED' || error.code === 'ETIMEDOUT')) {
+      if (error instanceof Error &&
+        ('code' in error) &&
+        (error.code === 'ECONNREFUSED' || error.code === 'ETIMEDOUT')) {
         await new Promise(resolve => setTimeout(resolve, 1000 * (i + 1)));
       } else {
         // For other errors, don't retry
@@ -131,18 +150,18 @@ export const query = async (
       }
     }
   }
-  
+
   if (lastError instanceof Error) {
-    logger.error(`Database query error: ${lastError.message}`, { 
-      query: text, 
-      params: JSON.stringify(params) 
+    logger.error(`Database query error: ${lastError.message}`, {
+      query: text,
+      params: JSON.stringify(params)
     });
     throw lastError;
   } else {
     const error = new Error('Unknown database error');
-    logger.error(`Unknown database query error`, { 
-      query: text, 
-      params: JSON.stringify(params) 
+    logger.error(`Unknown database query error`, {
+      query: text,
+      params: JSON.stringify(params)
     });
     throw error;
   }
@@ -160,10 +179,10 @@ export const pool = {
     if (!AppDataSource.isInitialized) {
       await AppDataSource.initialize();
     }
-    
+
     // Create a client object that wraps the AppDataSource for compatibility
     const client: DatabaseClient = {
-      query: async (text: string, params: any[] = []): Promise<QueryResult> => {
+      query: async (text: string, params: unknown[] = []): Promise<QueryResult> => {
         const result = await AppDataSource.query(text, params);
         return { rows: result, rowCount: result.length };
       },
@@ -171,7 +190,7 @@ export const pool = {
         // No-op for TypeORM
       }
     };
-    
+
     return client;
   },
   end: async (): Promise<void> => {
@@ -196,51 +215,67 @@ export const initializeDatabase = async (): Promise<boolean> => {
   while (retries < maxRetries && !connected) {
     try {
       console.log(`Attempting database connection (attempt ${retries + 1}/${maxRetries})...`);
-      
+
       // First initialize TypeORM connection before running any queries
       if (!AppDataSource.isInitialized) {
         await AppDataSource.initialize();
         console.log('TypeORM database connection established successfully');
       }
-      
+
       // Then run a simple query to verify the connection is working
       const result = await AppDataSource.query('SELECT NOW() as current_time');
       console.log(`Connected to database: ${result[0].current_time}`);
-      
+
       // Validate database schema to ensure all required components exist
       try {
         const { validateDatabaseSchema } = require('../utils/schemaValidator');
         const isValid = await validateDatabaseSchema();
-        
+
         if (!isValid) {
-          console.warn('Database schema validation failed. Some features may not work correctly.');
+          const errorMsg = 'Database schema validation failed. Some required components are missing.';
+          console.warn(errorMsg);
           console.warn('Consider running initialize_database.js to restore the complete schema.');
+
+          // In production, schema validation failures should be fatal
+          if (process.env.NODE_ENV === 'production') {
+            console.error('FATAL: Cannot start application with incomplete schema in production.');
+            throw new Error(errorMsg + ' Application cannot start in production with invalid schema.');
+          } else {
+            console.warn('Continuing in development mode despite schema validation failure');
+          }
         } else {
           console.log('Database schema validation successful');
         }
       } catch (error) {
         const errorMessage = error instanceof Error ? error.message : String(error);
+
+        // If this is a validation error in production, fail fatally
+        if (process.env.NODE_ENV === 'production' && errorMessage.includes('schema')) {
+          console.error(`FATAL schema validation error in production: ${errorMessage}`);
+          throw error;
+        }
+
         console.warn(`Schema validation error: ${errorMessage}`);
         console.warn('Continuing with initialization despite schema validation failure');
-        // Don't fail completely if schema validation has an error
+        // Don't fail completely if schema validation has an error in development
       }
-      
+
       connected = true;
       return true;
     } catch (err: any) {
       retries++;
       console.error(`Error connecting to database (attempt ${retries}/${maxRetries}):`, err);
-      
+
       if (retries >= maxRetries) {
         console.error('Maximum connection retries reached. Could not connect to database.');
         throw new Error(`Failed to connect to database after ${maxRetries} attempts: ${err.message}`);
       }
-      
+
       // Wait before retrying
       console.log(`Retrying in 5 seconds...`);
       await new Promise(resolve => setTimeout(resolve, 5000));
     }
   }
-  
+
   return false;
 }; 

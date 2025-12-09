@@ -1,10 +1,10 @@
-import React from 'react';
+
 import { Box, Chip, Typography, Tooltip } from '@mui/material';
-import { 
-  KeyboardDoubleArrowUp, 
-  KeyboardArrowUp, 
-  HorizontalRule, 
-  KeyboardArrowDown 
+import {
+  KeyboardDoubleArrowUp,
+  KeyboardArrowUp,
+  HorizontalRule,
+  KeyboardArrowDown
 } from '@mui/icons-material';
 import { useTickets } from '../../context/TicketContext'; // Import useTickets
 
@@ -54,23 +54,23 @@ const PriorityBadge: React.FC<PriorityBadgeProps> = ({
       return <HorizontalRule fontSize="small" />; // Default/fallback icon
     }
     const priorityName = priority.name.toLowerCase();
-    
+
     if (priorityName.includes('urgent') || priorityName.includes('critical')) {
       return <KeyboardDoubleArrowUp fontSize="small" />;
     }
-    
+
     if (priorityName.includes('high')) {
       return <KeyboardArrowUp fontSize="small" />;
     }
-    
+
     if (priorityName.includes('low')) {
       return <KeyboardArrowDown fontSize="small" />;
     }
-    
+
     if (priorityName.includes('medium') || priorityName.includes('normal')) {
       return <HorizontalRule fontSize="small" />;
     }
-    
+
     // Default icon based on priority ID
     switch (priority.id) {
       case '1':
@@ -91,7 +91,7 @@ const PriorityBadge: React.FC<PriorityBadgeProps> = ({
         return <HorizontalRule fontSize="small" />;
     }
   };
-  
+
   if (!priority) {
     // Render a placeholder or default badge if priority is undefined or not found
     return (
@@ -100,7 +100,7 @@ const PriorityBadge: React.FC<PriorityBadgeProps> = ({
         size={size}
         variant={variant === 'filled' ? 'filled' : 'outlined'}
         icon={<HorizontalRule fontSize="small" />}
-        sx={{ 
+        sx={{
           bgcolor: variant === 'filled' ? 'grey.300' : undefined,
           color: variant === 'filled' ? 'grey.800' : 'text.secondary',
           fontWeight: 500,
@@ -108,7 +108,7 @@ const PriorityBadge: React.FC<PriorityBadgeProps> = ({
       />
     );
   }
-  
+
   const badge = (() => {
     // For minimal variant (just icon and color)
     if (variant === 'minimal') {
@@ -124,7 +124,7 @@ const PriorityBadge: React.FC<PriorityBadgeProps> = ({
         </Box>
       );
     }
-    
+
     // For outlined variant
     if (variant === 'outlined') {
       return (
@@ -143,7 +143,7 @@ const PriorityBadge: React.FC<PriorityBadgeProps> = ({
           <Typography
             variant={size === 'small' ? 'caption' : 'body2'}
             component="span"
-            sx={{ 
+            sx={{
               color: priority.color,
               fontWeight: 'medium',
             }}
@@ -153,7 +153,7 @@ const PriorityBadge: React.FC<PriorityBadgeProps> = ({
         </Box>
       );
     }
-    
+
     // For filled variant (default)
     return (
       <Chip
@@ -172,7 +172,7 @@ const PriorityBadge: React.FC<PriorityBadgeProps> = ({
       />
     );
   })();
-  
+
   if (showTooltip) {
     return (
       <Tooltip title={`Priority: ${priority.name}`} arrow>
@@ -180,7 +180,7 @@ const PriorityBadge: React.FC<PriorityBadgeProps> = ({
       </Tooltip>
     );
   }
-  
+
   return badge;
 };
 

@@ -18,24 +18,24 @@ const debugLog = (message: string) => {
  */
 export const initializeNotificationSystem = async (authToken?: string): Promise<void> => {
   debugLog('Initializing notification system');
-  
+
   try {
     // Start storage cleanup for notifications
     notificationService.startStorageCleanup();
-    
+
     // Initialize socket if token is available
     if (authToken) {
       try {
         // Connect socket
         await socketService.initializeSocket(authToken);
         debugLog('Notification socket connected successfully');
-        
+
         // Notify notification manager that system is ready
         // This is already handled by notification manager's listeners
       } catch (error) {
         console.error('Failed to initialize notification socket:', error);
         // Socket connection will be retried by the enhanced socketService
-        
+
         // Show offline state notification
         notificationManager.showWarning('Running in offline mode. Some features may be limited.');
       }
@@ -51,21 +51,13 @@ export const initializeNotificationSystem = async (authToken?: string): Promise<
  */
 export const shutdownNotificationSystem = (): void => {
   debugLog('Shutting down notification system');
-  
+
   // Disconnect socket
   socketService.disconnect();
-  
+
   // Stop periodic storage cleanup
   notificationService.stopStorageCleanup();
 };
-
-// Auto-initialize if a token exists
-const authToken = localStorage.getItem('authToken');
-if (authToken) {
-  setTimeout(() => {
-    initializeNotificationSystem(authToken);
-  }, 1000); // Slight delay to ensure other services are initialized
-}
 
 export default {
   initializeNotificationSystem,

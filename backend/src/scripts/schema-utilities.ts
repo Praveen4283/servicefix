@@ -72,7 +72,7 @@ async function showSchemaInfo(): Promise<void> {
     // Close the connection
     await AppDataSource.destroy();
     logger.info('Database connection closed');
-    
+
     process.exit(0);
   } catch (error) {
     logger.error('Error retrieving schema information:', error);
@@ -113,7 +113,7 @@ async function registerMigration(version: string, description: string): Promise<
     // Close the connection
     await AppDataSource.destroy();
     logger.info('Database connection closed');
-    
+
     process.exit(0);
   } catch (error) {
     logger.error('Error registering migration:', error);
@@ -133,10 +133,10 @@ switch (command) {
     // Parse version and description from args
     const versionArg = args.find(arg => arg.startsWith('version='));
     const descriptionArg = args.find(arg => arg.startsWith('description='));
-    
+
     const version = versionArg ? versionArg.split('=')[1].replace(/"/g, '') : '';
     const description = descriptionArg ? descriptionArg.split('=')[1].replace(/"/g, '') : '';
-    
+
     registerMigration(version, description);
     break;
   default:

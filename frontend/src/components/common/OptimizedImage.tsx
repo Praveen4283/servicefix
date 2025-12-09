@@ -1,4 +1,4 @@
-import React from 'react';
+
 import { Box, BoxProps } from '@mui/material';
 
 interface OptimizedImageProps extends Omit<BoxProps, 'component'> {
@@ -29,10 +29,10 @@ const OptimizedImage: React.FC<OptimizedImageProps> = ({
   // If no specific formats are provided, generate paths based on the original src
   const baseSrc = fallbackSrc || src;
   const baseWithoutExt = baseSrc.substring(0, baseSrc.lastIndexOf('.')) || baseSrc;
-  
+
   const avifPath = avifSrc || `${baseWithoutExt}.avif`;
   const webpPath = webpSrc || `${baseWithoutExt}.webp`;
-  
+
   return (
     <Box
       component="picture"
@@ -43,17 +43,17 @@ const OptimizedImage: React.FC<OptimizedImageProps> = ({
       {...props}
     >
       {/* AVIF format - best compression and quality */}
-      <source 
-        srcSet={avifPath} 
-        type="image/avif" 
+      <source
+        srcSet={avifPath}
+        type="image/avif"
       />
-      
+
       {/* WebP format - good compression, wider support */}
-      <source 
-        srcSet={webpPath} 
-        type="image/webp" 
+      <source
+        srcSet={webpPath}
+        type="image/webp"
       />
-      
+
       {/* Original format fallback */}
       <Box
         component="img"

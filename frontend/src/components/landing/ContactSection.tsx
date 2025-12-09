@@ -1,8 +1,8 @@
-import React from 'react';
+
 import { Box, Container, Typography, Grid, TextField, Button, useTheme, Paper, Fade } from '@mui/material';
 import SendIcon from '@mui/icons-material/Send';
 import useIntersectionObserver from '../../hooks/useIntersectionObserver';
-import { 
+import {
   getGradientTextStyles,
   getTitleGradientStyles
 } from '../../utils/styles/landingStyles';
@@ -13,14 +13,14 @@ import LocationOnIcon from '@mui/icons-material/LocationOn';
 
 const ContactSection: React.FC = () => {
   const theme = useTheme();
-  const { ref, isVisible } = useIntersectionObserver({ 
+  const { ref, isVisible } = useIntersectionObserver({
     threshold: 0.1,
-    triggerOnce: true 
+    triggerOnce: true
   });
 
   // Custom styles that ensure visibility regardless of intersection state
   const sectionHeaderStyles = {
-    mb: 2, 
+    mb: 2,
     fontWeight: 600,
     textTransform: 'uppercase',
     letterSpacing: 1,
@@ -35,7 +35,7 @@ const ContactSection: React.FC = () => {
   };
 
   const sectionTitleStyles = {
-    mb: 3, 
+    mb: 3,
     fontWeight: 800,
     color: '#fff', // Force white color
     opacity: 1,
@@ -45,7 +45,7 @@ const ContactSection: React.FC = () => {
   const sectionSubtitleStyles = {
     fontWeight: 400,
     animation: 'fadeInUp 1s ease-out',
-    maxWidth: '800px', 
+    maxWidth: '800px',
     mx: 'auto',
     lineHeight: 1.6,
     mb: 4,
@@ -89,18 +89,18 @@ const ContactSection: React.FC = () => {
               '100%': { opacity: 1, transform: 'translateX(0)' }
             }
           }}>
-            <Box sx={{ 
-              textAlign: { xs: 'center', md: 'left' }, 
-              mb: { xs: 4, md: 0 }, 
+            <Box sx={{
+              textAlign: { xs: 'center', md: 'left' },
+              mb: { xs: 4, md: 0 },
               pr: { md: 6 },
               position: 'relative',
               zIndex: 2
             }}>
               {/* Small decorative element above title */}
-              <Box 
-                sx={{ 
-                  width: '60px', 
-                  height: '4px', 
+              <Box
+                sx={{
+                  width: '60px',
+                  height: '4px',
                   background: '#fff',
                   mx: { xs: 'auto', md: 0 },
                   mb: 3,
@@ -110,18 +110,18 @@ const ContactSection: React.FC = () => {
                     from: { transform: 'scaleX(0)' },
                     to: { transform: 'scaleX(1)' }
                   }
-                }} 
+                }}
               />
-              
+
               <Typography variant="h6" sx={sectionHeaderStyles}>
                 GET IN TOUCH
               </Typography>
               <Typography variant="h2" sx={sectionTitleStyles}>
                 Let's Start a Conversation
               </Typography>
-              
-              <Typography 
-                variant="h6" 
+
+              <Typography
+                variant="h6"
                 sx={{
                   fontWeight: 400,
                   animation: 'fadeInUp 1s ease-out',
@@ -136,9 +136,9 @@ const ContactSection: React.FC = () => {
               </Typography>
 
               <List component="ul" sx={{ mb: 4, pl: 0, listStyle: 'none' }}>
-                <ListItem sx={{ 
-                  display: 'flex', 
-                  mb: 2, 
+                <ListItem sx={{
+                  display: 'flex',
+                  mb: 2,
                   p: 0,
                   color: 'white',
                   animation: 'fadeInUp 1.2s ease-out'
@@ -146,9 +146,9 @@ const ContactSection: React.FC = () => {
                   <PhoneIcon sx={{ mr: 2 }} />
                   <Typography>+1 (555) 123-4567</Typography>
                 </ListItem>
-                <ListItem sx={{ 
-                  display: 'flex', 
-                  mb: 2, 
+                <ListItem sx={{
+                  display: 'flex',
+                  mb: 2,
                   p: 0,
                   color: 'white',
                   animation: 'fadeInUp 1.4s ease-out'
@@ -156,8 +156,8 @@ const ContactSection: React.FC = () => {
                   <EmailIcon sx={{ mr: 2 }} />
                   <Typography>support@servicefix.com</Typography>
                 </ListItem>
-                <ListItem sx={{ 
-                  display: 'flex', 
+                <ListItem sx={{
+                  display: 'flex',
                   p: 0,
                   color: 'white',
                   animation: 'fadeInUp 1.6s ease-out'
@@ -185,8 +185,8 @@ const ContactSection: React.FC = () => {
               backgroundColor: theme.palette.mode === 'dark' ? 'rgba(0, 0, 0, 0.2)' : 'rgba(255, 255, 255, 0.9)',
               backdropFilter: 'blur(10px)',
               border: '1px solid',
-              borderColor: theme.palette.mode === 'dark' 
-                ? 'rgba(255, 255, 255, 0.1)' 
+              borderColor: theme.palette.mode === 'dark'
+                ? 'rgba(255, 255, 255, 0.1)'
                 : 'rgba(255, 255, 255, 0.6)',
               boxShadow: '0 20px 40px rgba(0, 0, 0, 0.1)'
             }}>
@@ -233,7 +233,7 @@ const ContactSection: React.FC = () => {
                     />
                   </Grid>
                 </Grid>
-                
+
                 <TextField
                   fullWidth
                   variant="outlined"
@@ -252,7 +252,7 @@ const ContactSection: React.FC = () => {
                     },
                   }}
                 />
-                
+
                 <TextField
                   fullWidth
                   variant="outlined"
@@ -271,7 +271,7 @@ const ContactSection: React.FC = () => {
                     },
                   }}
                 />
-                
+
                 <TextField
                   fullWidth
                   multiline
@@ -292,13 +292,13 @@ const ContactSection: React.FC = () => {
                     },
                   }}
                 />
-                
-                <Button 
-                  variant="contained" 
+
+                <Button
+                  variant="contained"
                   color="primary"
                   size="large"
                   endIcon={<SendIcon />}
-                  sx={{ 
+                  sx={{
                     py: 1.5,
                     px: 3,
                     fontWeight: 600,

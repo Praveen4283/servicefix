@@ -2,6 +2,7 @@ import express from 'express';
 import { authenticate, authorize } from '../middleware/auth.middleware';
 import { UserRole } from '../models/User';
 import { idToNumber, idToString } from '../utils/idUtils';
+import { logger } from '../utils/logger';
 
 const router = express.Router();
 
@@ -24,10 +25,10 @@ router.get('/', async (req, res) => {
         tagId: req.query.tagId as string,
         organizationId: req.query.organizationId ? parseInt(req.query.organizationId as string, 10) : undefined
       }));
-      
+
     return res.json(result);
   } catch (error) {
-    console.error('Error fetching articles:', error);
+    logger.error('Error fetching articles:', { error });
     return res.status(500).json({ message: 'Server error' });
   }
 });
@@ -41,22 +42,22 @@ router.get('/:id', async (req, res) => {
   try {
     const knowledgeBaseService = (await import('../services/knowledgeBase.service')).default;
     const article = await knowledgeBaseService.getArticleById(req.params.id);
-    
+
     if (!article) {
       return res.status(404).json({ message: 'Article not found' });
     }
-    
+
     // Check if article is public or user has appropriate role
     if (article.visibility !== 'public' && (!req.user || (req.user.role !== UserRole.ADMIN && req.user.role !== UserRole.AGENT))) {
       return res.status(403).json({ message: 'Access denied' });
     }
-    
+
     // Increment view count
     await knowledgeBaseService.incrementViewCount(req.params.id);
-    
+
     return res.json(article);
   } catch (error) {
-    console.error('Error fetching article:', error);
+    logger.error('Error fetching article:', { error, articleId: req.params.id });
     return res.status(500).json({ message: 'Server error' });
   }
 });
@@ -69,14 +70,14 @@ router.get('/:id', async (req, res) => {
 router.post('/', authenticate, authorize([UserRole.ADMIN, UserRole.AGENT]), async (req, res) => {
   try {
     const { title, content, status, visibility, tags, category } = req.body;
-    
+
     // Validate required fields
     if (!title || !content) {
       return res.status(400).json({ message: 'Title and content are required' });
     }
-    
+
     const knowledgeBaseService = (await import('../services/knowledgeBase.service')).default;
-    
+
     // Convert req.user.id to number
     const authorIdNumber = idToNumber(req.user.id) || 0;
 
@@ -89,10 +90,10 @@ router.post('/', authenticate, authorize([UserRole.ADMIN, UserRole.AGENT]), asyn
       category,
       authorId: authorIdNumber // Use the converted number
     });
-    
+
     return res.status(201).json(article);
   } catch (error) {
-    console.error('Error creating article:', error);
+    logger.error('Error creating article:', { error });
     return res.status(500).json({ message: 'Server error' });
   }
 });
@@ -105,14 +106,14 @@ router.post('/', authenticate, authorize([UserRole.ADMIN, UserRole.AGENT]), asyn
 router.put('/:id', authenticate, authorize([UserRole.ADMIN, UserRole.AGENT]), async (req, res) => {
   try {
     const { title, content, status, visibility, tags, category } = req.body;
-    
+
     const knowledgeBaseService = (await import('../services/knowledgeBase.service')).default;
     const article = await knowledgeBaseService.getArticleById(req.params.id);
-    
+
     if (!article) {
       return res.status(404).json({ message: 'Article not found' });
     }
-    
+
     // Convert req.user.id to number for comparison
     const reqUserIdNumber = idToNumber(req.user.id) || 0;
 
@@ -120,7 +121,7 @@ router.put('/:id', authenticate, authorize([UserRole.ADMIN, UserRole.AGENT]), as
     if (req.user.role !== UserRole.ADMIN && article.authorId !== reqUserIdNumber) { // Compare with converted number
       return res.status(403).json({ message: 'Not authorized to edit this article' });
     }
-    
+
     const updatedArticle = await knowledgeBaseService.updateArticle(req.params.id, {
       title,
       content,
@@ -129,10 +130,10 @@ router.put('/:id', authenticate, authorize([UserRole.ADMIN, UserRole.AGENT]), as
       tags,
       category
     });
-    
+
     return res.json(updatedArticle);
   } catch (error) {
-    console.error('Error updating article:', error);
+    logger.error('Error updating article:', { error, articleId: req.params.id });
     return res.status(500).json({ message: 'Server error' });
   }
 });
@@ -145,21 +146,21 @@ router.put('/:id', authenticate, authorize([UserRole.ADMIN, UserRole.AGENT]), as
 router.post('/:id/feedback', async (req, res) => {
   try {
     const { isHelpful } = req.body;
-    
+
     if (typeof isHelpful !== 'boolean') {
       return res.status(400).json({ message: 'isHelpful field is required and must be a boolean' });
     }
-    
+
     const knowledgeBaseService = (await import('../services/knowledgeBase.service')).default;
     const success = await knowledgeBaseService.recordFeedback(req.params.id, isHelpful);
-    
+
     if (!success) {
       return res.status(404).json({ message: 'Article not found' });
     }
-    
+
     return res.json({ message: 'Feedback recorded' });
   } catch (error) {
-    console.error('Error recording feedback:', error);
+    logger.error('Error recording feedback:', { error, articleId: req.params.id });
     return res.status(500).json({ message: 'Server error' });
   }
 });

@@ -70,4 +70,58 @@ export interface AppError extends Error {
   code?: string;
   status?: number;
   details?: Record<string, string[]>;
-} 
+}
+
+// ============================================================================
+// API Response Types (Auth-specific)
+// ============================================================================
+
+export interface ApiUser {
+  id: string;
+  email: string;
+  firstName: string;
+  lastName: string;
+  role: 'admin' | 'agent' | 'customer';
+  organizationId?: string;
+  avatarUrl?: string;
+  phoneNumber?: string;
+  designation?: string;
+  timezone?: string;
+  language?: string;
+  lastLoginAt?: string;
+  createdAt?: string;
+  updatedAt?: string;
+  notificationSettings?: Record<string, { email: boolean; push: boolean; in_app: boolean } | boolean>;
+}
+
+export interface ApiSuccessResponse<T = unknown> {
+  status: 'success';
+  message?: string;
+  data?: T;
+  user?: ApiUser;
+  token?: string;
+  refreshToken?: string;
+}
+
+export interface ApiErrorResponse {
+  status: 'error';
+  message: string;
+  code?: string;
+  errors?: Array<{
+    field?: string;
+    message: string;
+    code?: string;
+  }>;
+}
+
+export type ApiResponse<T = unknown> = ApiSuccessResponse<T> | ApiErrorResponse;
+
+// Socket event types
+export interface SocketNotification {
+  id: string;
+  title?: string;
+  message: string;
+  type: 'success' | 'error' | 'info' | 'warning';
+  timestamp: number;
+  metadata?: MetadataObject;
+}
