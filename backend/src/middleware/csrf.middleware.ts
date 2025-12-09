@@ -51,26 +51,53 @@ function setCsrfCookie(res: Response, token: string): void {
 
   // Set cookie domain based on environment
   let cookieDomain;
+  let isCrossOrigin = false;
+
   try {
     if (isProduction && !frontendUrl.includes('localhost')) {
       const url = new URL(frontendUrl);
       // Use full domain in production, not just the last two segments
       // This prevents accidentally sharing cookies across unrelated subdomains
       cookieDomain = url.hostname;
+
+      // Detect if this is a cross-origin setup
+      // If backend is on a different domain than frontend, we need sameSite: 'none'
+      const backendHost = process.env.BACKEND_URL ? new URL(process.env.BACKEND_URL).hostname : '';
+      isCrossOrigin = !!(backendHost && backendHost !== url.hostname);
     }
   } catch (e) {
     logger.warn(`Failed to parse frontend URL for cookie domain: ${e}`);
   }
 
-  // Define sameSite value based on environment
-  const sameSite: 'strict' | 'lax' | 'none' = isProduction ? 'strict' : 'lax';
+  // Define sameSite value based on environment and cross-origin status
+  // For cross-origin production (frontend and backend on different domains), use 'none' with secure flag
+  // For same-origin production or development, use 'lax' for better compatibility
+  let sameSite: 'strict' | 'lax' | 'none';
+  let secure: boolean;
+
+  if (isProduction && isCrossOrigin) {
+    // Cross-origin production: must use 'none' with secure
+    sameSite = 'none';
+    secure = true;
+    logger.debug('Using sameSite: none for cross-origin production setup');
+  } else if (isProduction) {
+    // Same-origin production: use 'lax' for better compatibility than 'strict'
+    sameSite = 'lax';
+    secure = true;
+    logger.debug('Using sameSite: lax for same-origin production setup');
+  } else {
+    // Development: use 'lax' and secure based on protocol
+    sameSite = 'lax';
+    secure = frontendUrl.startsWith('https');
+    logger.debug('Using sameSite: lax for development setup');
+  }
 
   // Add entropy specific to this session to help mitigate CSRF attacks
   // that might somehow arise from multiple sites sharing the same CSRF token
   const sessionEntropy = crypto.randomBytes(16).toString('hex');
   res.cookie('_csrf_entropy', sessionEntropy, {
     httpOnly: true, // Keep this one httpOnly
-    secure: isProduction || frontendUrl.startsWith('https'),
+    secure,
     sameSite,
     path: '/',
     domain: cookieDomain,
@@ -79,7 +106,7 @@ function setCsrfCookie(res: Response, token: string): void {
 
   res.cookie(CSRF_COOKIE_NAME, token, {
     httpOnly: false, // CSRF token needs to be accessible by JavaScript
-    secure: isProduction || frontendUrl.startsWith('https'),
+    secure,
     sameSite,
     path: '/',
     domain: cookieDomain,
@@ -89,7 +116,7 @@ function setCsrfCookie(res: Response, token: string): void {
   // Set a timestamp to track when token was created
   res.cookie('_csrf_created', Date.now().toString(), {
     httpOnly: false, // Allows JavaScript to check if token needs refresh
-    secure: isProduction || frontendUrl.startsWith('https'),
+    secure,
     sameSite,
     path: '/',
     domain: cookieDomain,
