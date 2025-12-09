@@ -52,20 +52,38 @@ function setCsrfCookie(res: Response, token: string): void {
   const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
 
   // Set cookie domain based on environment
-  let cookieDomain;
+  let cookieDomain: string | undefined = undefined;
   let isCrossOrigin = false;
 
   try {
     if (isProduction && !frontendUrl.includes('localhost')) {
       const url = new URL(frontendUrl);
-      // Use full domain in production, not just the last two segments
-      // This prevents accidentally sharing cookies across unrelated subdomains
-      cookieDomain = url.hostname;
 
       // Detect if this is a cross-origin setup
       // If backend is on a different domain than frontend, we need sameSite: 'none'
       const backendHost = process.env.BACKEND_URL ? new URL(process.env.BACKEND_URL).hostname : '';
       isCrossOrigin = !!(backendHost && backendHost !== url.hostname);
+
+      // CRITICAL: For cross-origin cookies, domain MUST be undefined
+      // Setting domain to frontend hostname will cause cookies to be rejected by browser
+      // Only set domain if same-origin (both on same parent domain)
+      if (!isCrossOrigin && backendHost) {
+        // Check if both are subdomains of the same parent domain
+        const frontendParts = url.hostname.split('.');
+        const backendParts = backendHost.split('.');
+
+        // If both have at least 2 parts and share the same last 2 parts (parent domain)
+        if (frontendParts.length >= 2 && backendParts.length >= 2) {
+          const frontendParent = frontendParts.slice(-2).join('.');
+          const backendParent = backendParts.slice(-2).join('.');
+
+          if (frontendParent === backendParent) {
+            // Same parent domain - set cookie domain to share between subdomains
+            cookieDomain = '.' + frontendParent;
+          }
+        }
+      }
+      // For cross-origin: cookieDomain stays undefined (uses current origin - the backend)
     }
   } catch (e) {
     logger.warn(`Failed to parse frontend URL for cookie domain: ${e}`);

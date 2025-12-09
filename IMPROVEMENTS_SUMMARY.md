@@ -3,7 +3,91 @@
 ## Overview
 This document summarizes the comprehensive improvements made to the ServiceFix application, including critical bug fixes, performance enhancements, and architectural improvements.
 
-## Latest: Socket.IO Connection Fix (December 9, 2025)
+## Latest: Cross-Origin Cookie Configuration Fix (December 9, 2025)
+
+### Problem Statement
+The application was failing in production with authentication errors due to cross-origin cookie restrictions:
+- Login requests failing with **403 Forbidden** (CSRF validation error)
+- Post-login API calls failing with **401 Unauthorized** (JWT not sent)
+
+### Root Cause Analysis
+Two critical issues were identified:
+
+1. **CSRF Path Matching Bug**
+   - CSRF middleware checked for paths like `/api/auth/login`
+   - Express `req.path` is relative to middleware mount point (`/api/`)
+   - Actual path was `/auth/login`, causing check to fail
+   - Result: Login endpoint was not being skipped from CSRF validation
+
+2. **Strict Cookie Policy Blocking Cross-Origin Requests**
+   - Both CSRF and JWT cookies used `sameSite: 'strict'` in production
+   - Frontend (Netlify) and backend (Render) are on different domains
+   - Browser blocked cookies from being sent cross-origin
+   - Result: CSRF tokens and JWT authentication cookies never reached the server
+
+### Solution Implemented
+
+**1. Fixed CSRF Path Matching (`csrf.middleware.ts`)**
+```diff
+- '/api/auth/login',  // ❌ Wrong - includes mount point prefix
++ '/auth/login',      // ✅ Correct - relative to /api/ mount
+```
+
+**2. Implemented Cross-Origin Cookie Detection**
+Added logic to detect when frontend and backend are on different domains:
+```typescript
+const backendHost = process.env.BACKEND_URL ? new URL(process.env.BACKEND_URL).hostname : '';
+isCrossOrigin = !!(backendHost && backendHost !== url.hostname);
+```
+
+**3. Dynamic `sameSite` Configuration**
+Updated both `csrf.middleware.ts` and `auth.controller.ts`:
+```typescript
+if (isProduction && isCrossOrigin) {
+  sameSite = 'none';  // Required for cross-origin
+  secure = true;      // Required when sameSite: 'none'
+} else if (isProduction) {
+  sameSite = 'lax';   // Same-origin production
+} else {
+  sameSite = 'lax';   // Development
+}
+```
+
+### Files Modified
+1. **`backend/src/middleware/csrf.middleware.ts`**
+   - Fixed path matching (removed `/api/` prefix from csrfSkippedPaths)
+   - Added cross-origin detection logic
+   - Updated `sameSite` cookie attribute dynamically
+
+2. **`backend/src/controllers/auth.controller.ts`**
+   - Updated `getCookieOptions()` function with same cross-origin logic
+   - Applied to both accessToken and refreshToken cookies
+
+### Results
+- ✅ Login works correctly in production
+- ✅ CSRF validation passes with cross-origin requests
+- ✅ JWT cookies sent with proper `sameSite: none` attribute
+- ✅ Secure flag enforced for production HTTPS
+- ✅ Backward compatible with same-origin deployments
+
+### Technical Benefits
+**Before Fix:**
+```
+Cookie rejected: SameSite=Strict blocks cross-origin transmission
+→ CSRF token missing → 403 Forbidden
+→ JWT cookie missing → 401 Unauthorized
+```
+
+**After Fix:**
+```
+Cookie accepted: SameSite=None allows cross-origin transmission
+→ CSRF token sent → Login succeeds
+→ JWT cookie sent → Authenticated requests work
+```
+
+---
+
+## Socket.IO Connection Fix (December 9, 2025)
 
 ### Problem Statement
 The WebSocket (Socket.IO) connection system had critical issues preventing real-time notifications from working properly:
