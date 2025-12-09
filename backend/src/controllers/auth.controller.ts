@@ -78,19 +78,43 @@ const getCookieOptions = (isRefreshToken = false) => {
 
   // Extract domain for production environment
   let cookieDomain;
+  let isCrossOrigin = false;
+
   try {
     if (isProduction && !frontendUrl.includes('localhost')) {
       const url = new URL(frontendUrl);
       // Use full hostname in production, not just domain segments
       // This prevents cookie sharing between unrelated subdomains
       cookieDomain = url.hostname;
+
+      // Detect if this is a cross-origin setup
+      // If backend is on a different domain than frontend, we need sameSite: 'none'
+      const backendHost = process.env.BACKEND_URL ? new URL(process.env.BACKEND_URL).hostname : '';
+      isCrossOrigin = !!(backendHost && backendHost !== url.hostname);
     }
   } catch (error) {
     logger.warn(`Error parsing frontend URL: ${frontendUrl}`, error);
   }
 
-  // Define sameSite based on environment and context
-  const sameSite: 'strict' | 'lax' | 'none' = isProduction ? 'strict' : 'lax';
+  // Define sameSite value based on environment and cross-origin status
+  // For cross-origin production (frontend and backend on different domains), use 'none' with secure flag
+  // For same-origin production or development, use 'lax' for better compatibility
+  let sameSite: 'strict' | 'lax' | 'none';
+  let secure: boolean;
+
+  if (isProduction && isCrossOrigin) {
+    // Cross-origin production: must use 'none' with secure
+    sameSite = 'none';
+    secure = true;
+  } else if (isProduction) {
+    // Same-origin production: use 'lax' for better compatibility than 'strict'
+    sameSite = 'lax';
+    secure = true;
+  } else {
+    // Development: use 'lax' and secure based on protocol
+    sameSite = 'lax';
+    secure = frontendUrl.startsWith('https');
+  }
 
   // Get max age from environment variables or use defaults
   const maxAge = isRefreshToken ?
@@ -99,7 +123,7 @@ const getCookieOptions = (isRefreshToken = false) => {
 
   return {
     httpOnly: true,
-    secure: isProduction || frontendUrl.startsWith('https'),
+    secure,
     sameSite,
     path: '/',
     domain: cookieDomain,
